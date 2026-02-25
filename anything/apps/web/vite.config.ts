@@ -33,6 +33,16 @@ export default defineConfig({
   },
   logLevel: 'info',
   plugins: [
+    // Ensure the SSR build uses esnext target (supports top-level await).
+    // The react-router plugin overrides build.target, so we re-apply it here.
+    {
+      name: 'ssr-esnext-target',
+      config(_config, env) {
+        if (env.isSsrBuild) {
+          return { build: { target: 'esnext' } };
+        }
+      },
+    },
     nextPublicProcessEnv(),
     restartEnvFileChange(),
     reactRouterHonoServer({
