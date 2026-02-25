@@ -1,0 +1,11 @@
+{
+    "name": "cbn-ads-workspace",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "dev": "npm run dev:web",
+        "dev:web": "cd anything/apps/web && npm run dev",
+        "dev:mobile": "cd anything/apps/mobile && npx expo start -c",
+        "dev:all": "start cmd /k \"npm run dev:web\" && start cmd /k \"npm run dev:mobile\""
+    }
+}
