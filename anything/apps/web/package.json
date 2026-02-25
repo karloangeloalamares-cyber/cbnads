@@ -6,6 +6,7 @@
 		"dev": "react-router dev",
 		"dev:web": "npm run dev",
 		"dev:mobile": "cd ../mobile && npx expo start -c",
+		"build": "react-router build",
 		"typecheck": "react-router typegen && tsc --noEmit"
 	},
 	"dependencies": {
