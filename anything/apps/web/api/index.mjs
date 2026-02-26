@@ -1,20 +1,17 @@
 import { handle } from 'hono/vercel';
 
 const serverEntryUrl = new URL('../build/server/index.js', import.meta.url);
-const SSR_PREFIX = '/api/_ssr';
+const REWRITE_PATHNAME_PARAM = '__pathname';
 
 let cachedHandlerPromise;
 
 function normalizeRequest(request) {
   const url = new URL(request.url);
+  const rewrittenPathname = url.searchParams.get(REWRITE_PATHNAME_PARAM);
 
-  if (url.pathname === SSR_PREFIX) {
-    url.pathname = '/';
-    return new Request(url, request);
-  }
-
-  if (url.pathname.startsWith(`${SSR_PREFIX}/`)) {
-    url.pathname = url.pathname.slice(SSR_PREFIX.length) || '/';
+  if (rewrittenPathname) {
+    url.pathname = rewrittenPathname.startsWith('/') ? rewrittenPathname : `/${rewrittenPathname}`;
+    url.searchParams.delete(REWRITE_PATHNAME_PARAM);
     return new Request(url, request);
   }
 
