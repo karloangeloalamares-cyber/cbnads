@@ -27,7 +27,7 @@ function getHonoPath(routeFile: string): string {
 }
 
 // Import and register all routes
-async function registerRoutes() {
+function registerRoutes() {
   // Clear existing routes
   api.routes = [];
 
@@ -72,7 +72,7 @@ async function registerRoutes() {
   }
 }
 
-await registerRoutes();
+registerRoutes();
 
 // Hot reload routes in development
 if (import.meta.env.DEV) {

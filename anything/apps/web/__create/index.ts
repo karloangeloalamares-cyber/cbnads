@@ -307,24 +307,25 @@ if (authSecret && adapter) {
 }
 app.route(API_BASENAME, api);
 
-let server;
+async function createServer() {
+  if (import.meta.env.DEV) {
+    // Local dev / Node.js: use react-router-hono-server to start HTTP server
+    const { createHonoServer } = await import('react-router-hono-server/node');
+    return createHonoServer({
+      app,
+      defaultLogger: false,
+    });
+  }
 
-if (import.meta.env.DEV) {
-  // Local dev / Node.js: use react-router-hono-server to start HTTP server
-  const { createHonoServer } = await import('react-router-hono-server/node');
-  server = await createHonoServer({
-    app,
-    defaultLogger: false,
-  });
-} else {
-  // Production/serverless: always attach React Router handler and export Hono app.
-  // The Vercel function wrapper uses hono/vercel `handle(app)`.
+  // Production/serverless: attach React Router handler and return raw Hono app.
   const build = await import('virtual:react-router/server-build');
   const handler = createRequestHandler(build, 'production');
   app.use('*', async (c) => {
     return handler(c.req.raw);
   });
-  server = app;
+  return app;
 }
 
-export default server;
+// Export a promise — the Vercel function entry awaits it inside the handler,
+// NOT at the top level (CJS doesn't support top-level await).
+export default createServer();
