@@ -4,7 +4,6 @@ import { skipCSRFCheck } from '@auth/core';
 import Credentials from '@auth/core/providers/credentials';
 import { authHandler, initAuthConfig } from '@hono/auth-js';
 import { Pool, neonConfig } from '@neondatabase/serverless';
-import { hash, verify } from '@node-rs/argon2';
 import { Hono } from 'hono';
 import { contextStorage, getContext } from 'hono/context-storage';
 import { cors } from 'hono/cors';
@@ -32,6 +31,14 @@ if (!process.env.VERCEL) {
 }
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
+let argon2ModulePromise: Promise<typeof import('@node-rs/argon2')> | null = null;
+
+const getArgon2 = async () => {
+  if (!argon2ModulePromise) {
+    argon2ModulePromise = import('@node-rs/argon2');
+  }
+  return argon2ModulePromise;
+};
 
 for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   const original = nodeConsole[method].bind(console);
@@ -100,11 +107,13 @@ for (const method of ['post', 'put', 'patch'] as const) {
   );
 }
 
-if (process.env.AUTH_SECRET) {
+const authSecret = process.env.AUTH_SECRET;
+
+if (authSecret) {
   app.use(
     '*',
     initAuthConfig((c) => ({
-      secret: process.env.AUTH_SECRET,
+      secret: authSecret,
       pages: {
         signIn: '/account/signin',
         signOut: '/account/logout',
@@ -177,6 +186,7 @@ if (process.env.AUTH_SECRET) {
               return null;
             }
 
+            const { verify } = await getArgon2();
             const isValid = await verify(accountPassword, password);
             if (!isValid) {
               return null;
@@ -222,7 +232,7 @@ if (process.env.AUTH_SECRET) {
               });
               await adapter.linkAccount({
                 extraData: {
-                  password: await hash(password),
+                  password: await (await getArgon2()).hash(password),
                 },
                 type: 'credentials',
                 userId: newUser.id,
@@ -259,12 +269,21 @@ app.all('/integrations/:path{.+}', async (c, next) => {
   });
 });
 
-app.use('/api/auth/*', async (c, next) => {
-  if (isAuthAction(c.req.path)) {
-    return authHandler()(c, next);
-  }
-  return next();
-});
+if (authSecret) {
+  app.use('/api/auth/*', async (c, next) => {
+    if (isAuthAction(c.req.path)) {
+      return authHandler()(c, next);
+    }
+    return next();
+  });
+} else {
+  app.use('/api/auth/*', async (c, next) => {
+    if (isAuthAction(c.req.path)) {
+      return c.json({ error: 'Auth is not configured' }, 503);
+    }
+    return next();
+  });
+}
 app.route(API_BASENAME, api);
 
 let server;

@@ -159,7 +159,7 @@ export function addRenderIds(): PluginOption {
 
       const result = await babel.transformAsync(code, {
         filename: id,
-        sourceMaps: true,
+        sourceMaps: false,
         babelrc: false,
         configFile: false,
         presets: [['@babel/preset-react', { runtime: 'automatic' }], '@babel/preset-typescript'],
@@ -167,7 +167,7 @@ export function addRenderIds(): PluginOption {
       });
 
       if (!result) return null;
-      return { code: result.code ?? code, map: result.map };
+      return { code: result.code ?? code, map: null };
     },
 
     api: {
