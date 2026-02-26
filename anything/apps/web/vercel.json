@@ -3,7 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "build/client",
   "functions": {
-    "api/_ssr/[...path].mjs": {
+    "api/_ssr/*.mjs": {
       "includeFiles": "build/server/**",
       "maxDuration": 60,
       "regions": ["iad1"]

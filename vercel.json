@@ -4,7 +4,7 @@
   "buildCommand": "npm run build:web",
   "outputDirectory": "anything/apps/web/build/client",
   "functions": {
-    "api/_ssr/[...path].mjs": {
+    "api/_ssr/*.mjs": {
       "includeFiles": "anything/apps/web/build/server/**",
       "maxDuration": 60,
       "regions": ["iad1"]
