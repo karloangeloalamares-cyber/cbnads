@@ -2,7 +2,7 @@
     "buildCommand": "npm run build",
     "outputDirectory": "build/client",
     "functions": {
-        "api/index.js": {
+        "api/index.mjs": {
             "includeFiles": "build/server/**"
         }
     },
