@@ -6,6 +6,11 @@
 		".react-router/types/**/*",
 		"./src/global.d.ts"
 	],
+	"exclude": [
+		"node_modules",
+		"build",
+		"../mobile/**"
+	],
 	"compilerOptions": {
 		"lib": ["DOM", "DOM.Iterable", "ES2022"],
 		"types": ["node", "vite/client"],
