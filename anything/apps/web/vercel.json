@@ -4,7 +4,10 @@
     "functions": {
         "api/index.mjs": {
             "includeFiles": "{build/server/**,package.json}",
-            "maxDuration": 30
+            "maxDuration": 60,
+            "regions": [
+                "iad1"
+            ]
         }
     },
     "rewrites": [
