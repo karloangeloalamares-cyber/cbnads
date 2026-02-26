@@ -25,7 +25,7 @@ declare module 'hono' {
 
 // ws is only needed for Neon WebSocket in Node.js environments.
 // On Vercel, Neon uses fetch natively.
-if (!process.env.VERCEL) {
+if (import.meta.env.DEV) {
   const ws = (await import('ws')).default;
   neonConfig.webSocketConstructor = ws;
 }
@@ -306,22 +306,22 @@ app.route(API_BASENAME, api);
 
 let server;
 
-if (process.env.VERCEL) {
-  // On Vercel: attach React Router handler directly and export the Hono app.
-  // The api/index.js Vercel function wraps this with hono/vercel's handle().
-  const build = await import('virtual:react-router/server-build');
-  app.use('*', async (c) => {
-    const handler = createRequestHandler(build, 'production');
-    return handler(c.req.raw);
-  });
-  server = app;
-} else {
+if (import.meta.env.DEV) {
   // Local dev / Node.js: use react-router-hono-server to start HTTP server
   const { createHonoServer } = await import('react-router-hono-server/node');
   server = await createHonoServer({
     app,
     defaultLogger: false,
   });
+} else {
+  // Production/serverless: always attach React Router handler and export Hono app.
+  // The Vercel function wrapper uses hono/vercel `handle(app)`.
+  const build = await import('virtual:react-router/server-build');
+  const handler = createRequestHandler(build, 'production');
+  app.use('*', async (c) => {
+    return handler(c.req.raw);
+  });
+  server = app;
 }
 
 export default server;
