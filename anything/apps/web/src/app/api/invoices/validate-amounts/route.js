@@ -1,5 +1,5 @@
-import sql from "../../utils/sql";
-import { auth } from "../../../../auth";
+import sql from "@/app/api/utils/sql";
+
 export async function GET(request) {
   try {
     // Find all discrepancies between invoice totals and linked ad payments

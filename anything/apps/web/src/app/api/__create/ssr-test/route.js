@@ -1,16 +1,10 @@
 import { getToken } from '@auth/core/jwt';
 import React from 'react';
+import path from 'node:path';
 import { renderToString } from 'react-dom/server';
 import routes from '../../../routes';
 import { serializeError } from 'serialize-error';
 import cleanStack from 'clean-stack';
-
-const routeModuleImporters = {
-	...import.meta.glob('../../../**/page.jsx'),
-	...import.meta.glob('../../../**/page.tsx'),
-	...import.meta.glob('../../../__create/not-found.jsx'),
-	...import.meta.glob('../../../__create/not-found.tsx'),
-};
 
 function serializeClean(err) {
 	// if we want to clean this more, maybe we should look at the file where it
@@ -41,13 +35,9 @@ export async function GET(request) {
 		routes.map(async (route) => {
 			let component = null;
 			try {
-				const normalizedRouteFile = route.file.replace(/^\.\//, '');
-				const routeModulePath = `../../../${normalizedRouteFile}`;
-				const importer = routeModuleImporters[routeModulePath];
-				if (!importer) {
-					return null;
-				}
-				const response = await importer();
+				const response = await import(
+					/* @vite-ignore */ path.join('../../../', route.file)
+				);
 				component = response.default;
 			} catch (error) {
 				console.debug('Error importing component:', route.file, error);

@@ -1,5 +1,5 @@
-import sql from "../../utils/sql";
-import { auth } from "../../../../auth";
+import sql from "@/app/api/utils/sql";
+import { auth } from "@/auth";
 
 // POST - Archive old published ads (Published + older than 90 days)
 export async function POST(request) {

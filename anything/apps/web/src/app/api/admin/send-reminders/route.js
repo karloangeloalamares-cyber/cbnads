@@ -1,4 +1,4 @@
-import sql from "../../utils/sql";
+import sql from "@/app/api/utils/sql";
 
 // Eastern Time (New York) timezone helper
 function getNowInET() {

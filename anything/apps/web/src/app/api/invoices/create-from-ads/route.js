@@ -1,5 +1,4 @@
-import sql from "../../utils/sql";
-import { auth } from "../../../../auth";
+import sql from "@/app/api/utils/sql";
 
 export async function POST(request) {
   try {

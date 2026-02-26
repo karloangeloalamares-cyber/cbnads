@@ -4,41 +4,23 @@ import { skipCSRFCheck } from '@auth/core';
 import Credentials from '@auth/core/providers/credentials';
 import { authHandler, initAuthConfig } from '@hono/auth-js';
 import { Pool, neonConfig } from '@neondatabase/serverless';
+import { hash, verify } from 'argon2';
 import { Hono } from 'hono';
 import { contextStorage, getContext } from 'hono/context-storage';
 import { cors } from 'hono/cors';
 import { proxy } from 'hono/proxy';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
-import { createRequestHandler } from 'react-router';
+import { createHonoServer } from 'react-router-hono-server/node';
 import { serializeError } from 'serialize-error';
+import ws from 'ws';
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
-
-declare module 'hono' {
-  interface ContextVariableMap {
-    requestId: string;
-  }
-}
-
-// ws is only needed for Neon WebSocket in Node.js environments.
-// On Vercel, Neon uses fetch natively.
-if (import.meta.env.DEV) {
-  const ws = (await import('ws')).default;
-  neonConfig.webSocketConstructor = ws;
-}
+neonConfig.webSocketConstructor = ws;
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
-let argon2ModulePromise: Promise<typeof import('@node-rs/argon2')> | null = null;
-
-const getArgon2 = async () => {
-  if (!argon2ModulePromise) {
-    argon2ModulePromise = import('@node-rs/argon2');
-  }
-  return argon2ModulePromise;
-};
 
 for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   const original = nodeConsole[method].bind(console);
@@ -53,29 +35,12 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-const databaseEnabled = process.env.CBN_ENABLE_DATABASE === 'true';
-const databaseUrl = databaseEnabled ? process.env.DATABASE_URL : undefined;
-
-if (databaseEnabled && !databaseUrl) {
-  console.warn('CBN_ENABLE_DATABASE is true but DATABASE_URL is missing. Database mode disabled.');
-}
-
-const pool = databaseUrl
-  ? new Pool({
-      connectionString: databaseUrl,
-    })
-  : null;
-const adapter = pool ? NeonAdapter(pool) : null;
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+const adapter = NeonAdapter(pool);
 
 const app = new Hono();
-
-// Avoid running full SSR for missing favicon requests in serverless environments.
-app.get('/favicon.ico', (c) => c.body(null, 204));
-
-app.use('*', async (c, next) => {
-  Object.defineProperty(c, 'env', { value: process.env, writable: true });
-  await next();
-});
 
 app.use('*', requestId());
 
@@ -119,14 +84,11 @@ for (const method of ['post', 'put', 'patch'] as const) {
   );
 }
 
-const authSecret = process.env.AUTH_SECRET;
-
-if (authSecret && adapter) {
-  const authAdapter = adapter;
+if (process.env.AUTH_SECRET) {
   app.use(
     '*',
     initAuthConfig((c) => ({
-      secret: authSecret,
+      secret: c.env.AUTH_SECRET,
       pages: {
         signIn: '/account/signin',
         signOut: '/account/logout',
@@ -187,7 +149,7 @@ if (authSecret && adapter) {
             }
 
             // logic to verify if user exists
-            const user = await authAdapter.getUserByEmail(email);
+            const user = await adapter.getUserByEmail(email);
             if (!user) {
               return null;
             }
@@ -199,7 +161,6 @@ if (authSecret && adapter) {
               return null;
             }
 
-            const { verify } = await getArgon2();
             const isValid = await verify(accountPassword, password);
             if (!isValid) {
               return null;
@@ -234,18 +195,18 @@ if (authSecret && adapter) {
             }
 
             // logic to verify if user exists
-            const user = await authAdapter.getUserByEmail(email);
+            const user = await adapter.getUserByEmail(email);
             if (!user) {
-              const newUser = await authAdapter.createUser({
+              const newUser = await adapter.createUser({
                 id: crypto.randomUUID(),
                 emailVerified: null,
                 email,
                 name: typeof name === 'string' && name.length > 0 ? name : undefined,
                 image: typeof image === 'string' && image.length > 0 ? image : undefined,
               });
-              await authAdapter.linkAccount({
+              await adapter.linkAccount({
                 extraData: {
-                  password: await (await getArgon2()).hash(password),
+                  password: await hash(password),
                 },
                 type: 'credentials',
                 userId: newUser.id,
@@ -264,20 +225,6 @@ if (authSecret && adapter) {
 app.all('/integrations/:path{.+}', async (c, next) => {
   const queryParams = c.req.query();
   const url = `${process.env.NEXT_PUBLIC_CREATE_BASE_URL ?? 'https://www.create.xyz'}/integrations/${c.req.param('path')}${Object.keys(queryParams).length > 0 ? `?${new URLSearchParams(queryParams).toString()}` : ''}`;
-  const createHost = process.env.NEXT_PUBLIC_CREATE_HOST;
-  const projectGroupId = process.env.NEXT_PUBLIC_PROJECT_GROUP_ID;
-  const headers: Record<string, string> = {
-    ...c.req.header(),
-  };
-
-  if (createHost) {
-    headers['X-Forwarded-For'] = createHost;
-    headers['x-createxyz-host'] = createHost;
-    headers.Host = createHost;
-  }
-  if (projectGroupId) {
-    headers['x-createxyz-project-group-id'] = projectGroupId;
-  }
 
   return proxy(url, {
     method: c.req.method,
@@ -286,49 +233,25 @@ app.all('/integrations/:path{.+}', async (c, next) => {
     // required for streaming integrations
     duplex: 'half',
     redirect: 'manual',
-    headers,
+    headers: {
+      ...c.req.header(),
+      'X-Forwarded-For': process.env.NEXT_PUBLIC_CREATE_HOST,
+      'x-createxyz-host': process.env.NEXT_PUBLIC_CREATE_HOST,
+      Host: process.env.NEXT_PUBLIC_CREATE_HOST,
+      'x-createxyz-project-group-id': process.env.NEXT_PUBLIC_PROJECT_GROUP_ID,
+    },
   });
 });
 
-if (authSecret && adapter) {
-  app.use('/api/auth/*', async (c, next) => {
-    if (isAuthAction(c.req.path)) {
-      return authHandler()(c, next);
-    }
-    return next();
-  });
-} else {
-  app.use('/api/auth/*', async (c, next) => {
-    if (isAuthAction(c.req.path)) {
-      return c.json({ error: 'Auth is not configured' }, 503);
-    }
-    return next();
-  });
-}
+app.use('/api/auth/*', async (c, next) => {
+  if (isAuthAction(c.req.path)) {
+    return authHandler()(c, next);
+  }
+  return next();
+});
 app.route(API_BASENAME, api);
 
-async function createServer() {
-  if (import.meta.env.DEV) {
-    // Local dev / Node.js: use react-router-hono-server to start HTTP server
-    const { createHonoServer } = await import('react-router-hono-server/node');
-    return createHonoServer({
-      app,
-      defaultLogger: false,
-    });
-  }
-
-  // Production/serverless: attach React Router handler and return raw Hono app.
-  console.log('[createServer] Loading server build...');
-  const build = await import('virtual:react-router/server-build');
-  console.log('[createServer] Server build loaded. Creating request handler...');
-  const handler = createRequestHandler(build, 'production');
-  app.use('*', async (c) => {
-    return handler(c.req.raw);
-  });
-  console.log('[createServer] Done — returning Hono app');
-  return app;
-}
-
-// Export a promise — the Vercel function entry awaits it inside the handler,
-// NOT at the top level (CJS doesn't support top-level await).
-export default createServer();
+export default await createHonoServer({
+  app,
+  defaultLogger: false,
+});

@@ -1,53 +1,52 @@
-export function AdDetailsSection({ formData, onChange, onAddMedia, onRemoveMedia, showAlert }) {
-    return (
-        <section className="space-y-6">
-            <h2 className="text-sm font-bold text-[#0F172A] uppercase tracking-wide mb-4">
-                Ad Details
-            </h2>
+import { ChevronDown } from "lucide-react";
+import { MediaUploadSection } from "./MediaUploadSection";
 
-            <div className="space-y-4">
-                <label className="block">
-                    <span className="block text-xs font-semibold text-[#334155] mb-1.5 flex items-center gap-1">
-                        Ad Name <span className="text-red-500">*</span>
-                    </span>
-                    <input
-                        type="text"
-                        name="ad_name"
-                        placeholder="Enter ad name"
-                        className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 placeholder:text-gray-400 transition-colors"
-                        value={formData?.ad_name || ""}
-                        onChange={onChange}
-                    />
-                </label>
+export function AdDetailsSection({
+  formData,
+  onChange,
+  onAddMedia,
+  onRemoveMedia,
+  showAlert,
+}) {
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-gray-900 mb-4">Ad Details</h3>
 
-                <label className="block">
-                    <span className="block text-xs font-semibold text-[#334155] mb-1.5">
-                        Ad Text
-                    </span>
-                    <textarea
-                        name="ad_text"
-                        placeholder="Enter your ad copy here..."
-                        className="w-full border border-gray-200 rounded-lg p-3 text-sm min-h-[120px] focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-400 placeholder:text-gray-400 transition-colors resize-y"
-                        value={formData?.ad_text || ""}
-                        onChange={onChange}
-                    />
-                </label>
+      <div className="mb-4">
+        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            Ad Name <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            required
+            value={formData.ad_name}
+            onChange={(e) => onChange("ad_name", e.target.value)}
+            placeholder="Enter ad name"
+            className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+          />
+        </div>
+      </div>
 
-                <div className="block">
-                    <span className="block text-xs font-semibold text-[#334155] mb-1.5">
-                        Media (Images & Videos)
-                    </span>
-                    <button
-                        type="button"
-                        className="w-full border border-dashed border-gray-300 rounded-lg p-4 flex items-center justify-center gap-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors hover:border-gray-400"
-                    >
-                        <span className="text-gray-400 text-lg leading-none">+</span> Add images or videos
-                    </button>
-                    <p className="text-[11px] text-gray-400 mt-2">
-                        Supports: Images (PNG, JPG, GIF) and Videos (MP4, MOV). Videos must be under 200 MB.
-                    </p>
-                </div>
-            </div>
-        </section>
-    );
+      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 mb-4">
+        <label className="block text-xs font-semibold text-gray-700 mb-1">
+          Ad Text
+        </label>
+        <textarea
+          value={formData.ad_text}
+          onChange={(e) => onChange("ad_text", e.target.value)}
+          rows={4}
+          placeholder="Enter your ad copy here..."
+          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-none"
+        />
+      </div>
+
+      <MediaUploadSection
+        media={formData.media}
+        onAddMedia={onAddMedia}
+        onRemoveMedia={onRemoveMedia}
+        showAlert={showAlert}
+      />
+    </div>
+  );
 }

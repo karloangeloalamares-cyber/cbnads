@@ -1,6 +1,6 @@
-import sql from "../../utils/sql";
-import { auth } from "../../../../auth";
-import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend";
+import sql from "@/app/api/utils/sql";
+import { auth } from "@/auth";
+import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
 export async function POST(request) {
   try {

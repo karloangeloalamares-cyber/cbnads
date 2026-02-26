@@ -1,4 +1,4 @@
-import sql from "./sql";
+import sql from "@/app/api/utils/sql";
 
 /**
  * Recalculates an advertiser's total_spend based on all "Paid" invoices

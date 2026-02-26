@@ -1,18 +1,15 @@
 import { neon } from '@neondatabase/serverless';
 
-const databaseEnabled =
-  process.env.CBN_ENABLE_DATABASE === 'true' && Boolean(process.env.DATABASE_URL);
-
 const NullishQueryFunction = () => {
   throw new Error(
-    'Database mode is disabled. Set CBN_ENABLE_DATABASE=true and DATABASE_URL to enable SQL queries.'
+    'No database connection string was provided to `neon()`. Perhaps process.env.DATABASE_URL has not been set'
   );
 };
 NullishQueryFunction.transaction = () => {
   throw new Error(
-    'Database mode is disabled. Set CBN_ENABLE_DATABASE=true and DATABASE_URL to enable SQL queries.'
+    'No database connection string was provided to `neon()`. Perhaps process.env.DATABASE_URL has not been set'
   );
 };
-const sql = databaseEnabled ? neon(process.env.DATABASE_URL) : NullishQueryFunction;
+const sql = process.env.DATABASE_URL ? neon(process.env.DATABASE_URL) : NullishQueryFunction;
 
 export default sql;

@@ -1,5 +1,5 @@
-import sql from "../../../utils/sql";
-import { auth } from "../../../../../auth";
+import sql from "@/app/api/utils/sql";
+import { auth } from "@/auth";
 
 // Remove admin role from a member
 export async function DELETE(request, { params }) {

@@ -79,7 +79,7 @@ const getRenderIdVisitor =
           });
 
           // Ensure PolymorphicComponent import exists at top‑level
-          const program = path.findParent((p): p is NodePath<t.Program> => p.isProgram());
+          const program = path.findParent((p) => p.isProgram());
           if (!program) {
             console.warn(
               `No program found for ${filename} so unable to add CreatePolymorphicComponent import`
@@ -87,12 +87,11 @@ const getRenderIdVisitor =
             return;
           }
           idToJsx.current[renderId] = { code: path.getSource() };
-          const programNode = program.node as t.Program;
 
           const body = program.get('body');
-          const bodyPaths = Array.isArray(body) ? body : [body];
           const alreadyImported =
-            bodyPaths.some(
+            Array.isArray(body) &&
+            body.some(
               (p) =>
                 t.isImportDeclaration(p.node) &&
                 p.node.source.value === '@/__create/PolymorphicComponent'
@@ -102,16 +101,13 @@ const getRenderIdVisitor =
               [t.importDefaultSpecifier(t.identifier('CreatePolymorphicComponent'))],
               t.stringLiteral('@/__create/PolymorphicComponent')
             );
-            const firstImport = bodyPaths.findIndex((p) => p.isImportDeclaration());
+            const firstImport = Array.isArray(body)
+              ? body.findIndex((p) => p.isImportDeclaration())
+              : -1;
             if (firstImport === -1) {
-              programNode.body.unshift(importDecl);
+              program.unshiftContainer('body', importDecl);
             } else {
-              const firstImportPath = bodyPaths[firstImport];
-              if (firstImportPath) {
-                firstImportPath.insertBefore(importDecl);
-              } else {
-                programNode.body.unshift(importDecl);
-              }
+              body[firstImport].insertBefore(importDecl);
             }
           }
 
@@ -159,7 +155,7 @@ export function addRenderIds(): PluginOption {
 
       const result = await babel.transformAsync(code, {
         filename: id,
-        sourceMaps: false,
+        sourceMaps: true,
         babelrc: false,
         configFile: false,
         presets: [['@babel/preset-react', { runtime: 'automatic' }], '@babel/preset-typescript'],
@@ -167,7 +163,7 @@ export function addRenderIds(): PluginOption {
       });
 
       if (!result) return null;
-      return { code: result.code ?? code, map: null };
+      return { code: result.code ?? code, map: result.map };
     },
 
     api: {

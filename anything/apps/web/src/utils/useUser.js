@@ -1,61 +1,32 @@
-import { useSession } from '@auth/create/react';
-import React from 'react';
+import * as React from 'react';
+import { getSignedInUser } from '@/lib/localAuth';
+import { ensureDb, subscribeDb } from '@/lib/localDb';
 
-const LOCAL_USER_STORAGE_KEY = 'cbn_local_user';
+const useUser = () => {
+  const [loading, setLoading] = React.useState(true);
+  const [user, setUser] = React.useState(null);
 
-function readLocalUser() {
-	if (typeof window === 'undefined') {
-		return null;
-	}
+  const refetch = React.useCallback(() => {
+    ensureDb();
+    setUser(getSignedInUser());
+    setLoading(false);
+  }, []);
 
-	try {
-		const raw = window.localStorage.getItem(LOCAL_USER_STORAGE_KEY);
-		if (!raw) {
-			return null;
-		}
-		const parsed = JSON.parse(raw);
-		if (!parsed || typeof parsed !== 'object') {
-			return null;
-		}
-		return parsed;
-	} catch {
-		return null;
-	}
-}
+  React.useEffect(() => {
+    refetch();
+    const unsubscribe = subscribeDb(() => {
+      setUser(getSignedInUser());
+    });
+    return unsubscribe;
+  }, [refetch]);
 
-export const useUser = () => {
-	const { data: session, status } = useSession();
-	const sessionUser = session?.user ?? null;
-
-	const [user, setUser] = React.useState(sessionUser ?? readLocalUser());
-	const [localLoading, setLocalLoading] = React.useState(false);
-
-	const refetchUser = React.useCallback(() => {
-		if (sessionUser) {
-			setUser(sessionUser);
-			return;
-		}
-
-		if (status === 'loading') {
-			return;
-		}
-
-		setLocalLoading(true);
-		setUser(readLocalUser());
-		setLocalLoading(false);
-	}, [sessionUser, status]);
-
-	React.useEffect(refetchUser, [refetchUser]);
-
-	return {
-		user,
-		data: user,
-		loading:
-			status === 'loading' ||
-			localLoading ||
-			(status === 'authenticated' && !user),
-		refetch: refetchUser,
-	};
+  return {
+    user,
+    data: user,
+    loading,
+    refetch,
+  };
 };
 
+export { useUser };
 export default useUser;

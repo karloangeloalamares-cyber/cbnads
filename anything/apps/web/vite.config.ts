@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { reactRouter } from '@react-router/dev/vite';
-import { reactRouterHonoServer } from 'react-router-hono-server/dev';
 import { defineConfig } from 'vite';
 import babel from 'vite-plugin-babel';
 import tsconfigPaths from 'vite-tsconfig-paths';
@@ -20,42 +19,17 @@ export default defineConfig({
     // Explicitly include fast-glob, since it gets dynamically imported and we
     // don't want that to cause a re-bundle.
     include: ['fast-glob', 'lucide-react'],
-    exclude: [
-      '@hono/auth-js/react',
-      '@hono/auth-js',
-      '@auth/core',
-      '@hono/auth-js',
-      '@node-rs/argon2',
-      '@node-rs/argon2-wasm32-wasi',
-      'hono/context-storage',
-      '@auth/core/errors',
-      'fsevents',
-      'lightningcss',
-    ],
+    exclude: ['fsevents', 'lightningcss'],
   },
   logLevel: 'info',
   plugins: [
-    // Ensure the SSR build uses esnext target (supports top-level await).
-    // The react-router plugin overrides build.target, so we re-apply it here.
-    {
-      name: 'ssr-esnext-target',
-      config(_config, env) {
-        if (env.isSsrBuild) {
-          return { build: { target: 'esnext' } };
-        }
-      },
-    },
     nextPublicProcessEnv(),
     restartEnvFileChange(),
-    reactRouterHonoServer({
-      serverEntryPoint: './__create/index.ts',
-      runtime: 'node',
-    }),
     babel({
       include: ['src/**/*.{js,jsx,ts,tsx}'], // or RegExp: /src\/.*\.[tj]sx?$/
       exclude: /node_modules/, // skip everything else
       babelConfig: {
-        babelrc: false, // don’t merge other Babel files
+        babelrc: false, // don't merge other Babel files
         configFile: false,
         plugins: ['styled-jsx/babel'],
       },
@@ -83,8 +57,6 @@ export default defineConfig({
       lodash: 'lodash-es',
       'npm:stripe': 'stripe',
       stripe: path.resolve(__dirname, './src/__create/stripe'),
-      '@auth/create/react': '@hono/auth-js/react',
-      '@auth/create': path.resolve(__dirname, './src/__create/@auth/create'),
       '@': path.resolve(__dirname, 'src'),
     },
     dedupe: ['react', 'react-dom'],
@@ -100,11 +72,5 @@ export default defineConfig({
     warmup: {
       clientFiles: ['./src/app/**/*', './src/app/root.tsx', './src/app/routes.ts'],
     },
-  },
-  build: {
-    target: 'esnext',
-  },
-  ssr: {
-    target: 'node',
   },
 });

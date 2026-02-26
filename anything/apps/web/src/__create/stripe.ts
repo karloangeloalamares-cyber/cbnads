@@ -1,6 +1,6 @@
 import lodash from 'lodash';
 const { partial } = lodash;
-import StripeConstructor from 'stripe';
+import regularStripe from 'npm:stripe';
 import type Stripe from 'stripe';
 
 const env = process.env;
@@ -836,25 +836,17 @@ function getStripe({ projectGroupId, token }: GetStripeParams) {
   }
   return StripeClient;
 }
-const hasEnv = (
-  env: NodeJS.ProcessEnv
-): env is NodeJS.ProcessEnv & {
-  CREATE_TEMP_API_KEY: string;
-  NEXT_PUBLIC_PROJECT_GROUP_ID: string;
-  NEXT_PUBLIC_CREATE_API_BASE_URL: string;
-} =>
-  Boolean(
-    env.CREATE_TEMP_API_KEY &&
-      env.NEXT_PUBLIC_PROJECT_GROUP_ID &&
-      env.NEXT_PUBLIC_CREATE_API_BASE_URL
-  );
+const hasEnv =
+  env.CREATE_TEMP_API_KEY &&
+  env.NEXT_PUBLIC_PROJECT_GROUP_ID &&
+  env.NEXT_PUBLIC_CREATE_API_BASE_URL;
 
-const stripe = hasEnv(env)
+const stripe = hasEnv
   ? getStripe({
       projectGroupId: env.NEXT_PUBLIC_PROJECT_GROUP_ID,
       token: env.CREATE_TEMP_API_KEY,
     })
-  : StripeConstructor;
+  : regularStripe;
 
 export default stripe;
 export { stripe as Stripe };

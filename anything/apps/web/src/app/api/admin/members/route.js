@@ -1,14 +1,6 @@
-import sql from "../../utils/sql";
-import { auth } from "../../../../auth";
-
-let argon2Promise;
-
-async function getArgon2() {
-  if (!argon2Promise) {
-    argon2Promise = import("@node-rs/argon2");
-  }
-  return argon2Promise;
-}
+import sql from "@/app/api/utils/sql";
+import { auth } from "@/auth";
+import { hash } from "argon2";
 
 // Get all admin members
 export async function GET() {
@@ -95,7 +87,6 @@ export async function POST(request) {
     }
 
     // Hash password and create credentials account
-    const { hash } = await getArgon2();
     const hashedPassword = await hash(password);
     await sql`
       INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)

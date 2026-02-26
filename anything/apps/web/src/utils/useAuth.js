@@ -1,56 +1,45 @@
-import { signIn, signOut } from '@auth/create/react';
 import { useCallback } from 'react';
+import { signIn, signOut } from '@/lib/localAuth';
 
 function useAuth() {
-	const callbackUrl =
-		typeof window !== 'undefined'
-			? new URLSearchParams(window.location.search).get('callbackUrl')
-			: null;
+  const signInWithCredentials = useCallback(async (options) => {
+    const result = signIn({
+      email: options?.email,
+      password: options?.password,
+    });
 
-	const signInWithCredentials = useCallback(
-		(options) => {
-			return signIn('credentials-signin', {
-				...options,
-				callbackUrl: callbackUrl ?? options.callbackUrl,
-			});
-		},
-		[callbackUrl]
-	);
+    if (result.ok) {
+      if (options?.redirect) {
+        const callbackUrl = options?.callbackUrl || '/ads';
+        window.location.href = callbackUrl;
+      }
+      return { error: null, ok: true };
+    }
 
-	const signUpWithCredentials = useCallback(
-		(options) => {
-			return signIn('credentials-signup', {
-				...options,
-				callbackUrl: callbackUrl ?? options.callbackUrl,
-			});
-		},
-		[callbackUrl]
-	);
+    return { error: result.error || 'Sign in failed', ok: false };
+  }, []);
 
-	const signInWithGoogle = useCallback(
-		(options) => {
-			return signIn('google', {
-				...options,
-				callbackUrl: callbackUrl ?? options.callbackUrl,
-			});
-		},
-		[callbackUrl]
-	);
-	const signInWithFacebook = useCallback((options) => {
-		return signIn('facebook', options);
-	}, []);
-	const signInWithTwitter = useCallback((options) => {
-		return signIn('twitter', options);
-	}, []);
+  const signUpWithCredentials = useCallback(async () => {
+    return { error: 'Sign up is disabled', ok: false };
+  }, []);
 
-	return {
-		signInWithCredentials,
-		signUpWithCredentials,
-		signInWithGoogle,
-		signInWithFacebook,
-		signInWithTwitter,
-		signOut,
-	};
+  const handleSignOut = useCallback(async (options = {}) => {
+    signOut();
+    if (options.redirect !== false) {
+      window.location.href = options.callbackUrl || '/account/signin';
+    }
+    return { ok: true };
+  }, []);
+
+  return {
+    signInWithCredentials,
+    signUpWithCredentials,
+    signInWithGoogle: async () => ({ error: 'Not supported', ok: false }),
+    signInWithFacebook: async () => ({ error: 'Not supported', ok: false }),
+    signInWithTwitter: async () => ({ error: 'Not supported', ok: false }),
+    signInWithApple: async () => ({ error: 'Not supported', ok: false }),
+    signOut: handleSignOut,
+  };
 }
 
 export default useAuth;

@@ -1,4 +1,4 @@
-import sql from "../../utils/sql";
+import sql from "@/app/api/utils/sql";
 
 // Helper function to normalize time to HH:MM:SS format
 function normalizeTime(time) {

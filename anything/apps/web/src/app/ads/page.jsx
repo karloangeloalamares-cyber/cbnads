@@ -1,337 +1,315 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Bell, LogOut, ChevronDown, Settings } from "lucide-react";
-import Sidebar from "@/components/Sidebar";
-import AdsList from "@/components/AdsList";
-import NewAdForm from "@/components/NewAdForm";
-import BillingForm from "@/components/BillingForm";
-import AdvertisersList from "@/components/AdvertisersList";
-import NewAdvertiserForm from "@/components/NewAdvertiserForm";
-import ProductsList from "@/components/ProductsList";
-import SettingsPage from "@/components/SettingsPage";
-import PendingSubmissionsList from "@/components/PendingSubmissionsList";
-import InvoicesList from "@/components/InvoicesList";
-import NewInvoiceForm from "@/components/NewInvoiceForm";
-import useUser from "@/utils/useUser";
+import { useEffect, useMemo, useState } from "react";
+import { getSignedInUser } from "@/lib/localAuth";
+import {
+  approvePendingAd,
+  deleteAd,
+  deleteAdvertiser,
+  deleteInvoice,
+  deletePendingAd,
+  deleteProduct,
+  ensureDb,
+  exportAdsCsv,
+  exportDbJson,
+  readDb,
+  rejectPendingAd,
+  resetDb,
+  subscribeDb,
+  updateAdPayment,
+  updateAdStatus,
+  upsertAd,
+  upsertAdvertiser,
+  upsertInvoice,
+  upsertProduct,
+} from "@/lib/localDb";
+
+const sections = ["ads", "pending", "advertisers", "products", "invoices", "settings"];
+
+const blankAd = {
+  id: "",
+  ad_name: "",
+  advertiser_id: "",
+  product_id: "",
+  post_type: "one_time",
+  status: "Draft",
+  payment: "Unpaid",
+  post_date: "",
+  post_time: "",
+  price: "",
+  notes: "",
+};
 
 export default function AdsPage() {
-  const { data: user, loading: userLoading } = useUser();
-  const [view, setView] = useState("list");
-  const [activeSection, setActiveSection] = useState("Ads");
-  const [adData, setAdData] = useState(null);
-  const [editingAd, setEditingAd] = useState(null);
-  const [userRole, setUserRole] = useState(null);
-  const [roleLoading, setRoleLoading] = useState(true);
-  const [showAdvertiserForm, setShowAdvertiserForm] = useState(false);
-  const [advertiserRefreshKey, setAdvertiserRefreshKey] = useState(0);
-  const [invoiceRefreshKey, setInvoiceRefreshKey] = useState(0);
-  const [adsRefreshKey, setAdsRefreshKey] = useState(0);
-  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
-  const dropdownRef = useRef(null);
+  const [db, setDb] = useState(() => readDb());
+  const [section, setSection] = useState(() => {
+    if (typeof window === "undefined") return "ads";
+    const value = new URLSearchParams(window.location.search).get("section");
+    return sections.includes(value) ? value : "ads";
+  });
+  const [user, setUser] = useState(() => getSignedInUser());
+  const [ready, setReady] = useState(false);
+  const [message, setMessage] = useState("");
 
-  // Close dropdown when clicking outside
+  const [ad, setAd] = useState(blankAd);
+  const [advertiser, setAdvertiser] = useState({ id: "", advertiser_name: "", email: "" });
+  const [product, setProduct] = useState({ id: "", product_name: "", price: "" });
+  const [invoice, setInvoice] = useState({ id: "", invoice_number: "", advertiser_id: "", amount: "", status: "Unpaid", ad_ids: [] });
+
   useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setShowProfileDropdown(false);
-      }
+    ensureDb();
+    const sync = () => {
+      setDb(readDb());
+      setUser(getSignedInUser());
+      setReady(true);
     };
+    sync();
+    return subscribeDb(sync);
+  }, []);
 
-    if (showProfileDropdown) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () =>
-        document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [showProfileDropdown]);
-
-  // Fetch user role
   useEffect(() => {
-    const fetchRole = async () => {
-      if (user?.role) {
-        setUserRole(user.role);
-        setRoleLoading(false);
-        return;
-      }
+    if (!ready) return;
+    if (!user) window.location.href = "/account/signin";
+  }, [ready, user]);
 
-      try {
-        const response = await fetch("/api/user/role");
-        if (!response.ok) {
-          throw new Error("Failed to fetch role");
-        }
-        const data = await response.json();
-        setUserRole(data.user?.role);
-      } catch (error) {
-        console.error("Error fetching user role:", error);
-      } finally {
-        setRoleLoading(false);
-      }
-    };
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("section", section);
+    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
+  }, [section]);
 
-    if (user) {
-      fetchRole();
-    } else if (!userLoading) {
-      setRoleLoading(false);
+  const advertisers = db.advertisers || [];
+  const products = db.products || [];
+  const ads = db.ads || [];
+  const pending = db.pending_ads || [];
+  const invoices = db.invoices || [];
+
+  const visibleAdsForInvoice = useMemo(() => {
+    if (!invoice.advertiser_id) return ads;
+    return ads.filter((item) => item.advertiser_id === invoice.advertiser_id);
+  }, [ads, invoice.advertiser_id]);
+
+  const run = (fn, text) => {
+    try {
+      fn();
+      setDb(readDb());
+      setMessage(text);
+      setTimeout(() => setMessage(""), 1800);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Action failed");
     }
-  }, [user, userLoading]);
-
-  const handleNavigate = (section) => {
-    setActiveSection(section);
-    setView("list");
-    setEditingAd(null);
-    setShowAdvertiserForm(false);
   };
 
-  const handleCreateNew = () => {
-    setEditingAd(null);
-    setView("create");
+  const download = (filename, text, type) => {
+    const blob = new Blob([text], { type });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
   };
 
-  const handleEditAd = (ad) => {
-    setEditingAd(ad);
-    setView("create");
-  };
-
-  const handleContinueToBilling = (formData) => {
-    setAdData(formData);
-    setView("billing");
-  };
-
-  const handleBackToAdDetails = () => {
-    // Keep the adData so the form can restore it
-    setView("create");
-  };
-
-  const handleAdFormSuccess = () => {
-    setEditingAd(null);
-    setView("list");
-    setAdsRefreshKey((prev) => prev + 1);
-  };
-
-  const handleBillingSuccess = () => {
-    setView("list");
-    setAdsRefreshKey((prev) => prev + 1);
-    setInvoiceRefreshKey((prev) => prev + 1);
-  };
-
-  const handleCreateNewAdvertiser = () => {
-    setShowAdvertiserForm(true);
-  };
-
-  const handleAdvertiserFormCancel = () => {
-    setShowAdvertiserForm(false);
-  };
-
-  const handleAdvertiserFormSuccess = () => {
-    setShowAdvertiserForm(false);
-    setAdvertiserRefreshKey((prev) => prev + 1);
-  };
-
-  const handleCreateNewInvoice = () => {
-    setView("newInvoice");
-  };
-
-  const handleInvoiceFormCancel = () => {
-    setView("list");
-  };
-
-  const handleInvoiceFormSuccess = () => {
-    setView("list");
-    setInvoiceRefreshKey((prev) => prev + 1);
-  };
-
-  // Loading state
-  if (userLoading || roleLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-gray-600">Loading...</p>
-      </div>
-    );
-  }
-
-  // Not authenticated
-  if (!user) {
-    if (typeof window !== "undefined") {
-      window.location.href = "/account/signin";
-    }
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-gray-600">Redirecting to sign in...</p>
-      </div>
-    );
-  }
-
-  // Not admin
-  if (userRole !== "admin") {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <div className="text-center max-w-md">
-          <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-            Access Denied
-          </h1>
-          <p className="text-gray-600 mb-6">
-            You don't have admin access to this page. Please contact an
-            administrator.
-          </p>
-          <a
-            href="/account/logout"
-            className="inline-block px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 text-sm font-medium"
-          >
-            Sign Out
-          </a>
-        </div>
-      </div>
-    );
+  if (!ready || !user) {
+    return <div className="flex min-h-screen items-center justify-center text-sm text-gray-600">Loading dashboard...</div>;
   }
 
   return (
-    <div className="flex h-screen bg-white">
-      <Sidebar activeItem={activeSection} onNavigate={handleNavigate} />
-
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Header - only show for list view */}
-        {view === "list" && !showAdvertiserForm && (
-          <header className="h-16 border-b border-gray-200 flex items-center justify-end px-8 gap-4 flex-shrink-0">
-            <button className="p-2 hover:bg-gray-100 rounded-lg">
-              <Bell size={20} className="text-gray-600" />
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-7xl px-4 py-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">CBN Ads Admin</h1>
+          <a href="/account/logout" className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-100">Sign Out</a>
+        </div>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {sections.map((item) => (
+            <button key={item} onClick={() => setSection(item)} className={`rounded-lg px-3 py-2 text-sm ${section === item ? "bg-black text-white" : "bg-white border"}`}>
+              {item}
             </button>
-            <div className="relative" ref={dropdownRef}>
-              <button
-                onClick={() => setShowProfileDropdown(!showProfileDropdown)}
-                className="flex items-center gap-3 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors"
-              >
-                <span className="text-sm font-medium text-gray-900">
-                  {user.name || user.email}
-                </span>
-                <div className="w-10 h-10 rounded-full bg-[#F4E4D7] overflow-hidden flex items-center justify-center">
-                  {user.image ? (
-                    <img
-                      src={user.image}
-                      alt="Profile"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-sm font-medium text-gray-700">
-                      {(user.name || user.email || "U").charAt(0).toUpperCase()}
-                    </span>
-                  )}
+          ))}
+        </div>
+        {message ? <div className="mb-4 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">{message}</div> : null}
+
+        {section === "ads" ? (
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="rounded-xl border bg-white p-4">
+              <h2 className="mb-3 font-semibold">{ad.id ? "Edit ad" : "Create ad"}</h2>
+              <div className="space-y-2 text-sm">
+                <input className="w-full rounded border px-2 py-1" placeholder="Ad name" value={ad.ad_name} onChange={(e) => setAd({ ...ad, ad_name: e.target.value })} />
+                <select className="w-full rounded border px-2 py-1" value={ad.advertiser_id} onChange={(e) => setAd({ ...ad, advertiser_id: e.target.value })}>
+                  <option value="">Select advertiser</option>
+                  {advertisers.map((item) => <option key={item.id} value={item.id}>{item.advertiser_name}</option>)}
+                </select>
+                <select className="w-full rounded border px-2 py-1" value={ad.product_id} onChange={(e) => setAd({ ...ad, product_id: e.target.value })}>
+                  <option value="">Select product</option>
+                  {products.map((item) => <option key={item.id} value={item.id}>{item.product_name}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="rounded border px-2 py-1" type="date" value={ad.post_date} onChange={(e) => setAd({ ...ad, post_date: e.target.value })} />
+                  <input className="rounded border px-2 py-1" type="time" value={ad.post_time} onChange={(e) => setAd({ ...ad, post_time: e.target.value })} />
                 </div>
-                <ChevronDown size={16} className="text-gray-600" />
-              </button>
-
-              {/* Dropdown Menu */}
-              {showProfileDropdown && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                  <button
-                    onClick={() => {
-                      setShowProfileDropdown(false);
-                      handleNavigate("Settings");
-                    }}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
-                  >
-                    <Settings size={16} />
-                    Profile Settings
-                  </button>
-                  <div className="border-t border-gray-100 my-1" />
-                  <a
-                    href="/account/logout"
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    <LogOut size={16} />
-                    Sign Out
-                  </a>
+                <div className="grid grid-cols-2 gap-2">
+                  <select className="rounded border px-2 py-1" value={ad.status} onChange={(e) => setAd({ ...ad, status: e.target.value })}>
+                    {["Draft", "Scheduled", "Published", "Archived"].map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                  <select className="rounded border px-2 py-1" value={ad.payment} onChange={(e) => setAd({ ...ad, payment: e.target.value })}>
+                    {["Unpaid", "Paid"].map((status) => <option key={status} value={status}>{status}</option>)}
+                  </select>
                 </div>
-              )}
+                <input className="w-full rounded border px-2 py-1" type="number" placeholder="Price" value={ad.price} onChange={(e) => setAd({ ...ad, price: e.target.value })} />
+                <textarea className="w-full rounded border px-2 py-1" placeholder="Notes" value={ad.notes} onChange={(e) => setAd({ ...ad, notes: e.target.value })} />
+                <div className="flex gap-2">
+                  <button className="rounded bg-black px-3 py-2 text-white" onClick={() => run(() => { if (!ad.ad_name) throw new Error("Ad name required"); if (!ad.advertiser_id) throw new Error("Advertiser required"); upsertAd(ad); setAd(blankAd); }, "Ad saved.")}>Save</button>
+                  <button className="rounded border px-3 py-2" onClick={() => setAd(blankAd)}>Reset</button>
+                </div>
+              </div>
             </div>
-          </header>
-        )}
+            <div className="lg:col-span-2 rounded-xl border bg-white p-4">
+              <h2 className="mb-3 font-semibold">Ads ({ads.length})</h2>
+              <div className="space-y-2 text-sm">
+                {ads.map((item) => (
+                  <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
+                    <div>
+                      <p className="font-semibold">{item.ad_name}</p>
+                      <p className="text-xs text-gray-600">{item.advertiser} - {item.post_date || "No date"} {item.post_time || ""}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      <button className="rounded border px-2 py-1" onClick={() => setAd({ ...blankAd, ...item })}>Edit</button>
+                      <button className="rounded border px-2 py-1" onClick={() => run(() => updateAdStatus(item.id, "Published"), "Ad published.")}>Publish</button>
+                      <button className="rounded border px-2 py-1" onClick={() => run(() => updateAdPayment(item.id, item.payment === "Paid" ? "Unpaid" : "Paid"), "Payment updated.")}>Toggle Pay</button>
+                      <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => run(() => deleteAd(item.id), "Ad deleted.")}>Delete</button>
+                    </div>
+                  </div>
+                ))}
+                {ads.length === 0 ? <p className="text-gray-500">No ads yet.</p> : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-auto">
-          {view === "list" && activeSection === "Dashboard" && (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">Dashboard view coming soon...</p>
+        {section === "pending" ? (
+          <div className="rounded-xl border bg-white p-4 text-sm">
+            <h2 className="mb-3 font-semibold">Pending submissions ({pending.length})</h2>
+            <div className="space-y-2">
+              {pending.map((item) => (
+                <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
+                  <p>{item.status} - {item.ad_name} - {item.advertiser_name}</p>
+                  <div className="flex gap-2 text-xs">
+                    {item.status === "pending" ? (
+                      <>
+                        <button className="rounded border px-2 py-1" onClick={() => run(() => approvePendingAd(item.id), "Submission approved.")}>Approve</button>
+                        <button className="rounded border px-2 py-1" onClick={() => run(() => rejectPendingAd(item.id), "Submission rejected.")}>Reject</button>
+                      </>
+                    ) : null}
+                    <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => run(() => deletePendingAd(item.id), "Submission deleted.")}>Delete</button>
+                  </div>
+                </div>
+              ))}
+              {pending.length === 0 ? <p className="text-gray-500">No pending submissions.</p> : null}
             </div>
-          )}
-          {view === "list" && activeSection === "Tasks" && (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">Tasks view coming soon...</p>
-            </div>
-          )}
-          {view === "list" && activeSection === "Reports" && (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">Reports view coming soon...</p>
-            </div>
-          )}
-          {view === "list" && activeSection === "Billing" && (
-            <InvoicesList
-              onCreateNew={handleCreateNewInvoice}
-              key={invoiceRefreshKey}
-            />
-          )}
-          {view === "list" && activeSection === "Ads" && (
-            <AdsList
-              onCreateNew={handleCreateNew}
-              onEditAd={handleEditAd}
-              key={adsRefreshKey}
-            />
-          )}
-          {view === "list" && activeSection === "Submissions" && (
-            <PendingSubmissionsList />
-          )}
-          {view === "list" &&
-            activeSection === "Advertisers" &&
-            !showAdvertiserForm && (
-              <AdvertisersList
-                onCreateNew={handleCreateNewAdvertiser}
-                key={advertiserRefreshKey}
-              />
-            )}
-          {view === "list" &&
-            activeSection === "Advertisers" &&
-            showAdvertiserForm && (
-              <NewAdvertiserForm
-                onCancel={handleAdvertiserFormCancel}
-                onSuccess={handleAdvertiserFormSuccess}
-              />
-            )}
-          {view === "list" && activeSection === "Products" && <ProductsList />}
-          {view === "list" && activeSection === "Calendar" && (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500">Calendar view coming soon...</p>
-            </div>
-          )}
-          {view === "list" && activeSection === "Settings" && <SettingsPage />}
+          </div>
+        ) : null}
 
-          {view === "create" && (
-            <NewAdForm
-              editingAd={editingAd}
-              onCancel={() => {
-                setEditingAd(null);
-                setView("list");
-              }}
-              onSuccess={handleAdFormSuccess}
-              onContinueToBilling={handleContinueToBilling}
-            />
-          )}
+        {section === "advertisers" ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">{advertiser.id ? "Edit advertiser" : "Create advertiser"}</h2>
+              <input className="w-full rounded border px-2 py-1" placeholder="Name" value={advertiser.advertiser_name} onChange={(e) => setAdvertiser({ ...advertiser, advertiser_name: e.target.value })} />
+              <input className="w-full rounded border px-2 py-1" placeholder="Email" value={advertiser.email} onChange={(e) => setAdvertiser({ ...advertiser, email: e.target.value })} />
+              <div className="flex gap-2">
+                <button className="rounded bg-black px-3 py-2 text-white" onClick={() => run(() => { if (!advertiser.advertiser_name) throw new Error("Advertiser name required"); upsertAdvertiser(advertiser); setAdvertiser({ id: "", advertiser_name: "", email: "" }); }, "Advertiser saved.")}>Save</button>
+                <button className="rounded border px-3 py-2" onClick={() => setAdvertiser({ id: "", advertiser_name: "", email: "" })}>Reset</button>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">Advertisers ({advertisers.length})</h2>
+              {advertisers.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded border p-2">
+                  <p>{item.advertiser_name} - ${item.ad_spend || "0.00"}</p>
+                  <div className="flex gap-2 text-xs">
+                    <button className="rounded border px-2 py-1" onClick={() => setAdvertiser({ id: item.id, advertiser_name: item.advertiser_name || "", email: item.email || "" })}>Edit</button>
+                    <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => run(() => deleteAdvertiser(item.id), "Advertiser deleted.")}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
-          {view === "billing" && (
-            <BillingForm
-              adData={adData}
-              onBack={handleBackToAdDetails}
-              onCancel={() => setView("list")}
-              onSaveDraft={handleBillingSuccess}
-              onPublish={handleBillingSuccess}
-            />
-          )}
+        {section === "products" ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">{product.id ? "Edit product" : "Create product"}</h2>
+              <input className="w-full rounded border px-2 py-1" placeholder="Product name" value={product.product_name} onChange={(e) => setProduct({ ...product, product_name: e.target.value })} />
+              <input className="w-full rounded border px-2 py-1" placeholder="Price" type="number" value={product.price} onChange={(e) => setProduct({ ...product, price: e.target.value })} />
+              <div className="flex gap-2">
+                <button className="rounded bg-black px-3 py-2 text-white" onClick={() => run(() => { if (!product.product_name) throw new Error("Product name required"); upsertProduct(product); setProduct({ id: "", product_name: "", price: "" }); }, "Product saved.")}>Save</button>
+                <button className="rounded border px-3 py-2" onClick={() => setProduct({ id: "", product_name: "", price: "" })}>Reset</button>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">Products ({products.length})</h2>
+              {products.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded border p-2">
+                  <p>{item.product_name} - ${item.price}</p>
+                  <div className="flex gap-2 text-xs">
+                    <button className="rounded border px-2 py-1" onClick={() => setProduct({ id: item.id, product_name: item.product_name || "", price: item.price || "" })}>Edit</button>
+                    <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => run(() => deleteProduct(item.id), "Product deleted.")}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
-          {view === "newInvoice" && (
-            <NewInvoiceForm
-              onCancel={handleInvoiceFormCancel}
-              onSuccess={handleInvoiceFormSuccess}
-            />
-          )}
-        </main>
+        {section === "invoices" ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">{invoice.id ? "Edit invoice" : "Create invoice"}</h2>
+              <input className="w-full rounded border px-2 py-1" placeholder="Invoice number" value={invoice.invoice_number} onChange={(e) => setInvoice({ ...invoice, invoice_number: e.target.value })} />
+              <select className="w-full rounded border px-2 py-1" value={invoice.advertiser_id} onChange={(e) => setInvoice({ ...invoice, advertiser_id: e.target.value, ad_ids: [] })}>
+                <option value="">Select advertiser</option>
+                {advertisers.map((item) => <option key={item.id} value={item.id}>{item.advertiser_name}</option>)}
+              </select>
+              <input className="w-full rounded border px-2 py-1" placeholder="Amount" type="number" value={invoice.amount} onChange={(e) => setInvoice({ ...invoice, amount: e.target.value })} />
+              <select className="w-full rounded border px-2 py-1" value={invoice.status} onChange={(e) => setInvoice({ ...invoice, status: e.target.value })}>
+                {["Unpaid", "Paid"].map((status) => <option key={status} value={status}>{status}</option>)}
+              </select>
+              <div className="max-h-32 overflow-auto rounded border p-2">
+                {visibleAdsForInvoice.map((item) => (
+                  <label key={item.id} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={invoice.ad_ids.includes(item.id)} onChange={() => setInvoice((current) => ({ ...current, ad_ids: current.ad_ids.includes(item.id) ? current.ad_ids.filter((id) => id !== item.id) : [...current.ad_ids, item.id] }))} />
+                    {item.ad_name}
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button className="rounded bg-black px-3 py-2 text-white" onClick={() => run(() => { if (!invoice.advertiser_id) throw new Error("Advertiser required"); if (!invoice.amount) throw new Error("Amount required"); upsertInvoice(invoice); setInvoice({ id: "", invoice_number: "", advertiser_id: "", amount: "", status: "Unpaid", ad_ids: [] }); }, "Invoice saved.")}>Save</button>
+                <button className="rounded border px-3 py-2" onClick={() => setInvoice({ id: "", invoice_number: "", advertiser_id: "", amount: "", status: "Unpaid", ad_ids: [] })}>Reset</button>
+              </div>
+            </div>
+            <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
+              <h2 className="font-semibold">Invoices ({invoices.length})</h2>
+              {invoices.map((item) => (
+                <div key={item.id} className="flex items-center justify-between rounded border p-2">
+                  <p>{item.invoice_number} - ${item.amount} - {item.status}</p>
+                  <div className="flex gap-2 text-xs">
+                    <button className="rounded border px-2 py-1" onClick={() => setInvoice({ ...item, ad_ids: item.ad_ids || [] })}>Edit</button>
+                    <button className="rounded border border-red-200 px-2 py-1 text-red-700" onClick={() => run(() => deleteInvoice(item.id), "Invoice deleted.")}>Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {section === "settings" ? (
+          <div className="rounded-xl border bg-white p-4 space-y-3 text-sm">
+            <button className="rounded border px-3 py-2 hover:bg-gray-100" onClick={() => download(`cbnads-backup-${Date.now()}.json`, exportDbJson(), "application/json")}>Export local backup</button>
+            <button className="rounded border px-3 py-2 hover:bg-gray-100" onClick={() => download(`cbnads-ads-${Date.now()}.csv`, exportAdsCsv(), "text/csv;charset=utf-8")}>Export ads CSV</button>
+            <button className="rounded border border-red-200 px-3 py-2 text-red-700 hover:bg-red-50" onClick={() => { if (window.confirm("Reset all local data?")) run(() => { resetDb(); window.location.href = "/account/signin"; }, "Data reset."); }}>Reset all local data</button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

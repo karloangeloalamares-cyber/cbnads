@@ -1,5 +1,5 @@
-import { auth } from "../../../auth";
-import sql from "../utils/sql";
+import { auth } from "@/auth";
+import sql from "@/app/api/utils/sql";
 
 /**
  * Check if the current user is authenticated and is an admin

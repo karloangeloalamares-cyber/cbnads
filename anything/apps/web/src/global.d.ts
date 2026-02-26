@@ -11,7 +11,11 @@ declare module 'npm:stripe' {
 	import Stripe from 'stripe';
 	export default Stripe;
 }
-declare module '@auth/create/react' {
-	import { SessionProvider } from '@auth/react';
-	export { SessionProvider };
+declare module '*.jsx' {
+	const value: any;
+	export default value;
+}
+declare module '*.js' {
+	const value: any;
+	export default value;
 }

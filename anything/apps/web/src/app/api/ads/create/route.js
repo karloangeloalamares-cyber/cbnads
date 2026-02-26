@@ -1,5 +1,5 @@
-import sql from "../../utils/sql";
-import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad";
+import sql from "@/app/api/utils/sql";
+import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function POST(request) {
   try {

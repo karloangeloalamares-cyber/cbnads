@@ -26,6 +26,12 @@ type Pages = {
   "/ads": {
     params: {};
   };
+  "/pending-submissions": {
+    params: {};
+  };
+  "/reconciliation": {
+    params: {};
+  };
   "/submit-ad": {
     params: {};
   };
@@ -39,7 +45,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/account/logout" | "/account/signin" | "/account/signup" | "/ads" | "/submit-ad" | "/*";
+    page: "/" | "/account/logout" | "/account/signin" | "/account/signup" | "/ads" | "/pending-submissions" | "/reconciliation" | "/submit-ad" | "/*";
   };
   "./page.jsx": {
     id: "page";
@@ -61,6 +67,14 @@ type RouteFiles = {
     id: "ads/page";
     page: "/ads";
   };
+  "./pending-submissions/page.jsx": {
+    id: "pending-submissions/page";
+    page: "/pending-submissions";
+  };
+  "./reconciliation/page.jsx": {
+    id: "reconciliation/page";
+    page: "/reconciliation";
+  };
   "./submit-ad/page.jsx": {
     id: "submit-ad/page";
     page: "/submit-ad";
@@ -78,6 +92,8 @@ type RouteModules = {
   "account/signin/page": typeof import("./src/app/./account/signin/page.jsx");
   "account/signup/page": typeof import("./src/app/./account/signup/page.jsx");
   "ads/page": typeof import("./src/app/./ads/page.jsx");
+  "pending-submissions/page": typeof import("./src/app/./pending-submissions/page.jsx");
+  "reconciliation/page": typeof import("./src/app/./reconciliation/page.jsx");
   "submit-ad/page": typeof import("./src/app/./submit-ad/page.jsx");
   "__create/not-found": typeof import("./src/app/./__create/not-found.tsx");
 };

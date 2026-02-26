@@ -1,5 +1,5 @@
-import sql from "../../utils/sql";
-import { sendEmail } from "../../utils/send-email";
+import sql from "@/app/api/utils/sql";
+import { sendEmail } from "@/app/api/utils/send-email";
 
 export async function POST(request) {
   try {

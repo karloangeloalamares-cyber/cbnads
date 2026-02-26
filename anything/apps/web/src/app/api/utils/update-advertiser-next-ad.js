@@ -1,4 +1,4 @@
-import sql from "../utils/sql";
+import sql from "@/app/api/utils/sql";
 
 /**
  * Updates an advertiser's next_ad_date based on their scheduled ads
