@@ -23,6 +23,7 @@ import {
   AlertCircle,
   TrendingUp,
   Users,
+  User,
   DollarSign,
   FileText,
   Calendar,
@@ -34,25 +35,31 @@ import {
   MoreVertical,
   Edit2,
   Trash2,
+  Upload,
+  Check,
+  Crown,
+  MessageSquare,
+  Volume2,
   X,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
-import { getSignedInUser } from "@/lib/localAuth";
+import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
 import {
   approvePendingAd,
+  createId,
   deleteAd,
   deleteAdvertiser,
   deleteInvoice,
   deletePendingAd,
   deleteProduct,
   ensureDb,
-  exportAdsCsv,
-  exportDbJson,
   getReconciliationReport,
   readDb,
   rejectPendingAd,
-  resetDb,
+  saveAdminSettings,
+  saveNotificationPreferences,
   subscribeDb,
+  updateDb,
   updateAdStatus,
   upsertAd,
   upsertAdvertiser,
@@ -70,6 +77,15 @@ const sections = [
   "Billing",
   "Reconciliation",
   "Settings",
+];
+
+const settingsTabs = [
+  { id: "profile", label: "Profile" },
+  { id: "team", label: "Team" },
+  { id: "general", label: "General" },
+  { id: "scheduling", label: "Ad Scheduling" },
+  { id: "billing", label: "Billing" },
+  { id: "system", label: "System" },
 ];
 
 const blankAd = {
@@ -1653,6 +1669,41 @@ export default function AdsPage() {
   const [ad, setAd] = useState(blankAd);
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
+  const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
+  const [settingsProfileName, setSettingsProfileName] = useState("");
+  const [settingsProfileImage, setSettingsProfileImage] = useState("");
+  const [settingsProfileSaving, setSettingsProfileSaving] = useState(false);
+  const [settingsProfileUploading, setSettingsProfileUploading] = useState(false);
+  const [settingsProfileMessage, setSettingsProfileMessage] = useState(null);
+  const [settingsTeamModalOpen, setSettingsTeamModalOpen] = useState(false);
+  const [settingsTeamName, setSettingsTeamName] = useState("");
+  const [settingsTeamEmail, setSettingsTeamEmail] = useState("");
+  const [settingsTeamPassword, setSettingsTeamPassword] = useState("");
+  const [settingsTeamSaving, setSettingsTeamSaving] = useState(false);
+  const [settingsTeamError, setSettingsTeamError] = useState("");
+  const [settingsNotification, setSettingsNotification] = useState({
+    email_enabled: true,
+    sms_enabled: false,
+    reminder_time_value: 1,
+    reminder_time_unit: "hours",
+    email_address: "",
+    phone_number: "",
+    sound_enabled: true,
+  });
+  const [settingsNotificationSaving, setSettingsNotificationSaving] = useState(false);
+  const [settingsNotificationTesting, setSettingsNotificationTesting] = useState(false);
+  const [settingsNotificationChecking, setSettingsNotificationChecking] =
+    useState(false);
+  const [settingsNotificationMessage, setSettingsNotificationMessage] =
+    useState(null);
+  const [settingsReminderResults, setSettingsReminderResults] = useState(null);
+  const [settingsMaxAdsPerDay, setSettingsMaxAdsPerDay] = useState("5");
+  const [settingsSchedulingSaving, setSettingsSchedulingSaving] = useState(false);
+  const [settingsSchedulingError, setSettingsSchedulingError] = useState("");
+  const [settingsSchedulingSuccess, setSettingsSchedulingSuccess] = useState(false);
+  const [settingsSyncing, setSettingsSyncing] = useState(false);
+  const [settingsSyncResult, setSettingsSyncResult] = useState(null);
+  const [settingsSyncError, setSettingsSyncError] = useState("");
 
   useEffect(() => {
     ensureDb();
@@ -1768,6 +1819,46 @@ export default function AdsPage() {
   const ads = db.ads || [];
   const pending = db.pending_ads || [];
   const invoices = db.invoices || [];
+  const teamMembers = db.team_members || [];
+  const adminSettings = db.admin_settings || {};
+  const notificationPreferences = db.notification_preferences || {};
+
+  useEffect(() => {
+    setSettingsProfileName(user?.name || "");
+    setSettingsProfileImage(user?.image || "");
+    setSettingsProfileMessage(null);
+  }, [user?.id, user?.name, user?.image]);
+
+  useEffect(() => {
+    setSettingsNotification((current) => ({
+      ...current,
+      email_enabled:
+        notificationPreferences.email_enabled ?? current.email_enabled ?? true,
+      sms_enabled:
+        notificationPreferences.sms_enabled ?? current.sms_enabled ?? false,
+      reminder_time_value:
+        Number(notificationPreferences.reminder_time_value) ||
+        current.reminder_time_value ||
+        1,
+      reminder_time_unit:
+        notificationPreferences.reminder_time_unit ||
+        current.reminder_time_unit ||
+        "hours",
+      email_address:
+        notificationPreferences.email_address ||
+        notificationPreferences.reminder_email ||
+        current.email_address ||
+        user?.email ||
+        "",
+      phone_number:
+        notificationPreferences.phone_number || current.phone_number || "",
+      sound_enabled:
+        notificationPreferences.sound_enabled ?? current.sound_enabled ?? true,
+    }));
+    setSettingsMaxAdsPerDay(
+      String(adminSettings.max_ads_per_day || adminSettings.max_ads_per_slot || 5),
+    );
+  }, [adminSettings, notificationPreferences, user?.email]);
 
   const visibleAdsForInvoice = useMemo(() => {
     if (!invoice.advertiser_id) {
@@ -2587,6 +2678,407 @@ export default function AdsPage() {
     URL.revokeObjectURL(link.href);
   };
 
+  const handleSettingsProfileImageUpload = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setSettingsProfileMessage({
+        type: "error",
+        text: "Image must be less than 5MB",
+      });
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      setSettingsProfileMessage({
+        type: "error",
+        text: "Please upload an image file",
+      });
+      return;
+    }
+
+    setSettingsProfileUploading(true);
+    setSettingsProfileMessage(null);
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSettingsProfileImage(String(reader.result || ""));
+      setSettingsProfileUploading(false);
+    };
+    reader.onerror = () => {
+      setSettingsProfileUploading(false);
+      setSettingsProfileMessage({
+        type: "error",
+        text: "Failed to upload image",
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSettingsProfileSave = (event) => {
+    event.preventDefault();
+    if (!user) {
+      return;
+    }
+
+    setSettingsProfileSaving(true);
+    setSettingsProfileMessage(null);
+    try {
+      const updated = updateCurrentUser({
+        name: settingsProfileName.trim() || user.name || "User",
+        image: settingsProfileImage || "",
+      });
+      if (!updated) {
+        throw new Error("Failed to update profile");
+      }
+      setUser(updated);
+      setDb(readDb());
+      setSettingsProfileMessage({
+        type: "success",
+        text: "Profile updated successfully",
+      });
+    } catch (error) {
+      setSettingsProfileMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to update profile",
+      });
+    } finally {
+      setSettingsProfileSaving(false);
+    }
+  };
+
+  const handleSettingsAddMember = (event) => {
+    event.preventDefault();
+    const name = settingsTeamName.trim();
+    const email = settingsTeamEmail.trim().toLowerCase();
+    const password = settingsTeamPassword;
+
+    if (!name || !email || !password) {
+      setSettingsTeamError("Name, email, and password are required.");
+      return;
+    }
+    if (password.length < 6) {
+      setSettingsTeamError("Password must be at least 6 characters.");
+      return;
+    }
+
+    setSettingsTeamSaving(true);
+    setSettingsTeamError("");
+
+    try {
+      updateDb((currentDb) => {
+        if (
+          (currentDb.users || []).some(
+            (item) => String(item.email || "").toLowerCase() === email,
+          )
+        ) {
+          throw new Error("A user with this email already exists.");
+        }
+        if (
+          (currentDb.team_members || []).some(
+            (item) => String(item.email || "").toLowerCase() === email,
+          )
+        ) {
+          throw new Error("A team member with this email already exists.");
+        }
+
+        const now = new Date().toISOString();
+        currentDb.users = [
+          {
+            id: createId("user"),
+            name,
+            email,
+            password,
+            role: "admin",
+            image: "",
+            created_at: now,
+            updated_at: now,
+          },
+          ...(currentDb.users || []),
+        ];
+        currentDb.team_members = [
+          {
+            id: createId("member"),
+            name,
+            email,
+            role: "admin",
+            created_at: now,
+            updated_at: now,
+          },
+          ...(currentDb.team_members || []),
+        ];
+        return currentDb;
+      });
+
+      setDb(readDb());
+      setSettingsTeamModalOpen(false);
+      setSettingsTeamName("");
+      setSettingsTeamEmail("");
+      setSettingsTeamPassword("");
+      setSettingsTeamError("");
+    } catch (error) {
+      setSettingsTeamError(
+        error instanceof Error ? error.message : "Failed to add member",
+      );
+    } finally {
+      setSettingsTeamSaving(false);
+    }
+  };
+
+  const handleSettingsRemoveMember = (member) => {
+    const memberEmail = String(member.email || "").toLowerCase();
+    if (memberEmail && memberEmail === String(user?.email || "").toLowerCase()) {
+      setSettingsTeamError("You cannot remove the currently signed-in account.");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to remove this team member?")) {
+      return;
+    }
+
+    try {
+      updateDb((currentDb) => {
+        currentDb.team_members = (currentDb.team_members || []).filter(
+          (item) => item.id !== member.id,
+        );
+        currentDb.users = (currentDb.users || []).filter(
+          (item) => String(item.email || "").toLowerCase() !== memberEmail,
+        );
+        return currentDb;
+      });
+      setDb(readDb());
+      setSettingsTeamError("");
+    } catch (error) {
+      setSettingsTeamError(
+        error instanceof Error ? error.message : "Failed to remove member",
+      );
+    }
+  };
+
+  const handleSettingsSaveNotifications = () => {
+    setSettingsNotificationSaving(true);
+    setSettingsNotificationMessage(null);
+    try {
+      saveNotificationPreferences({
+        ...settingsNotification,
+        reminder_email: settingsNotification.email_address,
+      });
+      setDb(readDb());
+      setSettingsNotificationMessage({
+        type: "success",
+        text: "Notification preferences saved successfully!",
+      });
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to save preferences. Please try again.",
+      });
+    } finally {
+      setSettingsNotificationSaving(false);
+    }
+  };
+
+  const handleSettingsSendTestEmail = () => {
+    const email = settingsNotification.email_address.trim();
+    if (!email) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text: "Please enter an email address first",
+      });
+      return;
+    }
+    setSettingsNotificationTesting(true);
+    setSettingsNotificationMessage(null);
+    window.setTimeout(() => {
+      setSettingsNotificationTesting(false);
+      setSettingsNotificationMessage({
+        type: "success",
+        text: `Test email sent to ${email}! Check your inbox.`,
+      });
+    }, 500);
+  };
+
+  const handleSettingsCheckReminders = () => {
+    setSettingsNotificationChecking(true);
+    setSettingsReminderResults(null);
+    setSettingsNotificationMessage(null);
+
+    try {
+      const unitToMs = {
+        minutes: 60 * 1000,
+        hours: 60 * 60 * 1000,
+        days: 24 * 60 * 60 * 1000,
+      };
+      const value = Math.max(1, Number(settingsNotification.reminder_time_value) || 1);
+      const windowMs =
+        value * (unitToMs[settingsNotification.reminder_time_unit] || unitToMs.hours);
+      const now = Date.now();
+
+      const results = [];
+      for (const adItem of ads) {
+        if (!adItem.post_date) {
+          continue;
+        }
+        const scheduledAt = new Date(
+          `${adItem.post_date}T${adItem.post_time || "00:00:00"}`,
+        );
+        if (Number.isNaN(scheduledAt.valueOf())) {
+          continue;
+        }
+        const diff = scheduledAt.valueOf() - now;
+        if (diff < 0 || diff > windowMs) {
+          continue;
+        }
+
+        const advertiser = advertisers.find(
+          (item) => item.id === adItem.advertiser_id,
+        );
+        if (settingsNotification.email_enabled && settingsNotification.email_address) {
+          results.push({
+            type: "admin-email",
+            to: settingsNotification.email_address,
+            status: "queued",
+            ad_name: adItem.ad_name,
+          });
+        }
+        if (settingsNotification.sms_enabled && settingsNotification.phone_number) {
+          results.push({
+            type: "admin-sms",
+            to: settingsNotification.phone_number,
+            status: "queued",
+            ad_name: adItem.ad_name,
+          });
+        }
+        if (advertiser?.email) {
+          results.push({
+            type: "advertiser-email",
+            to: advertiser.email,
+            status: "queued",
+            ad_name: adItem.ad_name,
+          });
+        }
+      }
+
+      setSettingsReminderResults({
+        totalResults: results.length,
+        results,
+      });
+
+      if (results.length === 0) {
+        setSettingsNotificationMessage({
+          type: "info",
+          text: "No reminders due at this time. Check console logs for details.",
+        });
+      } else {
+        setSettingsNotificationMessage({
+          type: "success",
+          text: `Processed ${results.length} reminder(s). See results below.`,
+        });
+      }
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error ? error.message : "Failed to check reminders.",
+      });
+    } finally {
+      setSettingsNotificationChecking(false);
+    }
+  };
+
+  const handleSettingsSaveScheduling = () => {
+    const parsed = Number(settingsMaxAdsPerDay);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setSettingsSchedulingError("Maximum ads per day must be at least 1");
+      return;
+    }
+
+    setSettingsSchedulingSaving(true);
+    setSettingsSchedulingError("");
+    setSettingsSchedulingSuccess(false);
+
+    try {
+      saveAdminSettings({
+        max_ads_per_day: Math.floor(parsed),
+        max_ads_per_slot: Math.floor(parsed),
+      });
+      setDb(readDb());
+      setSettingsSchedulingSuccess(true);
+      window.setTimeout(() => setSettingsSchedulingSuccess(false), 3000);
+    } catch (error) {
+      setSettingsSchedulingError(
+        error instanceof Error ? error.message : "Failed to save settings",
+      );
+    } finally {
+      setSettingsSchedulingSaving(false);
+    }
+  };
+
+  const handleSettingsSyncAdvertiserSpending = () => {
+    setSettingsSyncing(true);
+    setSettingsSyncError("");
+    setSettingsSyncResult(null);
+
+    try {
+      const totalsByAdvertiser = new Map();
+      for (const invoiceItem of invoices) {
+        if (normalizeInvoiceStatus(invoiceItem.status) !== "Paid") {
+          continue;
+        }
+        const advertiserId = invoiceItem.advertiser_id;
+        if (!advertiserId) {
+          continue;
+        }
+        const total =
+          (totalsByAdvertiser.get(advertiserId) || 0) +
+          (Number(invoiceItem.amount) || 0);
+        totalsByAdvertiser.set(advertiserId, total);
+      }
+
+      updateDb((currentDb) => {
+        const now = new Date().toISOString();
+        currentDb.advertisers = (currentDb.advertisers || []).map((advertiser) => {
+          const total = Number(totalsByAdvertiser.get(advertiser.id) || 0).toFixed(2);
+          return {
+            ...advertiser,
+            total_spend: total,
+            ad_spend: total,
+            updated_at: now,
+          };
+        });
+        return currentDb;
+      });
+
+      const refreshedDb = readDb();
+      setDb(refreshedDb);
+      const results = (refreshedDb.advertisers || []).map((advertiser) => ({
+        id: advertiser.id,
+        name: advertiser.advertiser_name || "Unknown advertiser",
+        newTotal:
+          advertiser.total_spend || advertiser.ad_spend || advertiser.spend || "0.00",
+      }));
+      setSettingsSyncResult({
+        message: `Synced advertiser totals for ${results.length} account${
+          results.length === 1 ? "" : "s"
+        }.`,
+        results,
+      });
+    } catch (error) {
+      setSettingsSyncError(
+        error instanceof Error
+          ? error.message
+          : "Failed to sync advertiser spending",
+      );
+    } finally {
+      setSettingsSyncing(false);
+    }
+  };
+
   const handleAdsSort = (key) => {
     setAdsSortConfig((current) => {
       const direction =
@@ -3142,6 +3634,10 @@ export default function AdsPage() {
       setProductActionLoading(false);
     }
   };
+
+  const settingsProfileHasChanges =
+    settingsProfileName !== (user?.name || "") ||
+    settingsProfileImage !== (user?.image || "");
 
   if (!ready) {
     return (
@@ -6306,66 +6802,703 @@ export default function AdsPage() {
                   Settings
                 </h1>
                 <p className="text-sm text-gray-500">
-                  Manage local backups and environment maintenance
+                  Manage your account settings and team members
                 </p>
               </div>
 
-              <div className="grid gap-6 md:grid-cols-2">
-                <div className="rounded-lg border border-gray-200 bg-white p-6">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
-                    Data Export
-                  </h2>
-                  <div className="space-y-3">
+              <div className="border-b border-gray-200 mb-8">
+                <nav className="flex gap-8 overflow-x-auto">
+                  {settingsTabs.map((tab) => (
                     <button
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 text-left"
+                      key={tab.id}
                       type="button"
-                      onClick={() =>
-                        download(
-                          `cbnads-backup-${Date.now()}.json`,
-                          exportDbJson(),
-                          "application/json",
-                        )
-                      }
+                      onClick={() => setSettingsActiveTab(tab.id)}
+                      className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                        settingsActiveTab === tab.id
+                          ? "border-gray-900 text-gray-900"
+                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      }`}
                     >
-                      Export local backup (.json)
+                      {tab.label}
                     </button>
+                  ))}
+                </nav>
+              </div>
+
+              {settingsActiveTab === "profile" && (
+                <div className="bg-white rounded-lg border border-gray-200">
+                  <div className="p-6 border-b border-gray-200">
+                    <h2 className="text-lg font-semibold text-gray-900">Profile</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Update your personal information and profile picture
+                    </p>
+                  </div>
+                  <form onSubmit={handleSettingsProfileSave} className="p-6 space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Profile Picture
+                      </label>
+                      <div className="flex items-center gap-6">
+                        <div className="w-24 h-24 rounded-full bg-[#F4E4D7] overflow-hidden flex items-center justify-center">
+                          {settingsProfileImage ? (
+                            <img
+                              src={settingsProfileImage}
+                              alt="Profile"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <User size={40} className="text-gray-400" />
+                          )}
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="settings-profile-image"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium cursor-pointer"
+                          >
+                            <Upload size={16} />
+                            {settingsProfileUploading ? "Uploading..." : "Upload Photo"}
+                          </label>
+                          <input
+                            id="settings-profile-image"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleSettingsProfileImageUpload}
+                            disabled={settingsProfileUploading}
+                            className="hidden"
+                          />
+                          <p className="text-xs text-gray-500 mt-2">
+                            JPG, PNG or GIF. Max size 5MB.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="settings-display-name"
+                        className="block text-sm font-medium text-gray-700 mb-2"
+                      >
+                        Display Name
+                      </label>
+                      <input
+                        id="settings-display-name"
+                        type="text"
+                        value={settingsProfileName}
+                        onChange={(event) => setSettingsProfileName(event.target.value)}
+                        placeholder="Enter your name"
+                        className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={user.email || ""}
+                        disabled
+                        className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        Email address cannot be changed
+                      </p>
+                    </div>
+
+                    {settingsProfileMessage?.type === "error" && (
+                      <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
+                        {settingsProfileMessage.text}
+                      </div>
+                    )}
+                    {settingsProfileMessage?.type === "success" && (
+                      <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-600 flex items-center gap-2">
+                        <Check size={16} />
+                        {settingsProfileMessage.text}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 pt-4">
+                      <button
+                        type="submit"
+                        disabled={settingsProfileSaving || !settingsProfileHasChanges}
+                        className="px-6 py-2.5 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {settingsProfileSaving ? "Saving..." : "Save Changes"}
+                      </button>
+                      {settingsProfileHasChanges && !settingsProfileSaving && (
+                        <span className="text-sm text-gray-500">
+                          You have unsaved changes
+                        </span>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
+              {settingsActiveTab === "team" && (
+                <div className="bg-white rounded-lg border border-gray-200">
+                  <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Team Members
+                      </h2>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Manage who has access to your ads manager
+                      </p>
+                    </div>
                     <button
-                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 text-left"
                       type="button"
-                      onClick={() =>
-                        download(
-                          `cbnads-ads-${Date.now()}.csv`,
-                          exportAdsCsv(),
-                          "text/csv;charset=utf-8",
-                        )
-                      }
+                      onClick={() => {
+                        setSettingsTeamError("");
+                        setSettingsTeamModalOpen(true);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
                     >
-                      Export ads report (.csv)
+                      <Plus size={16} />
+                      Add Member
                     </button>
                   </div>
+                  {settingsTeamError && (
+                    <div className="mx-6 mt-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
+                      {settingsTeamError}
+                    </div>
+                  )}
+                  <div className="divide-y divide-gray-200">
+                    {teamMembers.length === 0 ? (
+                      <div className="p-6 text-center text-gray-500">
+                        <p>No team members yet. Add your first member to get started.</p>
+                      </div>
+                    ) : (
+                      teamMembers.map((member) => (
+                        <div
+                          key={member.id}
+                          className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                              {member.image ? (
+                                <img
+                                  src={member.image}
+                                  alt={member.name}
+                                  className="w-full h-full rounded-full object-cover"
+                                />
+                              ) : (
+                                <User size={20} className="text-gray-500" />
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">
+                                {member.name || "No name"}
+                              </p>
+                              <p className="text-sm text-gray-500">{member.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
+                              {member.role === "admin" && (
+                                <Crown size={14} className="text-yellow-600" />
+                              )}
+                              <span className="text-xs font-medium text-gray-700 capitalize">
+                                {member.role || "member"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleSettingsRemoveMember(member)}
+                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
+              )}
+              {settingsTeamModalOpen && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-2xl max-w-md w-full p-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                      Add Team Member
+                    </h2>
+                    <form onSubmit={handleSettingsAddMember} className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Full Name
+                        </label>
+                        <input
+                          type="text"
+                          value={settingsTeamName}
+                          onChange={(event) => setSettingsTeamName(event.target.value)}
+                          placeholder="John Doe"
+                          className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          value={settingsTeamEmail}
+                          onChange={(event) => setSettingsTeamEmail(event.target.value)}
+                          placeholder="member@example.com"
+                          className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Password
+                        </label>
+                        <input
+                          type="password"
+                          value={settingsTeamPassword}
+                          onChange={(event) => setSettingsTeamPassword(event.target.value)}
+                          placeholder="Create a secure password"
+                          className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                          minLength={6}
+                          required
+                        />
+                        <p className="text-xs text-gray-500 mt-2">
+                          This will create a new admin account with these credentials.
+                        </p>
+                      </div>
+                      {settingsTeamError && (
+                        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
+                          {settingsTeamError}
+                        </div>
+                      )}
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsTeamModalOpen(false);
+                            setSettingsTeamName("");
+                            setSettingsTeamEmail("");
+                            setSettingsTeamPassword("");
+                            setSettingsTeamError("");
+                          }}
+                          className="flex-1 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={settingsTeamSaving}
+                          className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium disabled:opacity-50"
+                        >
+                          {settingsTeamSaving ? "Adding..." : "Add Member"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+              {settingsActiveTab === "general" && (
+                <div className="bg-white rounded-lg border border-gray-200">
+                  <div className="p-6 border-b border-gray-200">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Bell size={20} className="text-gray-700" />
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Ad Reminder Notifications
+                      </h2>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Two reminders go out per ad: one to you (the admin) based on
+                      the timing below, and one to the advertiser based on the
+                      reminder time set on each ad.
+                    </p>
+                  </div>
 
-                <div className="rounded-lg border border-gray-200 bg-white p-6">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
-                    Dangerous Actions
-                  </h2>
-                  <button
-                    className="w-full rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-700 hover:bg-red-50 text-left"
-                    type="button"
-                    onClick={() => {
-                      if (!window.confirm("Reset all local data?")) {
-                        return;
-                      }
-                      run(() => {
-                        resetDb();
-                        window.location.href = "/account/signin";
-                      }, "Data reset.");
-                    }}
-                  >
-                    Reset all local data
-                  </button>
+                  <div className="p-6 space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-900 mb-1">
+                        Admin reminder timing
+                      </label>
+                      <p className="text-xs text-gray-500 mb-3">
+                        This controls when <strong>you</strong> get notified. The
+                        advertiser gets their own reminder based on the time set in
+                        the ad.
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="number"
+                          min="1"
+                          value={settingsNotification.reminder_time_value}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              reminder_time_value: Number(event.target.value) || 1,
+                            }))
+                          }
+                          className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <select
+                          value={settingsNotification.reminder_time_unit}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              reminder_time_unit: event.target.value,
+                            }))
+                          }
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="minutes">minutes</option>
+                          <option value="hours">hours</option>
+                          <option value="days">days</option>
+                        </select>
+                        <span className="text-sm text-gray-600">before an ad is due</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                      <div className="flex items-start gap-3 mb-4">
+                        <input
+                          type="checkbox"
+                          id="settings-email-enabled"
+                          checked={settingsNotification.email_enabled}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              email_enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Mail size={16} className="text-gray-700" />
+                            <label
+                              htmlFor="settings-email-enabled"
+                              className="text-sm font-medium text-gray-900 cursor-pointer"
+                            >
+                              Email notifications
+                            </label>
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            Receive email reminders for upcoming ads
+                          </p>
+                        </div>
+                      </div>
+                      {settingsNotification.email_enabled && (
+                        <div className="ml-7">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Email address
+                          </label>
+                          <input
+                            type="email"
+                            placeholder="admin@example.com"
+                            value={settingsNotification.email_address}
+                            onChange={(event) =>
+                              setSettingsNotification((current) => ({
+                                ...current,
+                                email_address: event.target.value,
+                              }))
+                            }
+                            className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                      <div className="flex items-start gap-3 mb-4">
+                        <input
+                          type="checkbox"
+                          id="settings-sms-enabled"
+                          checked={settingsNotification.sms_enabled}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              sms_enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <MessageSquare size={16} className="text-gray-700" />
+                            <label
+                              htmlFor="settings-sms-enabled"
+                              className="text-sm font-medium text-gray-900 cursor-pointer"
+                            >
+                              SMS notifications
+                            </label>
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            Receive text message reminders for upcoming ads
+                          </p>
+                        </div>
+                      </div>
+                      {settingsNotification.sms_enabled && (
+                        <div className="ml-7">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Phone number
+                          </label>
+                          <input
+                            type="tel"
+                            placeholder="+1 (555) 123-4567"
+                            value={settingsNotification.phone_number}
+                            onChange={(event) =>
+                              setSettingsNotification((current) => ({
+                                ...current,
+                                phone_number: event.target.value,
+                              }))
+                            }
+                            className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id="settings-sound-enabled"
+                          checked={settingsNotification.sound_enabled}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              sound_enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Volume2 size={16} className="text-gray-700" />
+                            <label
+                              htmlFor="settings-sound-enabled"
+                              className="text-sm font-medium text-gray-900 cursor-pointer"
+                            >
+                              Sound notifications
+                            </label>
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            Play a sound when new ad submissions arrive (while app is
+                            open)
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 border-t border-gray-200 bg-gray-50">
+                    {settingsNotificationMessage && (
+                      <div
+                        className={`mb-4 p-3 rounded-lg text-sm ${
+                          settingsNotificationMessage.type === "success"
+                            ? "bg-green-50 text-green-800 border border-green-200"
+                            : settingsNotificationMessage.type === "info"
+                              ? "bg-blue-50 text-blue-800 border border-blue-200"
+                              : "bg-red-50 text-red-800 border border-red-200"
+                        }`}
+                      >
+                        {settingsNotificationMessage.text}
+                      </div>
+                    )}
+
+                    {settingsReminderResults && (
+                      <div className="mb-4 p-4 bg-gray-100 rounded-lg border border-gray-300">
+                        <h3 className="text-sm font-semibold text-gray-900 mb-2">
+                          Reminder Check Results
+                        </h3>
+                        <div className="text-xs space-y-1 text-gray-700">
+                          <p>
+                            <strong>Total results:</strong>{" "}
+                            {settingsReminderResults.totalResults}
+                          </p>
+                          {settingsReminderResults.results &&
+                            settingsReminderResults.results.length > 0 && (
+                              <div className="mt-2">
+                                <p className="font-semibold">Details:</p>
+                                <ul className="list-disc list-inside mt-1 space-y-1">
+                                  {settingsReminderResults.results.map((result, idx) => (
+                                    <li key={`${result.to}-${result.ad_name}-${idx}`}>
+                                      {result.type} to {result.to}: {result.status} -{" "}
+                                      {result.ad_name}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={handleSettingsSaveNotifications}
+                        disabled={settingsNotificationSaving}
+                        className="px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {settingsNotificationSaving ? "Saving..." : "Save preferences"}
+                      </button>
+                      {settingsNotification.email_enabled && (
+                        <button
+                          type="button"
+                          onClick={handleSettingsSendTestEmail}
+                          disabled={
+                            settingsNotificationTesting ||
+                            !settingsNotification.email_address
+                          }
+                          className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {settingsNotificationTesting ? "Sending..." : "Send test email"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleSettingsCheckReminders}
+                        disabled={settingsNotificationChecking}
+                        className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {settingsNotificationChecking
+                          ? "Checking..."
+                          : "Check for reminders now"}
+                      </button>
+                    </div>
+                    <p className="mt-3 text-xs text-gray-500">
+                      <strong>Tip:</strong> Open your browser console (F12) to see
+                      detailed logs when checking reminders.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
+              {settingsActiveTab === "scheduling" && (
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <div className="mb-6">
+                    <h2 className="text-lg font-semibold text-gray-900 mb-1">
+                      Ad Scheduling
+                    </h2>
+                    <p className="text-sm text-gray-500">
+                      Configure scheduling limits for ad submissions
+                    </p>
+                  </div>
+
+                  {settingsSchedulingError && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+                      {settingsSchedulingError}
+                    </div>
+                  )}
+                  {settingsSchedulingSuccess && (
+                    <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
+                      Settings saved successfully!
+                    </div>
+                  )}
+
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Maximum Ads Per Day
+                      </label>
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="number"
+                          min="1"
+                          value={settingsMaxAdsPerDay}
+                          onChange={(event) => setSettingsMaxAdsPerDay(event.target.value)}
+                          className="w-32 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                        <p className="text-sm text-gray-500">
+                          Maximum number of ads that can be scheduled for a single
+                          day
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-gray-200">
+                      <button
+                        type="button"
+                        onClick={handleSettingsSaveScheduling}
+                        disabled={settingsSchedulingSaving}
+                        className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {settingsSchedulingSaving ? "Saving..." : "Save Changes"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {settingsActiveTab === "billing" && (
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  <p className="text-gray-600">Billing settings coming soon...</p>
+                </div>
+              )}
+              {settingsActiveTab === "system" && (
+                <div className="space-y-6">
+                  <div className="bg-white rounded-lg border border-gray-200 p-6">
+                    <div className="mb-4">
+                      <h3 className="text-lg font-medium text-gray-900 mb-1">
+                        Sync Advertiser Spending
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        Recalculate total_spend for all advertisers based on their
+                        "Paid" invoices. This is useful if you notice any discrepancies
+                        in spending totals.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSettingsSyncAdvertiserSpending}
+                      disabled={settingsSyncing}
+                      className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm font-medium"
+                    >
+                      {settingsSyncing ? "Syncing..." : "Run Sync Now"}
+                    </button>
+
+                    {settingsSyncResult && (
+                      <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <p className="text-sm font-medium text-green-900 mb-2">
+                          {settingsSyncResult.message}
+                        </p>
+                        {settingsSyncResult.results &&
+                          settingsSyncResult.results.length > 0 && (
+                            <div className="mt-2 max-h-[200px] overflow-y-auto">
+                              <table className="w-full text-xs">
+                                <thead className="bg-green-100">
+                                  <tr>
+                                    <th className="text-left px-2 py-1 text-green-900">
+                                      Advertiser
+                                    </th>
+                                    <th className="text-right px-2 py-1 text-green-900">
+                                      New Total Spend
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {settingsSyncResult.results.map((result) => (
+                                    <tr
+                                      key={result.id}
+                                      className="border-t border-green-200"
+                                    >
+                                      <td className="px-2 py-1 text-green-800">
+                                        {result.name}
+                                      </td>
+                                      <td className="px-2 py-1 text-right text-green-800">
+                                        ${Number(result.newTotal || 0).toFixed(2)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                      </div>
+                    )}
+
+                    {settingsSyncError && (
+                      <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-sm text-red-800">{settingsSyncError}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </main>
