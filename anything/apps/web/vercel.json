@@ -3,7 +3,7 @@
     "outputDirectory": "build/client",
     "functions": {
         "api/index.mjs": {
-            "includeFiles": ["build/server/**", "package.json"],
+            "includeFiles": "{build/server/**,package.json}",
             "maxDuration": 30
         }
     },
