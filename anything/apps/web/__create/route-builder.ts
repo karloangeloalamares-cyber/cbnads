@@ -1,13 +1,8 @@
 import { Hono } from 'hono';
 import type { Handler } from 'hono/types';
-import updatedFetch from '../src/__create/fetch';
 
 const API_BASENAME = '/api';
 const api = new Hono();
-
-if (globalThis.fetch) {
-  globalThis.fetch = updatedFetch;
-}
 
 // Helper function to transform file path to Hono route path
 function getHonoPath(routeFile: string): string {

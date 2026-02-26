@@ -1,6 +1,6 @@
 import sql from "../../utils/sql";
 import { auth } from "../../../../auth";
-import { hash } from "argon2";
+import { hash } from "@node-rs/argon2";
 
 // Get all admin members
 export async function GET() {

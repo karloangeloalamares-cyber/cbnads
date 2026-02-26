@@ -4,21 +4,26 @@ import { skipCSRFCheck } from '@auth/core';
 import Credentials from '@auth/core/providers/credentials';
 import { authHandler, initAuthConfig } from '@hono/auth-js';
 import { Pool, neonConfig } from '@neondatabase/serverless';
-import { hash, verify } from 'argon2';
+import { hash, verify } from '@node-rs/argon2';
 import { Hono } from 'hono';
 import { contextStorage, getContext } from 'hono/context-storage';
 import { cors } from 'hono/cors';
 import { proxy } from 'hono/proxy';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
-import { createHonoServer } from 'react-router-hono-server/node';
+import { createRequestHandler } from 'react-router';
 import { serializeError } from 'serialize-error';
-import ws from 'ws';
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
-neonConfig.webSocketConstructor = ws;
+
+// ws is only needed for Neon WebSocket in Node.js environments.
+// On Vercel, Neon uses fetch natively.
+if (!process.env.VERCEL) {
+  const ws = (await import('ws')).default;
+  neonConfig.webSocketConstructor = ws;
+}
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
 
@@ -256,7 +261,24 @@ app.use('/api/auth/*', async (c, next) => {
 });
 app.route(API_BASENAME, api);
 
-export default await createHonoServer({
-  app,
-  defaultLogger: false,
-});
+let server;
+
+if (process.env.VERCEL) {
+  // On Vercel: attach React Router handler directly and export the Hono app.
+  // The api/index.js Vercel function wraps this with hono/vercel's handle().
+  const build = await import('virtual:react-router/server-build');
+  app.use('*', async (c) => {
+    const handler = createRequestHandler(build, 'production');
+    return handler(c.req.raw);
+  });
+  server = app;
+} else {
+  // Local dev / Node.js: use react-router-hono-server to start HTTP server
+  const { createHonoServer } = await import('react-router-hono-server/node');
+  server = await createHonoServer({
+    app,
+    defaultLogger: false,
+  });
+}
+
+export default server;
