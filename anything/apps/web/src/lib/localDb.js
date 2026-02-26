@@ -1,5 +1,9 @@
-const DB_KEY = 'cbnads.local.db.v1';
-const SESSION_KEY = 'cbnads.local.session.v1';
+import { withNamespace } from '@/lib/appNamespace';
+
+const DB_KEY = withNamespace('local.db.v1');
+const SESSION_KEY = withNamespace('local.session.v1');
+const LEGACY_DB_KEY = 'cbnads.local.db.v1';
+const LEGACY_SESSION_KEY = 'cbnads.local.session.v1';
 const DB_VERSION = 1;
 
 const nowIso = () => new Date().toISOString();
@@ -17,6 +21,19 @@ const storage = () => {
     return null;
   }
   return window.localStorage;
+};
+
+const readStorageKey = (s, primaryKey, legacyKey) => s.getItem(primaryKey) ?? s.getItem(legacyKey);
+
+const migrateLegacyKey = (s, primaryKey, legacyKey) => {
+  if (!s || s.getItem(primaryKey)) {
+    return;
+  }
+
+  const legacyValue = s.getItem(legacyKey);
+  if (legacyValue) {
+    s.setItem(primaryKey, legacyValue);
+  }
 };
 
 const baseDb = () => {
@@ -84,7 +101,7 @@ const readRawDb = () => {
     return normalizeDb(baseDb());
   }
 
-  const raw = s.getItem(DB_KEY);
+  const raw = readStorageKey(s, DB_KEY, LEGACY_DB_KEY);
   if (!raw) {
     return normalizeDb(baseDb());
   }
@@ -154,6 +171,9 @@ export const ensureDb = () => {
     return clone(current);
   }
 
+  migrateLegacyKey(s, DB_KEY, LEGACY_DB_KEY);
+  migrateLegacyKey(s, SESSION_KEY, LEGACY_SESSION_KEY);
+
   if (!s.getItem(DB_KEY)) {
     writeRawDb(current);
   }
@@ -177,7 +197,12 @@ export const subscribeDb = (listener) => {
   }
 
   const onStorage = (event) => {
-    if (event.key === DB_KEY || event.key === SESSION_KEY) {
+    if (
+      event.key === DB_KEY ||
+      event.key === SESSION_KEY ||
+      event.key === LEGACY_DB_KEY ||
+      event.key === LEGACY_SESSION_KEY
+    ) {
       listener();
     }
   };
@@ -196,7 +221,8 @@ export const getSessionUserId = () => {
   if (!s) {
     return null;
   }
-  return s.getItem(SESSION_KEY);
+  migrateLegacyKey(s, SESSION_KEY, LEGACY_SESSION_KEY);
+  return readStorageKey(s, SESSION_KEY, LEGACY_SESSION_KEY);
 };
 
 export const setSessionUserId = (userId) => {
@@ -204,10 +230,12 @@ export const setSessionUserId = (userId) => {
   if (!s) {
     return;
   }
+  migrateLegacyKey(s, SESSION_KEY, LEGACY_SESSION_KEY);
   if (userId) {
     s.setItem(SESSION_KEY, userId);
   } else {
     s.removeItem(SESSION_KEY);
+    s.removeItem(LEGACY_SESSION_KEY);
   }
   window.dispatchEvent(new CustomEvent('cbn:db-changed'));
 };
