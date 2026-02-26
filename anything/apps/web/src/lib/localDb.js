@@ -142,9 +142,11 @@ const refreshDerivedFields = (db) => {
 
   db.advertisers = db.advertisers.map((advertiser) => {
     const nextDate = nextDateByAdvertiser.get(advertiser.id);
+    const spend = Number(spendByAdvertiser.get(advertiser.id) ?? 0).toFixed(2);
     return {
       ...advertiser,
-      ad_spend: Number(spendByAdvertiser.get(advertiser.id) ?? 0).toFixed(2),
+      ad_spend: spend,
+      total_spend: spend,
       next_ad_date: nextDate ? nextDate.toISOString().slice(0, 10) : '',
     };
   });
@@ -246,13 +248,18 @@ export const upsertAdvertiser = (input) => {
   let saved = null;
   updateDb((db) => {
     const now = nowIso();
+    const phone = (input.phone_number || input.phone || '').trim();
     const payload = {
       id: input.id || createId('adv'),
       advertiser_name: (input.advertiser_name || '').trim(),
+      contact_name: (input.contact_name || '').trim(),
       email: (input.email || '').trim(),
-      phone: (input.phone || '').trim(),
+      phone,
+      phone_number: phone,
       business_name: (input.business_name || '').trim(),
+      status: input.status || 'active',
       ad_spend: '0.00',
+      total_spend: '0.00',
       next_ad_date: '',
       created_at: input.created_at || now,
       updated_at: now,
@@ -290,6 +297,7 @@ export const upsertProduct = (input) => {
     const payload = {
       id: input.id || createId('prd'),
       product_name: (input.product_name || '').trim(),
+      placement: (input.placement || '').trim(),
       price: numberOrZero(input.price).toFixed(2),
       description: (input.description || '').trim(),
       created_at: input.created_at || now,

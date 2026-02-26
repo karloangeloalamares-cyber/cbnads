@@ -5,12 +5,20 @@ import {
   Bell,
   LogOut,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  ChevronsUpDown,
   Settings,
   ArrowLeft,
   Plus,
   Search,
   Download,
+  Filter,
+  Clock,
   Clock3,
+  CheckCircle,
+  Info,
   AlertCircle,
   TrendingUp,
   Users,
@@ -18,6 +26,14 @@ import {
   FileText,
   Calendar,
   RefreshCw,
+  Eye,
+  Play,
+  Receipt,
+  Pencil,
+  MoreVertical,
+  Edit2,
+  Trash2,
+  X,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { getSignedInUser } from "@/lib/localAuth";
@@ -36,7 +52,6 @@ import {
   rejectPendingAd,
   resetDb,
   subscribeDb,
-  updateAdPayment,
   updateAdStatus,
   upsertAd,
   upsertAdvertiser,
@@ -73,14 +88,18 @@ const blankAd = {
 const blankAdvertiser = {
   id: "",
   advertiser_name: "",
+  contact_name: "",
   email: "",
   phone: "",
+  phone_number: "",
   business_name: "",
+  status: "active",
 };
 
 const blankProduct = {
   id: "",
   product_name: "",
+  placement: "WhatsApp",
   price: "",
   description: "",
 };
@@ -91,7 +110,7 @@ const blankInvoice = {
   advertiser_id: "",
   amount: "",
   due_date: "",
-  status: "Unpaid",
+  status: "Pending",
   ad_ids: [],
 };
 
@@ -121,6 +140,54 @@ const formatDate = (value) => {
   });
 };
 
+const formatProductsDate = (value) => {
+  if (!value) {
+    return "";
+  }
+
+  const dateText = String(value).slice(0, 10);
+  const parsed = new Date(`${dateText}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "";
+  }
+
+  return parsed.toLocaleDateString("en-US");
+};
+
+const normalizeInvoiceStatus = (value) => {
+  const status = String(value || "").trim();
+  if (!status || status === "Unpaid") {
+    return "Pending";
+  }
+  return status;
+};
+
+const getInvoiceStatusColor = (status) => {
+  switch (normalizeInvoiceStatus(status)) {
+    case "Paid":
+      return "text-emerald-700 bg-emerald-50 border-emerald-100";
+    case "Overdue":
+      return "text-rose-700 bg-rose-50 border-rose-100";
+    case "Pending":
+      return "text-amber-700 bg-amber-50 border-amber-100";
+    default:
+      return "text-gray-700 bg-gray-50 border-gray-100";
+  }
+};
+
+const formatInvoiceListDate = (value) => {
+  if (!value) {
+    return "N/A";
+  }
+
+  const datePart = String(value).split("T")[0];
+  const [year, month, day] = datePart.split("-");
+  if (!year || !month || !day) {
+    return "N/A";
+  }
+  return `${month}/${day}/${year}`;
+};
+
 const formatTime = (value) => {
   if (!value) {
     return "-";
@@ -136,6 +203,646 @@ const formatTime = (value) => {
   const displayHour = hour % 12 === 0 ? 12 : hour % 12;
   return `${displayHour}:${minuteText} ${period}`;
 };
+
+const adsSelectStyle = {
+  backgroundImage:
+    'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 10 10\'%3E%3Cpath fill=\'%23666\' d=\'M5 7L1 3h8z\'/%3E%3C/svg%3E")',
+  backgroundRepeat: "no-repeat",
+  backgroundPosition: "right 14px center",
+  paddingRight: "40px",
+};
+
+const normalizeAdsPayment = (value) => {
+  const payment = String(value || "").trim();
+  if (!payment) {
+    return "Pending";
+  }
+  return payment === "Unpaid" ? "Pending" : payment;
+};
+
+const getAdsStatusColor = (status) => {
+  switch (String(status || "")) {
+    case "Published":
+      return "text-emerald-700 bg-emerald-50 border-emerald-100";
+    case "Draft":
+      return "text-gray-700 bg-gray-50 border-gray-100";
+    case "Scheduled":
+      return "text-blue-700 bg-blue-50 border-blue-100";
+    default:
+      return "text-gray-700 bg-gray-50 border-gray-100";
+  }
+};
+
+const getAdsPaymentColor = (payment) => {
+  switch (String(payment || "")) {
+    case "Paid":
+      return "text-emerald-700 bg-emerald-50 border-emerald-100";
+    case "Pending":
+      return "text-amber-700 bg-amber-50 border-amber-100";
+    case "Refunded":
+      return "text-purple-700 bg-purple-50 border-purple-100";
+    default:
+      return "text-gray-700 bg-gray-50 border-gray-100";
+  }
+};
+
+const formatAdsDate = (value) => {
+  if (!value) {
+    return "N/A";
+  }
+
+  const datePart = String(value).split("T")[0];
+  const [year, month, day] = datePart.split("-");
+  if (!year || !month || !day) {
+    return "N/A";
+  }
+  return `${month}/${day}/${year}`;
+};
+
+const formatAdsTime = (value) => {
+  if (!value) {
+    return "N/A";
+  }
+
+  const [hours, minutes] = String(value).split(":");
+  const hour = Number(hours);
+  if (Number.isNaN(hour) || minutes == null) {
+    return "N/A";
+  }
+  const ampm = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minutes} ${ampm}`;
+};
+
+const truncateAdsWords = (text, maxWords = 3) => {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return words.join(" ") || "-";
+  }
+  return `${words.slice(0, maxWords).join(" ")}...`;
+};
+
+const parseAdMedia = (value) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+function AdsSortableHeader({ label, sortKey, sortConfig, onSort }) {
+  const isActive = sortConfig.key === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className="text-left px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100 transition-colors"
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        {isActive ? (
+          sortConfig.direction === "asc" ? (
+            <ChevronUp size={12} className="text-gray-700" />
+          ) : (
+            <ChevronDown size={12} className="text-gray-700" />
+          )
+        ) : (
+          <ChevronsUpDown size={12} className="text-gray-400" />
+        )}
+      </div>
+    </th>
+  );
+}
+
+function AdsScheduleCell({ ad }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const customDates = useMemo(
+    () =>
+      toStringArray(ad.custom_dates)
+        .map((item) => String(item).slice(0, 10))
+        .filter(Boolean)
+        .sort((a, b) => String(a).localeCompare(String(b))),
+    [ad.custom_dates],
+  );
+
+  const publishedDates = useMemo(
+    () =>
+      new Set(
+        toStringArray(ad.published_dates)
+          .map((item) => String(item).slice(0, 10))
+          .filter(Boolean),
+      ),
+    [ad.published_dates],
+  );
+
+  const today = useMemo(() => {
+    const next = new Date();
+    next.setHours(0, 0, 0, 0);
+    return next;
+  }, []);
+
+  const nextCustomDate = useMemo(() => {
+    if (customDates.length === 0) {
+      return null;
+    }
+    const todayKey = toDateKey(today);
+    const upcoming = customDates.filter((dateText) => dateText >= todayKey);
+    return upcoming[0] || null;
+  }, [customDates, today]);
+
+  const completionStatus = useMemo(
+    () => ({
+      completed: customDates.filter((dateText) => publishedDates.has(dateText)).length,
+      total: customDates.length,
+    }),
+    [customDates, publishedDates],
+  );
+
+  const categorizedDates = useMemo(() => {
+    if (customDates.length === 0) {
+      return [];
+    }
+    return customDates.map((dateText) => {
+      const parsedDate = parseCalendarDate(dateText);
+      const isPast = parsedDate ? parsedDate < today : false;
+      const isPublished = publishedDates.has(dateText);
+      const isNext = dateText === nextCustomDate;
+      return {
+        date: dateText,
+        isPublished,
+        isPast,
+        isNext,
+      };
+    });
+  }, [customDates, nextCustomDate, publishedDates, today]);
+
+  if (customDates.length === 0) {
+    return <span className="text-xs text-gray-700 font-medium">{formatAdsDate(ad.schedule)}</span>;
+  }
+
+  if (!nextCustomDate) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-green-600 font-medium">All completed</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex items-center gap-1.5">
+      <span className="text-xs text-gray-700 font-medium">{formatAdsDate(nextCustomDate)}</span>
+      <div
+        className="relative"
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        <Info size={14} className="text-gray-400 cursor-help" />
+        {showTooltip ? (
+          <div className="absolute left-0 top-6 z-50 w-64 bg-white border border-gray-200 rounded-lg shadow-xl p-3">
+            <div className="text-xs font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-100">
+              Custom Schedule ({completionStatus.total} dates)
+              <span className="ml-2 text-gray-500 font-normal">
+                {completionStatus.completed}/{completionStatus.total} completed
+              </span>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {categorizedDates.map((item) => {
+                const statusLabel = item.isPublished
+                  ? "Published"
+                  : item.isNext
+                    ? "Next"
+                    : item.isPast
+                      ? "Missed"
+                      : "Upcoming";
+                const statusClass = item.isPublished
+                  ? "text-green-600"
+                  : item.isNext
+                    ? "text-blue-600"
+                    : item.isPast
+                      ? "text-gray-400"
+                      : "text-gray-500";
+                const dateClass = item.isPublished
+                  ? "text-gray-400 line-through"
+                  : item.isNext
+                    ? "text-blue-700 font-semibold"
+                    : item.isPast
+                      ? "text-gray-400"
+                      : "text-gray-600";
+                return (
+                  <div
+                    key={item.date}
+                    className={`flex items-center gap-2 text-xs py-1 px-2 rounded ${
+                      item.isNext ? "bg-blue-50" : ""
+                    }`}
+                  >
+                    <span className={`text-[10px] ${statusClass}`}>{statusLabel}</span>
+                    <span className={`flex-1 ${dateClass}`}>{formatAdsDate(item.date)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AdsTableRow({ ad, onPreview, onEdit, onMarkPublished, onDelete }) {
+  const [activeMenu, setActiveMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({
+    vertical: "bottom",
+    horizontal: "right",
+  });
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setActiveMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleMenuClick = (event) => {
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceRight = window.innerWidth - rect.right;
+    const menuHeight = 350;
+    const menuWidth = 200;
+    setMenuPosition({
+      vertical: spaceBelow < menuHeight ? "top" : "bottom",
+      horizontal: spaceRight < menuWidth ? "left" : "right",
+    });
+    setActiveMenu((current) => !current);
+  };
+
+  return (
+    <tr className="hover:bg-gray-50 transition-colors group">
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <div className="text-xs font-semibold text-gray-900" title={ad.ad_name || ""}>
+          {truncateAdsWords(ad.ad_name)}
+        </div>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span className="text-xs text-gray-700 font-medium">{ad.advertiser || "N/A"}</span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span
+          className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getAdsStatusColor(
+            ad.status,
+          )}`}
+        >
+          {ad.status || "Draft"}
+        </span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span className="text-xs text-gray-700 font-medium">{ad.post_type || "-"}</span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span className="text-xs text-gray-700 font-medium">{ad.placement || "-"}</span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <AdsScheduleCell ad={ad} />
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span className="text-xs text-gray-700 font-medium">{formatAdsTime(ad.post_time)}</span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span
+          className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getAdsPaymentColor(
+            ad.payment,
+          )}`}
+        >
+          {ad.payment || "Pending"}
+        </span>
+      </td>
+      <td className="px-6 py-4 text-right relative" onClick={(event) => event.stopPropagation()}>
+        <button
+          onClick={handleMenuClick}
+          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          type="button"
+        >
+          <MoreVertical size={18} className="text-gray-500" />
+        </button>
+        {activeMenu ? (
+          <div
+            ref={menuRef}
+            className={`absolute ${
+              menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"
+            } ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+          >
+            <button
+              onClick={() => {
+                setActiveMenu(false);
+                onPreview(ad);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+              type="button"
+            >
+              <Eye size={16} className="text-gray-400" />
+              Preview
+            </button>
+            <button
+              onClick={() => {
+                setActiveMenu(false);
+                onEdit(ad);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+              type="button"
+            >
+              <Pencil size={16} className="text-gray-400" />
+              Edit
+            </button>
+            {ad.status !== "Published" ? (
+              <button
+                onClick={() => {
+                  setActiveMenu(false);
+                  onMarkPublished(ad.id);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                type="button"
+              >
+                <CheckCircle size={16} className="text-gray-400" />
+                Mark as Published
+              </button>
+            ) : null}
+            <div className="border-t border-gray-100 my-1" />
+            <button
+              onClick={() => {
+                setActiveMenu(false);
+                onDelete(ad.id);
+              }}
+              className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+              type="button"
+            >
+              <Trash2 size={16} className="text-red-500" />
+              Delete
+            </button>
+          </div>
+        ) : null}
+      </td>
+    </tr>
+  );
+}
+
+function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices }) {
+  if (!ad) {
+    return null;
+  }
+
+  const customDates = toStringArray(ad.custom_dates)
+    .map((item) => String(item).slice(0, 10))
+    .filter(Boolean)
+    .sort((a, b) => String(a).localeCompare(String(b)));
+  const publishedDates = new Set(
+    toStringArray(ad.published_dates)
+      .map((item) => String(item).slice(0, 10))
+      .filter(Boolean),
+  );
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const media = parseAdMedia(ad.media);
+
+  return (
+    <>
+      <div onClick={onClose} className="fixed inset-0 bg-black/50 z-40 transition-opacity" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">{ad.ad_name || "Untitled Ad"}</h2>
+              <p className="text-sm text-gray-500 mt-1">{ad.advertiser || "Unknown advertiser"}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit(ad);
+                }}
+                className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+                type="button"
+              >
+                <Pencil size={16} />
+                Edit
+              </button>
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                type="button"
+              >
+                <X size={20} className="text-gray-600" />
+              </button>
+            </div>
+          </div>
+          <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
+            <div className="grid grid-cols-2 gap-6 mb-6">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Status
+                </label>
+                <span
+                  className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getAdsStatusColor(
+                    ad.status,
+                  )}`}
+                >
+                  {ad.status || "Draft"}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Payment
+                </label>
+                <span
+                  className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getAdsPaymentColor(
+                    ad.payment,
+                  )}`}
+                >
+                  {ad.payment || "Pending"}
+                </span>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Post Type
+                </label>
+                <p className="text-sm text-gray-900 font-medium">{ad.post_type || "-"}</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Placement
+                </label>
+                <p className="text-sm text-gray-900 font-medium">{ad.placement || "-"}</p>
+              </div>
+              <div className={customDates.length > 0 ? "col-span-2" : ""}>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Schedule
+                </label>
+                {customDates.length > 0 ? (
+                  <div className="mt-2">
+                    <div className="text-sm text-gray-700 font-medium mb-2">
+                      Custom Schedule ({customDates.length} dates)
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-1.5 max-h-40 overflow-y-auto">
+                      {customDates.map((dateText) => {
+                        const parsedDate = parseCalendarDate(dateText);
+                        const isPast = parsedDate ? parsedDate < today : false;
+                        const isPublished = publishedDates.has(dateText);
+                        const statusLabel = isPublished ? "Published" : isPast ? "Missed" : "Upcoming";
+                        const statusClass = isPublished
+                          ? "text-green-600"
+                          : isPast
+                            ? "text-gray-400"
+                            : "text-blue-600";
+                        return (
+                          <div
+                            key={dateText}
+                            className="flex items-center gap-2 text-xs py-1.5 px-2 bg-white rounded border border-gray-100"
+                          >
+                            <span className={`text-[10px] font-medium ${statusClass}`}>
+                              {statusLabel}
+                            </span>
+                            <span
+                              className={`flex-1 ${
+                                isPublished ? "line-through text-gray-400" : "text-gray-700"
+                              }`}
+                            >
+                              {formatAdsDate(dateText)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-900 font-medium">{formatAdsDate(ad.schedule)}</p>
+                )}
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                  Post Time
+                </label>
+                <p className="text-sm text-gray-900 font-medium">{formatAdsTime(ad.post_time)}</p>
+              </div>
+            </div>
+
+            {media.length > 0 ? (
+              <div className="mb-6">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 block">
+                  Media
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {media.map((item, index) => (
+                    <div
+                      key={`${item.url || item.name || "media"}-${index}`}
+                      className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50"
+                    >
+                      {item.type === "image" ? (
+                        <img
+                          src={item.url}
+                          alt={item.name || `Media ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                          <Play size={48} className="text-white" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mb-6">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
+                Ad Content
+              </label>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                  {ad.ad_text || ad.notes || "No ad text provided"}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 block flex items-center gap-2">
+                <Receipt size={14} />
+                Invoice History
+              </label>
+              {linkedInvoices.length === 0 ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                  <p className="text-sm text-gray-500">No invoices linked to this ad</p>
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="divide-y divide-gray-200">
+                    {linkedInvoices.map((invoiceItem) => {
+                      const total = Number(invoiceItem.total ?? invoiceItem.amount ?? 0) || 0;
+                      const amountPaid = Number(invoiceItem.amount_paid ?? 0) || 0;
+                      const status = String(invoiceItem.status || "Unpaid");
+                      return (
+                        <div
+                          key={invoiceItem.id}
+                          className="p-4 hover:bg-gray-50 transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="text-sm font-semibold text-gray-900">
+                                  {invoiceItem.invoice_number || "Invoice"}
+                                </span>
+                                <span
+                                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    status === "Paid"
+                                      ? "bg-green-100 text-green-700"
+                                      : status === "Partial"
+                                        ? "bg-yellow-100 text-yellow-700"
+                                        : status === "Overdue"
+                                          ? "bg-red-100 text-red-700"
+                                          : "bg-gray-100 text-gray-700"
+                                  }`}
+                                >
+                                  {status}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs text-gray-500">
+                                <span>Issued: {formatDate(invoiceItem.issue_date)}</span>
+                                {amountPaid > 0 && amountPaid < total ? (
+                                  <span className="text-yellow-600 font-medium">
+                                    Partial: ${amountPaid.toFixed(2)} / ${total.toFixed(2)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-bold text-gray-900">${total.toFixed(2)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 const formatRelativeTime = (value) => {
   if (!value) {
@@ -160,6 +867,53 @@ const formatRelativeTime = (value) => {
   return `${Math.max(diffDays, 0)}d ago`;
 };
 
+const getSubmissionStatusBadgeClass = (status) => {
+  const styles = {
+    pending: "bg-yellow-100 text-yellow-800",
+    approved: "bg-green-100 text-green-800",
+    not_approved: "bg-red-100 text-red-800",
+  };
+  return styles[String(status || "pending").toLowerCase()] || "";
+};
+
+const formatSubmissionStatus = (status) =>
+  String(status || "pending").replace(/_/g, " ").toUpperCase();
+
+const formatSubmissionDate = (value) => {
+  if (!value) {
+    return "-";
+  }
+  const datePart =
+    typeof value === "string" ? value.split("T")[0].split(" ")[0] : String(value);
+  const parsed = new Date(`${datePart}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "-";
+  }
+  return parsed.toLocaleDateString();
+};
+
+const formatAdvertiserDate = (value) => {
+  if (!value) {
+    return "\u2014";
+  }
+  const datePart =
+    typeof value === "string" ? value.split("T")[0].split(" ")[0] : String(value);
+  const parsed = new Date(`${datePart}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "\u2014";
+  }
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+const getAdvertiserStatusClass = (status) =>
+  String(status || "active").toLowerCase() === "active"
+    ? "bg-green-100 text-green-800"
+    : "bg-gray-100 text-gray-600";
+
 const getInvoiceOutstanding = (invoice) => {
   const total = Number(invoice?.total ?? invoice?.amount ?? 0) || 0;
   const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
@@ -183,6 +937,584 @@ function StatCard({ label, value }) {
   );
 }
 
+const toDateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+    date.getDate(),
+  ).padStart(2, "0")}`;
+
+const parseCalendarDate = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    if (Number.isNaN(value.valueOf())) {
+      return null;
+    }
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  const datePart = String(value).split("T")[0];
+  const [yearText, monthText, dayText] = datePart.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const parsed = new Date(year, month - 1, day);
+  if (Number.isNaN(parsed.valueOf())) {
+    return null;
+  }
+  return parsed;
+};
+
+const normalizeCalendarPostType = (value) => {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("daily")) {
+    return "Daily Run";
+  }
+  if (text.includes("custom")) {
+    return "Custom Schedule";
+  }
+  if (text.includes("one")) {
+    return "One-Time Post";
+  }
+  return value || "One-Time Post";
+};
+
+const toStringArray = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item));
+      }
+    } catch {
+      // Fall through to comma-separated parsing.
+    }
+
+    return trimmed
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const getMonthCalendarDays = (year, month) => {
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startingDayOfWeek = firstDay.getDay();
+  const days = [];
+  const prevMonthLastDay = new Date(year, month, 0).getDate();
+
+  for (let i = startingDayOfWeek - 1; i >= 0; i -= 1) {
+    days.push({
+      date: new Date(year, month - 1, prevMonthLastDay - i),
+      isCurrentMonth: false,
+    });
+  }
+
+  for (let i = 1; i <= daysInMonth; i += 1) {
+    days.push({
+      date: new Date(year, month, i),
+      isCurrentMonth: true,
+    });
+  }
+
+  const remainingDays = 42 - days.length;
+  for (let i = 1; i <= remainingDays; i += 1) {
+    days.push({
+      date: new Date(year, month + 1, i),
+      isCurrentMonth: false,
+    });
+  }
+
+  return days;
+};
+
+const getWeekStart = (date) => {
+  const next = new Date(date);
+  const day = next.getDay();
+  const diff = next.getDate() - day;
+  return new Date(next.setDate(diff));
+};
+
+const getAdsForDate = (expandedAds, targetDate) =>
+  expandedAds.filter(
+    (item) =>
+      item.date.getFullYear() === targetDate.getFullYear() &&
+      item.date.getMonth() === targetDate.getMonth() &&
+      item.date.getDate() === targetDate.getDate(),
+  );
+
+const getCalendarStatusColor = (status, isPublished) => {
+  if (isPublished !== undefined) {
+    return isPublished
+      ? "bg-gray-100 text-gray-600 border-gray-200"
+      : "bg-blue-100 text-blue-700 border-blue-200";
+  }
+
+  const colors = {
+    Scheduled: "bg-blue-100 text-blue-700 border-blue-200",
+    Published: "bg-gray-100 text-gray-600 border-gray-200",
+    Paid: "bg-green-100 text-green-700 border-green-200",
+    Unpaid: "bg-yellow-100 text-yellow-700 border-yellow-200",
+  };
+
+  return colors[status] || "bg-gray-100 text-gray-600 border-gray-200";
+};
+
+const getCapacityStatus = (count, maxAdsPerDay) => {
+  const safeMax = Number(maxAdsPerDay) || 1;
+  const percentage = (count / safeMax) * 100;
+  if (percentage >= 100) {
+    return { bg: "bg-red-100", color: "text-red-700" };
+  }
+  if (percentage >= 80) {
+    return { bg: "bg-yellow-100", color: "text-yellow-700" };
+  }
+  return { bg: "bg-green-100", color: "text-green-700" };
+};
+
+function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateClick }) {
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const calendarDays = getMonthCalendarDays(year, month);
+  const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="grid grid-cols-7 border-b border-gray-200">
+        {weekDays.map((day) => (
+          <div
+            key={day}
+            className="py-3 text-center text-xs font-semibold text-gray-700 bg-gray-50"
+          >
+            {day}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7">
+        {calendarDays.map((dayInfo, index) => {
+          const dayAds = getAdsForDate(ads, dayInfo.date);
+          const capacity = getCapacityStatus(dayAds.length, maxAdsPerDay);
+          const today = toDateKey(dayInfo.date) === toDateKey(new Date());
+
+          return (
+            <div
+              key={`${toDateKey(dayInfo.date)}-${index}`}
+              onClick={() => onDateClick(dayInfo.date)}
+              className={`min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors ${
+                !dayInfo.isCurrentMonth ? "bg-gray-50" : "bg-white"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span
+                  className={`text-sm font-medium ${
+                    !dayInfo.isCurrentMonth
+                      ? "text-gray-400"
+                      : today
+                        ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                        : "text-gray-900"
+                  }`}
+                >
+                  {dayInfo.date.getDate()}
+                </span>
+
+                {dayInfo.isCurrentMonth && dayAds.length > 0 ? (
+                  <span
+                    className={`text-xs px-1.5 py-0.5 rounded ${capacity.bg} ${capacity.color}`}
+                  >
+                    {dayAds.length}/{maxAdsPerDay}
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="space-y-1">
+                {dayAds.slice(0, 3).map((item, itemIndex) => (
+                  <div
+                    key={`${item.ad.id || item.ad.ad_name}-${itemIndex}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onAdClick(item.ad);
+                    }}
+                    className={`text-xs p-1.5 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
+                      item.ad.status,
+                    )}`}
+                  >
+                    <div className="font-medium truncate">{item.ad.ad_name}</div>
+                    <div className="text-[10px] truncate opacity-75">{item.ad.advertiser}</div>
+                  </div>
+                ))}
+
+                {dayAds.length > 3 ? (
+                  <div className="text-xs text-gray-500 pl-1.5">+{dayAds.length - 3} more</div>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CalendarWeekView({ currentDate, ads, onAdClick }) {
+  const weekStart = getWeekStart(currentDate);
+  const weekDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(weekStart);
+    date.setDate(weekStart.getDate() + index);
+    return date;
+  });
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div className="grid grid-cols-7">
+        {weekDays.map((date) => {
+          const dayAds = getAdsForDate(ads, date);
+          const today = toDateKey(date) === toDateKey(new Date());
+
+          return (
+            <div
+              key={toDateKey(date)}
+              className={`border-r border-b border-gray-200 p-3 min-h-[400px] ${
+                today ? "bg-blue-50" : "bg-white"
+              }`}
+            >
+              <div className="text-center mb-3">
+                <div className="text-xs font-semibold text-gray-600 uppercase">
+                  {date.toLocaleDateString("en-US", { weekday: "short" })}
+                </div>
+                <div
+                  className={`text-lg font-semibold mt-1 ${
+                    today
+                      ? "bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto"
+                      : "text-gray-900"
+                  }`}
+                >
+                  {date.getDate()}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {dayAds.map((item, index) => (
+                  <div
+                    key={`${item.ad.id || item.ad.ad_name}-${index}`}
+                    onClick={() => onAdClick(item.ad)}
+                    className={`text-xs p-2 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
+                      item.ad.status,
+                    )}`}
+                  >
+                    <div className="font-medium truncate">{item.ad.ad_name}</div>
+                    <div className="text-[10px] truncate opacity-75 mt-0.5">
+                      {item.ad.advertiser}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
+  const dayAds = getAdsForDate(ads, currentDate);
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold text-gray-900">
+          {currentDate.toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          })}
+        </h2>
+        <p className="text-sm text-gray-500 mt-1">
+          {dayAds.length} ad{dayAds.length !== 1 ? "s" : ""} scheduled (
+          {dayAds.length}/{maxAdsPerDay} capacity)
+        </p>
+      </div>
+
+      {dayAds.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No ads scheduled for this day</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {dayAds.map((item, index) => (
+            <div
+              key={`${item.ad.id || item.ad.ad_name}-${index}`}
+              onClick={() => onAdClick(item.ad)}
+              className={`p-4 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${getCalendarStatusColor(
+                item.ad.status,
+              )}`}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-base">{item.ad.ad_name}</h3>
+                  <p className="text-sm opacity-75 mt-1">{item.ad.advertiser}</p>
+                  <div className="flex gap-4 mt-2 text-xs">
+                    <span>
+                      <span className="font-medium">Type:</span> {item.ad.post_type}
+                    </span>
+                    <span>
+                      <span className="font-medium">Placement:</span> {item.ad.placement}
+                    </span>
+                    <span>
+                      <span className="font-medium">Payment:</span> {item.ad.payment}
+                    </span>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-white bg-opacity-50">
+                  {item.ad.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarUpcomingSidebar({ ads, onAdClick, isMinimized, setIsMinimized }) {
+  if (isMinimized) {
+    return (
+      <div className="bg-white border-l border-gray-200 flex items-start justify-center pt-4">
+        <button
+          onClick={() => setIsMinimized(false)}
+          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          title="Show upcoming ads"
+          type="button"
+        >
+          <ChevronLeft size={20} className="text-gray-600" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-80 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold text-gray-900">Upcoming (Next 7 Days)</h3>
+        <button
+          onClick={() => setIsMinimized(true)}
+          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+          title="Minimize sidebar"
+          type="button"
+        >
+          <ChevronRight size={18} className="text-gray-600" />
+        </button>
+      </div>
+
+      {ads.length === 0 ? (
+        <p className="text-sm text-gray-500">No upcoming ads</p>
+      ) : (
+        <div className="space-y-3">
+          {ads.map((item, index) => (
+            <div
+              key={`${item.ad.id || item.ad.ad_name}-${index}`}
+              onClick={() => onAdClick(item.ad)}
+              className={`p-3 rounded-lg border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
+                item.ad.status,
+              )}`}
+            >
+              <div className="text-xs font-medium text-gray-600 mb-1">
+                {item.date.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                })}
+              </div>
+              <div className="font-medium text-sm truncate">{item.ad.ad_name}</div>
+              <div className="text-xs opacity-75 truncate mt-0.5">{item.ad.advertiser}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarFilters({
+  selectedAdvertiser,
+  setSelectedAdvertiser,
+  selectedPlacement,
+  setSelectedPlacement,
+  selectedPostType,
+  setSelectedPostType,
+  selectedStatus,
+  setSelectedStatus,
+  showUnpublishedOnly,
+  setShowUnpublishedOnly,
+  advertisers,
+  placements,
+  postTypes,
+}) {
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+        <select
+          value={selectedAdvertiser}
+          onChange={(event) => setSelectedAdvertiser(event.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        >
+          <option value="">All Advertisers</option>
+          {advertisers.map((advertiser) => (
+            <option key={advertiser} value={advertiser}>
+              {advertiser}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedPlacement}
+          onChange={(event) => setSelectedPlacement(event.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        >
+          <option value="">All Placements</option>
+          {placements.map((placement) => (
+            <option key={placement} value={placement}>
+              {placement}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedPostType}
+          onChange={(event) => setSelectedPostType(event.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        >
+          <option value="">All Post Types</option>
+          {postTypes.map((postType) => (
+            <option key={postType} value={postType}>
+              {postType}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedStatus}
+          onChange={(event) => setSelectedStatus(event.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+        >
+          <option value="">All Statuses</option>
+          <option value="Scheduled">Scheduled</option>
+          <option value="Published">Published</option>
+          <option value="Paid">Paid</option>
+          <option value="Unpaid">Unpaid</option>
+        </select>
+
+        <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
+          <input
+            type="checkbox"
+            checked={showUnpublishedOnly}
+            onChange={(event) => setShowUnpublishedOnly(event.target.checked)}
+            className="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900"
+          />
+          <span className="text-gray-700">Unpublished only</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function CalendarAdPreviewModal({ ad, onClose, onEdit }) {
+  if (!ad) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-xl rounded-lg border border-gray-200 bg-white shadow-lg">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h3 className="text-lg font-semibold text-gray-900">Ad Preview</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+          >
+            Close
+          </button>
+        </div>
+        <div className="space-y-3 px-5 py-4 text-sm">
+          <p>
+            <span className="font-medium text-gray-900">Ad:</span> {ad.ad_name || "-"}
+          </p>
+          <p>
+            <span className="font-medium text-gray-900">Advertiser:</span> {ad.advertiser || "-"}
+          </p>
+          <p>
+            <span className="font-medium text-gray-900">Placement:</span> {ad.placement || "-"}
+          </p>
+          <p>
+            <span className="font-medium text-gray-900">Schedule:</span>{" "}
+            {formatDate(ad.post_date)} {ad.post_time ? `at ${formatTime(ad.post_time)}` : ""}
+          </p>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getCalendarStatusColor(
+                ad.status,
+              )}`}
+            >
+              {ad.status || "Draft"}
+            </span>
+            <span
+              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getCalendarStatusColor(
+                ad.payment || "Unpaid",
+              )}`}
+            >
+              {ad.payment || "Unpaid"}
+            </span>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
+          <button
+            type="button"
+            onClick={onEdit}
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            Edit Ad
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvoiceSortableHeader({ label, sortKey, onSort }) {
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className="text-left px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100 transition-colors"
+    >
+      <div className="flex items-center gap-1">
+        {label}
+        <ChevronsUpDown size={12} className="text-gray-400" />
+      </div>
+    </th>
+  );
+}
+
 export default function AdsPage() {
   const [db, setDb] = useState(() => readDb());
   const [activeSection, setActiveSection] = useState(() => {
@@ -193,23 +1525,91 @@ export default function AdsPage() {
     return sections.includes(value) ? value : "Ads";
   });
   const [view, setView] = useState("list");
-  const [adsSearch, setAdsSearch] = useState("");
-  const [adsStatusFilter, setAdsStatusFilter] = useState("All Ads");
-  const [adsPaymentFilter, setAdsPaymentFilter] = useState("All Payment Status");
+  const [adsFilters, setAdsFilters] = useState({
+    status: "All Ads",
+    placement: "All Placement",
+    postType: "All post types",
+    advertiser: "All Advertisers",
+    payment: "All Payment Status",
+    search: "",
+    dateFrom: "",
+    dateTo: "",
+  });
+  const [adsShowDateRangePicker, setAdsShowDateRangePicker] = useState(false);
+  const [adsShowAdvancedFilters, setAdsShowAdvancedFilters] = useState(false);
+  const [adsSortConfig, setAdsSortConfig] = useState({
+    key: "schedule",
+    direction: "asc",
+  });
+  const [adsPreviewAd, setAdsPreviewAd] = useState(null);
   const [calendarSearch, setCalendarSearch] = useState("");
-  const [submissionSearch, setSubmissionSearch] = useState("");
+  const [calendarMode, setCalendarMode] = useState("month");
+  const [calendarCurrentDate, setCalendarCurrentDate] = useState(() => new Date());
+  const [calendarShowFilters, setCalendarShowFilters] = useState(false);
+  const [calendarSelectedAdvertiser, setCalendarSelectedAdvertiser] = useState("");
+  const [calendarSelectedPlacement, setCalendarSelectedPlacement] = useState("");
+  const [calendarSelectedPostType, setCalendarSelectedPostType] = useState("");
+  const [calendarSelectedStatus, setCalendarSelectedStatus] = useState("");
+  const [calendarUnpublishedOnly, setCalendarUnpublishedOnly] = useState(false);
+  const [calendarPreviewOpen, setCalendarPreviewOpen] = useState(false);
+  const [calendarSelectedAd, setCalendarSelectedAd] = useState(null);
+  const [calendarSidebarMinimized, setCalendarSidebarMinimized] = useState(false);
   const [advertiserSearch, setAdvertiserSearch] = useState("");
-  const [productSearch, setProductSearch] = useState("");
-  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [openAdvertiserMenuId, setOpenAdvertiserMenuId] = useState(null);
+  const [advertiserMenuPosition, setAdvertiserMenuPosition] = useState({
+    vertical: "bottom",
+    horizontal: "right",
+  });
+  const [advertiserViewModal, setAdvertiserViewModal] = useState(null);
+  const [advertiserEditModal, setAdvertiserEditModal] = useState(null);
+  const [advertiserDeleteModal, setAdvertiserDeleteModal] = useState(null);
+  const [advertiserActionLoading, setAdvertiserActionLoading] = useState(false);
+  const [advertiserCreateOpen, setAdvertiserCreateOpen] = useState(false);
+  const [advertiserCreateLoading, setAdvertiserCreateLoading] = useState(false);
+  const [advertiserCreateForm, setAdvertiserCreateForm] = useState({
+    advertiser_name: "",
+    contact_name: "",
+    email: "",
+    phone_number: "",
+    status: "active",
+  });
+  const [productCreateOpen, setProductCreateOpen] = useState(false);
+  const [openProductMenuId, setOpenProductMenuId] = useState(null);
+  const [productMenuPosition, setProductMenuPosition] = useState({
+    vertical: "bottom",
+    horizontal: "right",
+  });
+  const [productEditModal, setProductEditModal] = useState(null);
+  const [productDeleteModal, setProductDeleteModal] = useState(null);
+  const [productActionLoading, setProductActionLoading] = useState(false);
+  const [invoiceFilters, setInvoiceFilters] = useState({
+    status: "All",
+    search: "",
+  });
+  const [invoiceSortConfig, setInvoiceSortConfig] = useState({
+    key: null,
+    direction: null,
+  });
+  const [openInvoiceMenuId, setOpenInvoiceMenuId] = useState(null);
+  const [invoiceMenuPosition, setInvoiceMenuPosition] = useState({
+    vertical: "bottom",
+    horizontal: "right",
+  });
+  const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
+  const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef(null);
+  const advertiserMenuRef = useRef(null);
+  const productMenuRef = useRef(null);
+  const invoiceMenuRef = useRef(null);
+  const invoiceCreateMenuRef = useRef(null);
+  const adsAdvancedFiltersRef = useRef(null);
 
   const [ad, setAd] = useState(blankAd);
-  const [advertiser, setAdvertiser] = useState(blankAdvertiser);
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
 
@@ -257,6 +1657,70 @@ export default function AdsPage() {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [showProfileDropdown]);
+
+  useEffect(() => {
+    const onClickOutside = (event) => {
+      if (
+        advertiserMenuRef.current &&
+        !advertiserMenuRef.current.contains(event.target)
+      ) {
+        setOpenAdvertiserMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const onClickOutside = (event) => {
+      if (
+        productMenuRef.current &&
+        !productMenuRef.current.contains(event.target)
+      ) {
+        setOpenProductMenuId(null);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const onClickOutside = (event) => {
+      if (
+        invoiceMenuRef.current &&
+        !invoiceMenuRef.current.contains(event.target)
+      ) {
+        setOpenInvoiceMenuId(null);
+      }
+      if (
+        invoiceCreateMenuRef.current &&
+        !invoiceCreateMenuRef.current.contains(event.target)
+      ) {
+        setShowInvoiceCreateMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!adsShowAdvancedFilters) {
+      return undefined;
+    }
+
+    const handleClickOutside = (event) => {
+      if (
+        adsAdvancedFiltersRef.current &&
+        !adsAdvancedFiltersRef.current.contains(event.target)
+      ) {
+        setAdsShowAdvancedFilters(false);
+        setAdsShowDateRangePicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [adsShowAdvancedFilters]);
 
   const advertisers = db.advertisers || [];
   const products = db.products || [];
@@ -331,29 +1795,409 @@ export default function AdsPage() {
       );
   }, [ads]);
 
-  const filteredAds = useMemo(() => {
-    return ads.filter((item) => {
-      const matchesSearch =
-        !adsSearch ||
-        String(item.ad_name || "")
-          .toLowerCase()
-          .includes(adsSearch.toLowerCase()) ||
-        String(item.advertiser || "")
-          .toLowerCase()
-          .includes(adsSearch.toLowerCase()) ||
-        String(item.placement || "")
-          .toLowerCase()
-          .includes(adsSearch.toLowerCase());
+  const calendarMaxAdsPerDay =
+    Number(db.admin_settings?.max_ads_per_day) ||
+    Number(db.admin_settings?.max_ads_per_slot) ||
+    5;
 
-      const matchesStatus =
-        adsStatusFilter === "All Ads" || item.status === adsStatusFilter;
-      const matchesPayment =
-        adsPaymentFilter === "All Payment Status" ||
-        item.payment === adsPaymentFilter;
+  const calendarExpandedAds = useMemo(() => {
+    const advertiserById = new Map(
+      advertisers.map((item) => [item.id, item.advertiser_name || item.name || ""]),
+    );
+    const placementByProductId = new Map(
+      products.map((item) => [item.id, item.placement || ""]),
+    );
+    const expanded = [];
 
-      return matchesSearch && matchesStatus && matchesPayment;
+    for (const ad of ads) {
+      const publishedDates = toStringArray(ad.published_dates);
+      const advertiserName =
+        ad.advertiser || advertiserById.get(ad.advertiser_id) || "Unknown advertiser";
+      const placement =
+        ad.placement || placementByProductId.get(ad.product_id) || "Unknown placement";
+      const normalizedAd = {
+        ...ad,
+        advertiser: advertiserName,
+        placement,
+        post_type: normalizeCalendarPostType(ad.post_type),
+        status: ad.status || "Draft",
+        payment: ad.payment || "Unpaid",
+      };
+
+      const postType = String(ad.post_type || "").toLowerCase();
+      const dates = [];
+
+      if (postType.includes("daily") && ad.post_date_from && ad.post_date_to) {
+        const startDate = parseCalendarDate(ad.post_date_from);
+        const endDate = parseCalendarDate(ad.post_date_to);
+        if (startDate && endDate) {
+          for (let day = new Date(startDate); day <= endDate; day.setDate(day.getDate() + 1)) {
+            dates.push(new Date(day));
+          }
+        }
+      } else if (postType.includes("custom") && ad.custom_dates) {
+        for (const dateText of toStringArray(ad.custom_dates)) {
+          const parsedDate = parseCalendarDate(dateText);
+          if (parsedDate) {
+            dates.push(parsedDate);
+          }
+        }
+      } else {
+        const oneTimeDate = parseCalendarDate(ad.schedule || ad.post_date);
+        if (oneTimeDate) {
+          dates.push(oneTimeDate);
+        }
+      }
+
+      for (const date of dates) {
+        const key = toDateKey(date);
+        expanded.push({
+          ad: normalizedAd,
+          date,
+          isPublished:
+            String(ad.status || "").toLowerCase() === "published" || publishedDates.includes(key),
+        });
+      }
+    }
+
+    return expanded.sort((a, b) => {
+      if (a.date.valueOf() !== b.date.valueOf()) {
+        return a.date.valueOf() - b.date.valueOf();
+      }
+      return String(a.ad.ad_name || "").localeCompare(String(b.ad.ad_name || ""));
     });
-  }, [ads, adsPaymentFilter, adsSearch, adsStatusFilter]);
+  }, [ads, advertisers, products]);
+
+  const calendarAdvertiserOptions = useMemo(
+    () =>
+      [...new Set(calendarExpandedAds.map((item) => item.ad.advertiser).filter(Boolean))].sort(),
+    [calendarExpandedAds],
+  );
+
+  const calendarPlacementOptions = useMemo(
+    () =>
+      [...new Set(calendarExpandedAds.map((item) => item.ad.placement).filter(Boolean))].sort(),
+    [calendarExpandedAds],
+  );
+
+  const calendarPostTypeOptions = useMemo(
+    () =>
+      [...new Set(calendarExpandedAds.map((item) => item.ad.post_type).filter(Boolean))].sort(),
+    [calendarExpandedAds],
+  );
+
+  const calendarFilteredAds = useMemo(() => {
+    return calendarExpandedAds.filter((item) => {
+      const adName = String(item.ad.ad_name || "").toLowerCase();
+      const advertiser = String(item.ad.advertiser || "").toLowerCase();
+      const searchText = String(calendarSearch || "").toLowerCase();
+
+      if (searchText && !adName.includes(searchText) && !advertiser.includes(searchText)) {
+        return false;
+      }
+
+      if (calendarSelectedAdvertiser && item.ad.advertiser !== calendarSelectedAdvertiser) {
+        return false;
+      }
+
+      if (calendarSelectedPlacement && item.ad.placement !== calendarSelectedPlacement) {
+        return false;
+      }
+
+      if (calendarSelectedPostType && item.ad.post_type !== calendarSelectedPostType) {
+        return false;
+      }
+
+      if (calendarSelectedStatus) {
+        if (
+          calendarSelectedStatus === "Paid" ||
+          calendarSelectedStatus === "Unpaid"
+        ) {
+          if (item.ad.payment !== calendarSelectedStatus) {
+            return false;
+          }
+        } else if (item.ad.status !== calendarSelectedStatus) {
+          return false;
+        }
+      }
+
+      if (calendarUnpublishedOnly && String(item.ad.status || "").toLowerCase() === "published") {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    calendarExpandedAds,
+    calendarSearch,
+    calendarSelectedAdvertiser,
+    calendarSelectedPlacement,
+    calendarSelectedPostType,
+    calendarSelectedStatus,
+    calendarUnpublishedOnly,
+  ]);
+
+  const calendarUpcomingAds = useMemo(() => {
+    const now = new Date();
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(now.getDate() + 7);
+    return calendarFilteredAds
+      .filter((item) => item.date >= now && item.date <= sevenDaysFromNow)
+      .sort((a, b) => a.date.valueOf() - b.date.valueOf())
+      .slice(0, 10);
+  }, [calendarFilteredAds]);
+
+  const navigateCalendarDate = (direction) => {
+    const nextDate = new Date(calendarCurrentDate);
+    if (calendarMode === "month") {
+      nextDate.setMonth(nextDate.getMonth() + direction);
+    } else if (calendarMode === "week") {
+      nextDate.setDate(nextDate.getDate() + direction * 7);
+    } else {
+      nextDate.setDate(nextDate.getDate() + direction);
+    }
+    setCalendarCurrentDate(nextDate);
+  };
+
+  const goToCalendarToday = () => {
+    setCalendarCurrentDate(new Date());
+  };
+
+  const handleCalendarAdClick = (selectedAd) => {
+    setCalendarSelectedAd(selectedAd);
+    setCalendarPreviewOpen(true);
+  };
+
+  const handleCalendarDateClick = (date) => {
+    if (calendarMode === "month") {
+      setCalendarCurrentDate(date);
+      setCalendarMode("day");
+    }
+  };
+
+  const calendarPeriodLabel = useMemo(() => {
+    if (calendarMode === "week") {
+      const weekStart = getWeekStart(calendarCurrentDate);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      return `${weekStart.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      })} - ${weekEnd.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })}`;
+    }
+
+    const options =
+      calendarMode === "month"
+        ? { month: "long", year: "numeric" }
+        : { month: "long", day: "numeric", year: "numeric" };
+    return calendarCurrentDate.toLocaleDateString("en-US", options);
+  }, [calendarCurrentDate, calendarMode]);
+
+  const adsNormalized = useMemo(() => {
+    const advertiserById = new Map(
+      advertisers.map((item) => [item.id, item.advertiser_name || item.name || ""]),
+    );
+    const placementByProductId = new Map(
+      products.map((item) => [item.id, item.placement || ""]),
+    );
+
+    const todayKey = toDateKey(new Date());
+
+    return ads.map((item) => {
+      const customDates = toStringArray(item.custom_dates)
+        .map((dateText) => String(dateText).slice(0, 10))
+        .filter(Boolean)
+        .sort((a, b) => String(a).localeCompare(String(b)));
+      const publishedDates = toStringArray(item.published_dates)
+        .map((dateText) => String(dateText).slice(0, 10))
+        .filter(Boolean);
+      const nextCustomDate =
+        customDates.find((dateText) => dateText >= todayKey) ||
+        customDates[0] ||
+        "";
+      const schedule = item.schedule || item.post_date || item.post_date_from || nextCustomDate;
+      const advertiserName =
+        item.advertiser || advertiserById.get(item.advertiser_id) || "N/A";
+      const placement =
+        item.placement || placementByProductId.get(item.product_id) || "N/A";
+      const status = item.status || "Draft";
+      const paymentRaw = String(item.payment || "").trim();
+      const payment = normalizeAdsPayment(paymentRaw);
+
+      return {
+        ...item,
+        advertiser: advertiserName,
+        placement,
+        status,
+        payment_raw: paymentRaw || "Unpaid",
+        payment,
+        post_type: normalizeCalendarPostType(item.post_type),
+        schedule,
+        custom_dates: customDates,
+        published_dates: publishedDates,
+      };
+    });
+  }, [ads, advertisers, products]);
+
+  const adsPlacementOptions = useMemo(
+    () => [...new Set(adsNormalized.map((item) => item.placement).filter(Boolean))].sort(),
+    [adsNormalized],
+  );
+
+  const adsPostTypeOptions = useMemo(
+    () => [...new Set(adsNormalized.map((item) => item.post_type).filter(Boolean))].sort(),
+    [adsNormalized],
+  );
+
+  const adsAdvertiserOptions = useMemo(
+    () => [...new Set(adsNormalized.map((item) => item.advertiser).filter(Boolean))].sort(),
+    [adsNormalized],
+  );
+
+  const adsActiveAdvancedFilterCount = useMemo(() => {
+    let count = 0;
+    if (adsFilters.placement !== "All Placement") count += 1;
+    if (adsFilters.postType !== "All post types") count += 1;
+    if (adsFilters.advertiser !== "All Advertisers") count += 1;
+    if (adsFilters.payment !== "All Payment Status") count += 1;
+    if (adsFilters.dateFrom || adsFilters.dateTo) count += 1;
+    return count;
+  }, [adsFilters]);
+
+  const filteredAds = useMemo(() => {
+    const query = String(adsFilters.search || "").toLowerCase().trim();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekStart = getWeekStart(today);
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+
+    return adsNormalized.filter((item) => {
+      const adName = String(item.ad_name || "").toLowerCase();
+      const advertiser = String(item.advertiser || "").toLowerCase();
+      const placement = String(item.placement || "").toLowerCase();
+
+      if (query && !adName.includes(query) && !advertiser.includes(query) && !placement.includes(query)) {
+        return false;
+      }
+
+      const scheduleDate = parseCalendarDate(item.schedule);
+      if (adsFilters.status === "Today") {
+        if (!scheduleDate || toDateKey(scheduleDate) !== toDateKey(today)) {
+          return false;
+        }
+      } else if (adsFilters.status === "This Week") {
+        if (!scheduleDate || scheduleDate < weekStart || scheduleDate > weekEnd) {
+          return false;
+        }
+      } else if (adsFilters.status === "Upcoming Ads") {
+        if (!scheduleDate || scheduleDate < today) {
+          return false;
+        }
+      } else if (adsFilters.status === "Past Ads") {
+        if (!scheduleDate || scheduleDate >= today) {
+          return false;
+        }
+      } else if (
+        adsFilters.status !== "All Ads" &&
+        String(item.status || "") !== adsFilters.status
+      ) {
+        return false;
+      }
+
+      if (adsFilters.placement !== "All Placement" && item.placement !== adsFilters.placement) {
+        return false;
+      }
+      if (adsFilters.postType !== "All post types" && item.post_type !== adsFilters.postType) {
+        return false;
+      }
+      if (adsFilters.advertiser !== "All Advertisers" && item.advertiser !== adsFilters.advertiser) {
+        return false;
+      }
+
+      if (adsFilters.payment !== "All Payment Status") {
+        if (adsFilters.payment === "Pending") {
+          if (!["Pending", "Unpaid"].includes(String(item.payment_raw || item.payment))) {
+            return false;
+          }
+        } else if (String(item.payment || "") !== adsFilters.payment) {
+          return false;
+        }
+      }
+
+      if (adsFilters.dateFrom || adsFilters.dateTo) {
+        if (!scheduleDate) {
+          return false;
+        }
+        const minDate = adsFilters.dateFrom ? parseCalendarDate(adsFilters.dateFrom) : null;
+        const maxDate = adsFilters.dateTo ? parseCalendarDate(adsFilters.dateTo) : null;
+        if (minDate && scheduleDate < minDate) {
+          return false;
+        }
+        if (maxDate && scheduleDate > maxDate) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [adsFilters, adsNormalized]);
+
+  const sortedAds = useMemo(() => {
+    if (!adsSortConfig.key) {
+      return filteredAds;
+    }
+
+    return [...filteredAds].sort((left, right) => {
+      let leftValue = left[adsSortConfig.key];
+      let rightValue = right[adsSortConfig.key];
+
+      if (leftValue == null) return 1;
+      if (rightValue == null) return -1;
+
+      if (adsSortConfig.key === "schedule" || adsSortConfig.key === "post_date_from") {
+        leftValue = parseCalendarDate(leftValue)?.valueOf() || 0;
+        rightValue = parseCalendarDate(rightValue)?.valueOf() || 0;
+      } else if (adsSortConfig.key === "post_time") {
+        const toMinutes = (timeValue) => {
+          if (!timeValue) return 0;
+          const [hoursText, minutesText] = String(timeValue).split(":");
+          return (Number(hoursText) || 0) * 60 + (Number(minutesText) || 0);
+        };
+        leftValue = toMinutes(leftValue);
+        rightValue = toMinutes(rightValue);
+      } else if (typeof leftValue === "string") {
+        leftValue = leftValue.toLowerCase();
+        rightValue = String(rightValue || "").toLowerCase();
+      }
+
+      if (leftValue < rightValue) {
+        return adsSortConfig.direction === "asc" ? -1 : 1;
+      }
+      if (leftValue > rightValue) {
+        return adsSortConfig.direction === "asc" ? 1 : -1;
+      }
+      return 0;
+    });
+  }, [adsSortConfig, filteredAds]);
+
+  const linkedPreviewInvoices = useMemo(() => {
+    if (!adsPreviewAd?.id) {
+      return [];
+    }
+    const adId = String(adsPreviewAd.id);
+    return invoices.filter((item) =>
+      toStringArray(item.ad_ids)
+        .map((entry) => String(entry))
+        .includes(adId),
+    );
+  }, [adsPreviewAd?.id, invoices]);
 
   const todayAds = useMemo(() => {
     const todayText = new Date().toISOString().slice(0, 10);
@@ -546,33 +2390,7 @@ export default function AdsPage() {
       .slice(0, 5);
   }, [ads]);
 
-  const filteredUpcomingAds = useMemo(() => {
-    return upcomingAds.filter((item) => {
-      if (!calendarSearch) {
-        return true;
-      }
-      const query = calendarSearch.toLowerCase();
-      return (
-        String(item.ad_name || "").toLowerCase().includes(query) ||
-        String(item.advertiser || "").toLowerCase().includes(query) ||
-        String(item.status || "").toLowerCase().includes(query)
-      );
-    });
-  }, [calendarSearch, upcomingAds]);
-
-  const filteredPendingSubmissions = useMemo(() => {
-    return pending.filter((item) => {
-      if (!submissionSearch) {
-        return true;
-      }
-      const query = submissionSearch.toLowerCase();
-      return (
-        String(item.ad_name || "").toLowerCase().includes(query) ||
-        String(item.advertiser_name || "").toLowerCase().includes(query) ||
-        String(item.status || "").toLowerCase().includes(query)
-      );
-    });
-  }, [pending, submissionSearch]);
+  const filteredPendingSubmissions = useMemo(() => pending, [pending]);
 
   const filteredAdvertisers = useMemo(() => {
     return advertisers.filter((item) => {
@@ -582,40 +2400,118 @@ export default function AdsPage() {
       const query = advertiserSearch.toLowerCase();
       return (
         String(item.advertiser_name || "").toLowerCase().includes(query) ||
-        String(item.email || "").toLowerCase().includes(query)
+        String(item.contact_name || "").toLowerCase().includes(query) ||
+        String(item.email || "").toLowerCase().includes(query) ||
+        String(item.phone_number || item.phone || "")
+          .toLowerCase()
+          .includes(query)
       );
     });
   }, [advertiserSearch, advertisers]);
 
-  const filteredProducts = useMemo(() => {
-    return products.filter((item) => {
-      if (!productSearch) {
-        return true;
-      }
-      const query = productSearch.toLowerCase();
-      return (
-        String(item.product_name || "").toLowerCase().includes(query) ||
-        String(item.description || "").toLowerCase().includes(query)
-      );
-    });
-  }, [productSearch, products]);
+  const filteredProducts = useMemo(() => products, [products]);
 
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((item) => {
-      if (!invoiceSearch) {
+    const baseFiltered = invoices.filter((item) => {
+      const normalizedStatus = normalizeInvoiceStatus(item.status);
+      const advertiserName =
+        item.advertiser_name ||
+        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name ||
+        "";
+
+      if (invoiceFilters.status !== "All" && normalizedStatus !== invoiceFilters.status) {
+        return false;
+      }
+
+      const query = String(invoiceFilters.search || "").toLowerCase().trim();
+      if (!query) {
         return true;
       }
 
-      const advertiserName =
-        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name || "";
-      const query = invoiceSearch.toLowerCase();
       return (
         String(item.invoice_number || "").toLowerCase().includes(query) ||
-        String(item.status || "").toLowerCase().includes(query) ||
-        advertiserName.toLowerCase().includes(query)
+        String(normalizedStatus || "").toLowerCase().includes(query) ||
+        String(advertiserName || "").toLowerCase().includes(query)
       );
     });
-  }, [advertisers, invoiceSearch, invoices]);
+
+    if (!invoiceSortConfig.key || !invoiceSortConfig.direction) {
+      return baseFiltered;
+    }
+
+    const sorted = [...baseFiltered].sort((a, b) => {
+      let aValue;
+      let bValue;
+
+      switch (invoiceSortConfig.key) {
+        case "invoice_number":
+          aValue = String(a.invoice_number || "");
+          bValue = String(b.invoice_number || "");
+          break;
+        case "advertiser_name":
+          aValue = String(
+            a.advertiser_name ||
+              advertisers.find((adv) => adv.id === a.advertiser_id)?.advertiser_name ||
+              "",
+          );
+          bValue = String(
+            b.advertiser_name ||
+              advertisers.find((adv) => adv.id === b.advertiser_id)?.advertiser_name ||
+              "",
+          );
+          break;
+        case "date":
+          aValue = new Date(a.due_date || a.created_at || 0).valueOf();
+          bValue = new Date(b.due_date || b.created_at || 0).valueOf();
+          break;
+        case "status":
+          aValue = normalizeInvoiceStatus(a.status);
+          bValue = normalizeInvoiceStatus(b.status);
+          break;
+        case "items":
+          aValue = Array.isArray(a.ad_ids) ? a.ad_ids.length : 0;
+          bValue = Array.isArray(b.ad_ids) ? b.ad_ids.length : 0;
+          break;
+        case "total":
+          aValue = Number(a.amount) || 0;
+          bValue = Number(b.amount) || 0;
+          break;
+        default:
+          aValue = "";
+          bValue = "";
+      }
+
+      if (aValue < bValue) {
+        return invoiceSortConfig.direction === "asc" ? -1 : 1;
+      }
+      if (aValue > bValue) {
+        return invoiceSortConfig.direction === "asc" ? 1 : -1;
+      }
+      return 0;
+    });
+
+    return sorted;
+  }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
+
+  const invoiceSummary = useMemo(() => {
+    return filteredInvoices.reduce(
+      (acc, item) => {
+        const amount = Number(item.amount) || 0;
+        const status = normalizeInvoiceStatus(item.status);
+        if (status === "Paid") {
+          acc.totalPaid += amount;
+        }
+        if (status === "Pending" || status === "Overdue") {
+          acc.totalOutstanding += amount;
+        }
+        if (status === "Overdue") {
+          acc.overdueCount += 1;
+        }
+        return acc;
+      },
+      { totalOutstanding: 0, totalPaid: 0, overdueCount: 0 },
+    );
+  }, [filteredInvoices]);
 
   const reconciliation = useMemo(() => getReconciliationReport(), [db]);
 
@@ -639,6 +2535,178 @@ export default function AdsPage() {
     URL.revokeObjectURL(link.href);
   };
 
+  const handleAdsSort = (key) => {
+    setAdsSortConfig((current) => {
+      const direction =
+        current.key === key && current.direction === "asc" ? "desc" : "asc";
+      return { key, direction };
+    });
+  };
+
+  const handleInvoiceSort = (key) => {
+    setInvoiceSortConfig((current) => {
+      const direction =
+        current.key === key && current.direction === "asc" ? "desc" : "asc";
+      return { key, direction };
+    });
+  };
+
+  const openInvoiceMenu = (invoiceId, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceRight = window.innerWidth - rect.right;
+    setInvoiceMenuPosition({
+      vertical: spaceBelow < 350 ? "top" : "bottom",
+      horizontal: spaceRight < 200 ? "left" : "right",
+    });
+    setOpenInvoiceMenuId((current) => (current === invoiceId ? null : invoiceId));
+  };
+
+  const openInvoiceEditor = (item) => {
+    setInvoice({
+      ...blankInvoice,
+      ...item,
+      status: normalizeInvoiceStatus(item.status),
+      ad_ids: item.ad_ids || [],
+    });
+    setView("newInvoice");
+    setOpenInvoiceMenuId(null);
+    setShowInvoiceCreateMenu(false);
+  };
+
+  const openInvoicePreview = (item) => {
+    setInvoicePreviewModal({
+      ...item,
+      advertiser_name:
+        item.advertiser_name ||
+        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name ||
+        "-",
+      status: normalizeInvoiceStatus(item.status),
+      ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
+    });
+    setOpenInvoiceMenuId(null);
+  };
+
+  const markInvoiceAsPaid = (item) =>
+    run(() => {
+      upsertInvoice({
+        ...item,
+        status: "Paid",
+        ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
+      });
+      setOpenInvoiceMenuId(null);
+      if (invoicePreviewModal?.id === item.id) {
+        setInvoicePreviewModal((current) =>
+          current ? { ...current, status: "Paid" } : current,
+        );
+      }
+    }, "Invoice marked as paid.");
+
+  const deleteInvoiceRecord = (invoiceId) =>
+    run(() => {
+      deleteInvoice(invoiceId);
+      setOpenInvoiceMenuId(null);
+      if (invoicePreviewModal?.id === invoiceId) {
+        setInvoicePreviewModal(null);
+      }
+    }, "Invoice deleted.");
+
+  const saveInvoiceForm = () =>
+    run(() => {
+      if (!invoice.advertiser_id) {
+        throw new Error("Advertiser required");
+      }
+      if (!String(invoice.amount || "").trim()) {
+        throw new Error("Amount required");
+      }
+      upsertInvoice({
+        ...invoice,
+        status: normalizeInvoiceStatus(invoice.status),
+      });
+      setInvoice(blankInvoice);
+      setView("list");
+    }, "Invoice saved.");
+
+  const clearAdsAdvancedFilters = () => {
+    setAdsFilters((current) => ({
+      ...current,
+      placement: "All Placement",
+      postType: "All post types",
+      advertiser: "All Advertisers",
+      payment: "All Payment Status",
+      dateFrom: "",
+      dateTo: "",
+    }));
+    setAdsShowDateRangePicker(false);
+  };
+
+  const openAdEditor = (item) => {
+    const advertiserId =
+      item.advertiser_id ||
+      advertisers.find(
+        (advertiserItem) =>
+          String(advertiserItem.advertiser_name || "") === String(item.advertiser || ""),
+      )?.id ||
+      "";
+    const productId =
+      item.product_id ||
+      products.find(
+        (productItem) => String(productItem.placement || "") === String(item.placement || ""),
+      )?.id ||
+      "";
+
+    setAd({
+      ...blankAd,
+      ...item,
+      advertiser_id: advertiserId,
+      product_id: productId,
+      post_date: item.schedule || item.post_date || item.post_date_from || "",
+      post_time: String(item.post_time || "").slice(0, 5),
+      payment:
+        String(item.payment_raw || item.payment || "").toLowerCase() === "paid"
+          ? "Paid"
+          : "Unpaid",
+    });
+    setView("createAd");
+  };
+
+  const exportVisibleAdsCsv = () => {
+    const headers = [
+      "Ad",
+      "Advertiser",
+      "Status",
+      "Post Type",
+      "Placement",
+      "Schedule",
+      "Post Time",
+      "Payment",
+    ];
+    const escapeCsv = (value) => {
+      const text = String(value ?? "");
+      if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+        return `"${text.replace(/"/g, '""')}"`;
+      }
+      return text;
+    };
+    const rows = sortedAds.map((item) => [
+      item.ad_name || "",
+      item.advertiser || "",
+      item.status || "",
+      item.post_type || "",
+      item.placement || "",
+      formatAdsDate(item.schedule),
+      formatAdsTime(item.post_time),
+      item.payment || "",
+    ]);
+    const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
+    download(`cbnads-ads-${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
+  };
+
+  const markAdAsPublished = (adId) =>
+    run(() => updateAdStatus(adId, "Published"), "Ad marked as published.");
+
+  const deleteAdRecord = (adId) => run(() => deleteAd(adId), "Ad deleted.");
+
   const handleNavigate = (section) => {
     if (!sections.includes(section)) {
       return;
@@ -646,7 +2714,16 @@ export default function AdsPage() {
     setActiveSection(section);
     setView("list");
     setAd(blankAd);
+    setProduct(blankProduct);
     setInvoice(blankInvoice);
+    setAdvertiserCreateOpen(false);
+    setProductCreateOpen(false);
+    setOpenProductMenuId(null);
+    setProductEditModal(null);
+    setProductDeleteModal(null);
+    setOpenInvoiceMenuId(null);
+    setShowInvoiceCreateMenu(false);
+    setInvoicePreviewModal(null);
     setShowProfileDropdown(false);
   };
 
@@ -659,6 +2736,267 @@ export default function AdsPage() {
     setMessage("Dashboard synced.");
     window.setTimeout(() => setMessage(""), 1800);
     window.setTimeout(() => setSyncing(false), 500);
+  };
+
+  const openAdvertiserMenu = (advertiserId, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceRight = window.innerWidth - rect.right;
+    const menuHeight = 300;
+    const menuWidth = 200;
+    setAdvertiserMenuPosition({
+      vertical: spaceBelow < menuHeight ? "top" : "bottom",
+      horizontal: spaceRight < menuWidth ? "left" : "right",
+    });
+    setOpenAdvertiserMenuId((current) =>
+      current === advertiserId ? null : advertiserId,
+    );
+  };
+
+  const openAdvertiserCreate = () => {
+    setAdvertiserCreateForm({
+      advertiser_name: "",
+      contact_name: "",
+      email: "",
+      phone_number: "",
+      status: "active",
+    });
+    setAdvertiserCreateOpen(true);
+    setOpenAdvertiserMenuId(null);
+    setAdvertiserEditModal(null);
+    setAdvertiserDeleteModal(null);
+    setAdvertiserViewModal(null);
+  };
+
+  const openAdvertiserEdit = (item) => {
+    setAdvertiserEditModal({
+      ...blankAdvertiser,
+      ...item,
+      phone_number: item.phone_number || item.phone || "",
+      phone: item.phone || item.phone_number || "",
+      status: item.status || "active",
+    });
+    setOpenAdvertiserMenuId(null);
+  };
+
+  const openAdvertiserView = (item) => {
+    const advertiserAds = ads.filter(
+      (adItem) =>
+        adItem.advertiser_id === item.id ||
+        (!adItem.advertiser_id &&
+          String(adItem.advertiser || "") === String(item.advertiser_name || "")),
+    );
+
+    setAdvertiserViewModal({
+      advertiser: {
+        ...item,
+        contact_name: item.contact_name || item.business_name || "\u2014",
+        phone_number: item.phone_number || item.phone || "",
+        total_spend: Number(item.total_spend ?? item.ad_spend ?? 0) || 0,
+        status: item.status || "active",
+      },
+      ads: advertiserAds.map((adItem) => ({
+        ...adItem,
+        post_date_from: adItem.post_date_from || adItem.post_date || "",
+      })),
+    });
+    setOpenAdvertiserMenuId(null);
+  };
+
+  const saveAdvertiserModal = () => {
+    if (!advertiserEditModal) {
+      return;
+    }
+
+    setAdvertiserActionLoading(true);
+    try {
+      if (!String(advertiserEditModal.advertiser_name || "").trim()) {
+        throw new Error("Advertiser name required");
+      }
+
+      upsertAdvertiser({
+        ...advertiserEditModal,
+        phone:
+          String(advertiserEditModal.phone_number || advertiserEditModal.phone || "").trim(),
+      });
+      setDb(readDb());
+      setMessage("Advertiser saved.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setAdvertiserEditModal(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to save advertiser");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setAdvertiserActionLoading(false);
+    }
+  };
+
+  const confirmAdvertiserDelete = () => {
+    if (!advertiserDeleteModal) {
+      return;
+    }
+    setAdvertiserActionLoading(true);
+    try {
+      deleteAdvertiser(advertiserDeleteModal.id);
+      setDb(readDb());
+      setMessage("Advertiser deleted.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setAdvertiserDeleteModal(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete advertiser");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setAdvertiserActionLoading(false);
+    }
+  };
+
+  const saveNewAdvertiser = (type) => {
+    if (type === "cancel") {
+      setAdvertiserCreateOpen(false);
+      return;
+    }
+
+    setAdvertiserCreateLoading(true);
+    try {
+      if (!String(advertiserCreateForm.advertiser_name || "").trim()) {
+        throw new Error("Advertiser name required");
+      }
+      if (!String(advertiserCreateForm.contact_name || "").trim()) {
+        throw new Error("Contact name required");
+      }
+
+      upsertAdvertiser({
+        ...advertiserCreateForm,
+        phone: String(advertiserCreateForm.phone_number || "").trim(),
+        phone_number: String(advertiserCreateForm.phone_number || "").trim(),
+      });
+      setDb(readDb());
+      setMessage("Advertiser saved.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setAdvertiserCreateOpen(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to create advertiser");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setAdvertiserCreateLoading(false);
+    }
+  };
+
+  const openProductMenu = (productId, event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceRight = window.innerWidth - rect.right;
+    const menuHeight = 350;
+    const menuWidth = 200;
+
+    setProductMenuPosition({
+      vertical: spaceBelow < menuHeight ? "top" : "bottom",
+      horizontal: spaceRight < menuWidth ? "left" : "right",
+    });
+    setOpenProductMenuId((current) => (current === productId ? null : productId));
+  };
+
+  const openProductCreate = () => {
+    setProduct(blankProduct);
+    setProductCreateOpen(true);
+  };
+
+  const saveNewProduct = (type) => {
+    if (type === "cancel") {
+      setProductCreateOpen(false);
+      setProduct(blankProduct);
+      return;
+    }
+
+    setProductActionLoading(true);
+    try {
+      if (!String(product.product_name || "").trim()) {
+        throw new Error("Product name required");
+      }
+      if (!String(product.price || "").trim()) {
+        throw new Error("Price required");
+      }
+
+      upsertProduct({
+        ...product,
+        placement: String(product.placement || "WhatsApp").trim() || "WhatsApp",
+      });
+      setDb(readDb());
+      setMessage("Product saved.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setProduct(blankProduct);
+      setProductCreateOpen(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to create product");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setProductActionLoading(false);
+    }
+  };
+
+  const openProductEdit = (item) => {
+    setProductEditModal({
+      ...blankProduct,
+      ...item,
+      placement: item.placement || "WhatsApp",
+    });
+    setOpenProductMenuId(null);
+  };
+
+  const saveProductModal = () => {
+    if (!productEditModal) {
+      return;
+    }
+
+    setProductActionLoading(true);
+    try {
+      if (!String(productEditModal.product_name || "").trim()) {
+        throw new Error("Product name required");
+      }
+      if (!String(productEditModal.price || "").trim()) {
+        throw new Error("Price required");
+      }
+
+      upsertProduct({
+        ...productEditModal,
+        placement:
+          String(productEditModal.placement || "WhatsApp").trim() || "WhatsApp",
+      });
+      setDb(readDb());
+      setMessage("Product updated.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setProductEditModal(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to update product");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setProductActionLoading(false);
+    }
+  };
+
+  const openProductDelete = (item) => {
+    setProductDeleteModal(item);
+    setOpenProductMenuId(null);
+  };
+
+  const confirmProductDelete = () => {
+    if (!productDeleteModal) {
+      return;
+    }
+
+    setProductActionLoading(true);
+    try {
+      deleteProduct(productDeleteModal.id);
+      setDb(readDb());
+      setMessage("Product deleted.");
+      window.setTimeout(() => setMessage(""), 1800);
+      setProductDeleteModal(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Failed to delete product");
+      window.setTimeout(() => setMessage(""), 1800);
+    } finally {
+      setProductActionLoading(false);
+    }
   };
 
   if (!ready) {
@@ -765,7 +3103,11 @@ export default function AdsPage() {
           </header>
         )}
 
-        <main className="flex-1 overflow-auto bg-gray-50 p-8">
+        <main
+          className={`flex-1 overflow-auto bg-gray-50 ${
+            activeSection === "Calendar" ? "p-0" : "p-8"
+          }`}
+        >
           {message ? (
             <div className="mb-4 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
               {message}
@@ -1136,480 +3478,736 @@ export default function AdsPage() {
           )}
 
           {activeSection === "Calendar" && (
-            <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6 flex items-center justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
-                  <p className="text-sm text-gray-500">
-                    View upcoming ad schedule and publication timeline
-                  </p>
-                </div>
-                <div className="relative w-full max-w-sm">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={16}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                    placeholder="Search upcoming schedule..."
-                    value={calendarSearch}
-                    onChange={(event) => setCalendarSearch(event.target.value)}
-                  />
-                </div>
-              </div>
+            <div className="flex flex-col h-full bg-gray-50">
+              <div className="bg-white border-b border-gray-200">
+                <div className="px-6 py-4">
+                  <div className="flex items-center justify-between mb-4 gap-4">
+                    <div className="flex items-center gap-4">
+                      <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
+                      <button
+                        onClick={goToCalendarToday}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+                        type="button"
+                      >
+                        Today
+                      </button>
+                    </div>
 
-              <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
-                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Ad
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Advertiser
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Date
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Time
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Status
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredUpcomingAds.map((item) => (
-                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                          <td className="px-6 py-4">
-                            <p className="text-sm font-medium text-gray-900">{item.ad_name}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {item.placement || "-"}
-                            </p>
-                          </td>
-                          <td className="px-6 py-4 text-gray-700">
-                            {item.advertiser || "-"}
-                          </td>
-                          <td className="px-6 py-4 text-gray-700">
-                            {formatDate(item.post_date)}
-                          </td>
-                          <td className="px-6 py-4 text-gray-700">
-                            {formatTime(item.post_time)}
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
-                              {item.status || "Draft"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredUpcomingAds.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={5}
-                            className="px-6 py-12 text-center text-sm text-gray-500"
-                          >
-                            No upcoming ads.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="rounded-lg border border-gray-200 bg-white">
-                  <div className="px-5 py-4 border-b border-gray-200">
-                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
-                      Next Up
-                    </h2>
-                  </div>
-                  <div className="p-5">
-                    {filteredUpcomingAds.slice(0, 8).length > 0 ? (
-                      <div className="space-y-3">
-                        {filteredUpcomingAds.slice(0, 8).map((item) => (
-                          <div
-                            key={`next-${item.id}`}
-                            className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-                          >
-                            <p className="text-sm font-medium text-gray-900 truncate">
-                              {item.ad_name}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {formatDate(item.post_date)} at {formatTime(item.post_time)}
-                            </p>
-                          </div>
-                        ))}
+                    <div className="flex items-center gap-2">
+                      <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => setCalendarMode("month")}
+                          className={`px-3 py-1.5 text-sm ${
+                            calendarMode === "month"
+                              ? "bg-gray-900 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                          type="button"
+                        >
+                          Month
+                        </button>
+                        <button
+                          onClick={() => setCalendarMode("week")}
+                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${
+                            calendarMode === "week"
+                              ? "bg-gray-900 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                          type="button"
+                        >
+                          Week
+                        </button>
+                        <button
+                          onClick={() => setCalendarMode("day")}
+                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${
+                            calendarMode === "day"
+                              ? "bg-gray-900 text-white"
+                              : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
+                          type="button"
+                        >
+                          Day
+                        </button>
                       </div>
-                    ) : (
-                      <p className="text-sm text-gray-500">No upcoming posts.</p>
-                    )}
+                    </div>
                   </div>
+
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => navigateCalendarDate(-1)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg"
+                          type="button"
+                        >
+                          <ChevronLeft className="w-5 h-5 text-gray-600" />
+                        </button>
+                        <span className="text-lg font-medium text-gray-900 min-w-[250px] text-center">
+                          {calendarPeriodLabel}
+                        </span>
+                        <button
+                          onClick={() => navigateCalendarDate(1)}
+                          className="p-1.5 hover:bg-gray-100 rounded-lg"
+                          type="button"
+                        >
+                          <ChevronRight className="w-5 h-5 text-gray-600" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search ads..."
+                          value={calendarSearch}
+                          onChange={(event) => setCalendarSearch(event.target.value)}
+                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-64"
+                        />
+                      </div>
+
+                      <button
+                        onClick={() => setCalendarShowFilters((current) => !current)}
+                        className={`px-3 py-2 border border-gray-300 rounded-lg text-sm flex items-center gap-2 ${
+                          calendarShowFilters
+                            ? "bg-gray-900 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                        }`}
+                        type="button"
+                      >
+                        <Filter className="w-4 h-4" />
+                        Filters
+                      </button>
+                    </div>
+                  </div>
+
+                  {calendarShowFilters ? (
+                    <CalendarFilters
+                      selectedAdvertiser={calendarSelectedAdvertiser}
+                      setSelectedAdvertiser={setCalendarSelectedAdvertiser}
+                      selectedPlacement={calendarSelectedPlacement}
+                      setSelectedPlacement={setCalendarSelectedPlacement}
+                      selectedPostType={calendarSelectedPostType}
+                      setSelectedPostType={setCalendarSelectedPostType}
+                      selectedStatus={calendarSelectedStatus}
+                      setSelectedStatus={setCalendarSelectedStatus}
+                      showUnpublishedOnly={calendarUnpublishedOnly}
+                      setShowUnpublishedOnly={setCalendarUnpublishedOnly}
+                      advertisers={calendarAdvertiserOptions}
+                      placements={calendarPlacementOptions}
+                      postTypes={calendarPostTypeOptions}
+                    />
+                  ) : null}
                 </div>
               </div>
+
+              <div className="flex flex-1 overflow-hidden">
+                <div className="flex-1 p-6 overflow-auto">
+                  {calendarMode === "month" ? (
+                    <CalendarMonthView
+                      currentDate={calendarCurrentDate}
+                      ads={calendarFilteredAds}
+                      maxAdsPerDay={calendarMaxAdsPerDay}
+                      onAdClick={handleCalendarAdClick}
+                      onDateClick={handleCalendarDateClick}
+                    />
+                  ) : null}
+
+                  {calendarMode === "week" ? (
+                    <CalendarWeekView
+                      currentDate={calendarCurrentDate}
+                      ads={calendarFilteredAds}
+                      onAdClick={handleCalendarAdClick}
+                    />
+                  ) : null}
+
+                  {calendarMode === "day" ? (
+                    <CalendarDayView
+                      currentDate={calendarCurrentDate}
+                      ads={calendarFilteredAds}
+                      maxAdsPerDay={calendarMaxAdsPerDay}
+                      onAdClick={handleCalendarAdClick}
+                    />
+                  ) : null}
+                </div>
+
+                <CalendarUpcomingSidebar
+                  ads={calendarUpcomingAds}
+                  onAdClick={handleCalendarAdClick}
+                  isMinimized={calendarSidebarMinimized}
+                  setIsMinimized={setCalendarSidebarMinimized}
+                />
+              </div>
+
+              {calendarPreviewOpen && calendarSelectedAd ? (
+                <CalendarAdPreviewModal
+                  ad={calendarSelectedAd}
+                  onClose={() => {
+                    setCalendarPreviewOpen(false);
+                    setCalendarSelectedAd(null);
+                  }}
+                  onEdit={() => {
+                    setCalendarPreviewOpen(false);
+                    setActiveSection("Ads");
+                    setAd({ ...blankAd, ...calendarSelectedAd });
+                    setView("createAd");
+                    setCalendarSelectedAd(null);
+                  }}
+                />
+              ) : null}
             </div>
           )}
 
           {activeSection === "Submissions" && (
-            <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6 flex items-center justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-                    Submissions
-                  </h1>
-                  <p className="text-sm text-gray-500">
-                    Review and approve advertising requests from clients
-                  </p>
-                </div>
-                <div className="relative w-full max-w-sm">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={16}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                    placeholder="Search submissions..."
-                    value={submissionSearch}
-                    onChange={(event) => setSubmissionSearch(event.target.value)}
-                  />
-                </div>
+            <div>
+              <div className="mb-6">
+                <h1 className="text-2xl font-semibold text-gray-900 mb-1">Submissions</h1>
+                <p className="text-sm text-gray-500">
+                  Review and approve advertising requests from clients
+                </p>
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Ad Request
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Advertiser
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredPendingSubmissions.map((item) => (
-                      <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                        <td className="px-6 py-4">
-                          <p className="text-sm font-medium text-gray-900">
-                            {item.ad_name || "-"}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-0.5">
-                            {formatDate(item.post_date)} {formatTime(item.post_time)}
-                          </p>
-                        </td>
-                        <td className="px-6 py-4 text-gray-700">
-                          {item.advertiser_name || "-"}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700">
-                            {item.status || "pending"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex justify-end gap-2 text-xs">
-                            {item.status === "pending" ? (
-                              <>
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                {filteredPendingSubmissions.length === 0 ? (
+                  <div className="text-center py-12 text-gray-500">No submissions</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Status
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Ad Name
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Advertiser
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Email
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Post Type
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Submitted
+                          </th>
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {filteredPendingSubmissions.map((item) => (
+                          <tr key={item.id} className="hover:bg-gray-50">
+                            <td className="px-6 py-3.5">
+                              <span
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${getSubmissionStatusBadgeClass(
+                                  item.status,
+                                )}`}
+                              >
+                                {formatSubmissionStatus(item.status)}
+                              </span>
+                            </td>
+                            <td className="px-6 py-3.5 font-medium text-gray-900 text-xs">
+                              {item.ad_name || "-"}
+                            </td>
+                            <td className="px-6 py-3.5 text-gray-600 text-xs">
+                              {item.advertiser_name || "-"}
+                            </td>
+                            <td className="px-6 py-3.5 text-gray-600 text-xs">
+                              {item.email || "-"}
+                            </td>
+                            <td className="px-6 py-3.5 text-gray-600 text-xs">
+                              {item.post_type || "-"}
+                            </td>
+                            <td className="px-6 py-3.5 text-gray-600 text-xs">
+                              {formatSubmissionDate(item.created_at)}
+                            </td>
+                            <td className="px-6 py-3.5">
+                              <div className="flex gap-2">
                                 <button
-                                  className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
                                   type="button"
-                                  onClick={() =>
-                                    run(
-                                      () => approvePendingAd(item.id),
-                                      "Submission approved.",
-                                    )
-                                  }
+                                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                                  title="View Details"
+                                  onClick={() => {
+                                    setMessage(
+                                      `${item.ad_name || "Submission"} by ${
+                                        item.advertiser_name || "unknown advertiser"
+                                      }`,
+                                    );
+                                    window.setTimeout(() => setMessage(""), 1800);
+                                  }}
                                 >
-                                  Approve
+                                  <Eye size={16} />
                                 </button>
-                                <button
-                                  className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                  type="button"
-                                  onClick={() =>
-                                    run(
-                                      () => rejectPendingAd(item.id),
-                                      "Submission rejected.",
-                                    )
-                                  }
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            ) : null}
-                            <button
-                              className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
-                              type="button"
-                              onClick={() =>
-                                run(
-                                  () => deletePendingAd(item.id),
-                                  "Submission deleted.",
-                                )
-                              }
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredPendingSubmissions.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={4}
-                          className="px-6 py-12 text-center text-sm text-gray-500"
-                        >
-                          No pending submissions.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                                {item.status === "pending" ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="p-1.5 text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded transition-colors"
+                                      title="Edit Submission"
+                                      onClick={() => {
+                                        setActiveSection("Ads");
+                                        setAd({
+                                          ...blankAd,
+                                          ad_name: item.ad_name || "",
+                                          post_type: item.post_type || "one_time",
+                                          post_date:
+                                            item.post_date || item.post_date_from || "",
+                                          post_time: item.post_time || "",
+                                          notes: item.notes || item.ad_text || "",
+                                        });
+                                        setView("createAd");
+                                      }}
+                                    >
+                                      <Pencil size={16} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="px-2.5 py-1 bg-black text-white rounded hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:text-gray-300 text-xs font-medium"
+                                      onClick={() =>
+                                        run(
+                                          () => approvePendingAd(item.id),
+                                          "Submission approved.",
+                                        )
+                                      }
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 hover:border-gray-400 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 text-xs font-medium"
+                                      onClick={() =>
+                                        run(
+                                          () => rejectPendingAd(item.id),
+                                          "Submission rejected.",
+                                        )
+                                      }
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                ) : null}
+                                {item.status === "not_approved" ? (
+                                  <button
+                                    type="button"
+                                    className="px-2.5 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors disabled:bg-gray-400 text-xs"
+                                    onClick={() =>
+                                      run(
+                                        () => deletePendingAd(item.id),
+                                        "Submission deleted.",
+                                      )
+                                    }
+                                  >
+                                    Delete
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {activeSection === "Ads" && view === "list" && (
-            <div>
-              <div className="max-w-[1600px] mx-auto">
-                <div className="mb-6 flex items-center justify-between">
-                  <div>
-                    <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-                      Ads
-                    </h1>
-                    <p className="text-sm text-gray-500">
-                      Manage and publish scheduled ads
-                    </p>
-                  </div>
+            <div className="max-w-[1600px] mx-auto p-8">
+              <div className="mb-8">
+                <h1 className="text-3xl font-semibold text-gray-900 mb-2">Ads</h1>
+                <p className="text-sm text-gray-500">
+                  Monitor active campaigns, review creative content, and track deployment
+                  statuses.
+                </p>
+              </div>
 
-                  <div className="flex items-center gap-3">
+              <div className="flex items-center flex-nowrap gap-3 mb-6 overflow-x-auto pb-1">
+                  <select
+                    value={adsFilters.status}
+                    onChange={(event) =>
+                      setAdsFilters((current) => ({ ...current, status: event.target.value }))
+                    }
+                    className="w-[152px] h-12 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all"
+                    style={adsSelectStyle}
+                  >
+                    <option value="All Ads">All Ads</option>
+                    <option value="Upcoming Ads">Upcoming Ads</option>
+                    <option value="Past Ads">Past Ads</option>
+                    <option value="Published">Published</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Scheduled">Scheduled</option>
+                  </select>
+
+                  <button
+                    onClick={() =>
+                      setAdsFilters((current) => ({
+                        ...current,
+                        status: current.status === "Today" ? "All Ads" : "Today",
+                      }))
+                    }
+                    className={`w-[122px] h-12 px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center ${
+                      adsFilters.status === "Today"
+                        ? "bg-gray-900 text-white"
+                        : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                    type="button"
+                  >
+                    {adsFilters.status === "Today" ? <X size={16} /> : <Clock size={16} />}
+                    Today&apos;s Ads
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setAdsFilters((current) => ({
+                        ...current,
+                        status: current.status === "This Week" ? "All Ads" : "This Week",
+                      }))
+                    }
+                    className={`w-[114px] h-12 px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center ${
+                      adsFilters.status === "This Week"
+                        ? "bg-gray-900 text-white"
+                        : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                    type="button"
+                  >
+                    {adsFilters.status === "This Week" ? (
+                      <X size={16} />
+                    ) : (
+                      <Calendar size={16} />
+                    )}
+                    This Week
+                  </button>
+
+                  <div className="relative" ref={adsAdvancedFiltersRef}>
                     <button
-                      className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      onClick={() => setAdsShowAdvancedFilters((current) => !current)}
+                      className="w-[165px] h-12 px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-center"
                       type="button"
-                      onClick={() =>
-                        download(
-                          `cbnads-ads-${Date.now()}.csv`,
-                          exportAdsCsv(),
-                          "text/csv;charset=utf-8",
-                        )
-                      }
                     >
-                      <Download size={16} />
-                      Export
+                      <Filter size={16} />
+                      Advanced filters
+                      {adsActiveAdvancedFilterCount > 0 ? (
+                        <span className="ml-1 px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
+                          {adsActiveAdvancedFilterCount}
+                        </span>
+                      ) : null}
+                      <ChevronDown size={16} />
                     </button>
 
-                    <button
-                      className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-                      type="button"
-                      onClick={() => {
-                        setAd(blankAd);
-                        setView("createAd");
-                      }}
-                    >
-                      <Plus size={16} />
-                      Create New
-                    </button>
+                    {adsShowAdvancedFilters ? (
+                      <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Date Range
+                            </label>
+                            <button
+                              onClick={() =>
+                                setAdsShowDateRangePicker((current) => !current)
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
+                              type="button"
+                            >
+                              <Calendar size={16} />
+                              {adsFilters.dateFrom && adsFilters.dateTo
+                                ? `${adsFilters.dateFrom} - ${adsFilters.dateTo}`
+                                : "Select date range"}
+                            </button>
+                            {adsShowDateRangePicker ? (
+                              <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    type="date"
+                                    value={adsFilters.dateFrom}
+                                    onChange={(event) =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateFrom: event.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                  />
+                                  <input
+                                    type="date"
+                                    value={adsFilters.dateTo}
+                                    onChange={(event) =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateTo: event.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                  />
+                                </div>
+                                {adsFilters.dateFrom || adsFilters.dateTo ? (
+                                  <button
+                                    onClick={() =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateFrom: "",
+                                        dateTo: "",
+                                      }))
+                                    }
+                                    className="w-full mt-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+                                    type="button"
+                                  >
+                                    Clear Dates
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Placement
+                            </label>
+                            <select
+                              value={adsFilters.placement}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  placement: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Placement">All Placement</option>
+                              {adsPlacementOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Post Type
+                            </label>
+                            <select
+                              value={adsFilters.postType}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  postType: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All post types">All post types</option>
+                              {adsPostTypeOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Advertiser
+                            </label>
+                            <select
+                              value={adsFilters.advertiser}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  advertiser: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Advertisers">All Advertisers</option>
+                              {adsAdvertiserOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Payment Status
+                            </label>
+                            <select
+                              value={adsFilters.payment}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  payment: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Payment Status">All Payment Status</option>
+                              <option value="Paid">Paid</option>
+                              <option value="Pending">Pending</option>
+                              <option value="Refunded">Refunded</option>
+                            </select>
+                          </div>
+
+                          {adsActiveAdvancedFilterCount > 0 ? (
+                            <button
+                              onClick={clearAdsAdvancedFilters}
+                              className="w-full mt-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                              type="button"
+                            >
+                              <X size={16} />
+                              Clear Advanced Filters
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-
-                <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <select
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
-                      value={adsStatusFilter}
-                      onChange={(event) => setAdsStatusFilter(event.target.value)}
-                    >
-                      {["All Ads", "Draft", "Scheduled", "Published"].map(
-                        (status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ),
-                      )}
-                    </select>
-
-                    <select
-                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
-                      value={adsPaymentFilter}
-                      onChange={(event) => setAdsPaymentFilter(event.target.value)}
-                    >
-                      {["All Payment Status", "Paid", "Unpaid"].map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="relative w-full max-w-sm">
+                  <div className="relative">
                     <Search
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                       size={16}
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
                     />
                     <input
-                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                      placeholder="Search by ad, advertiser, placement..."
-                      value={adsSearch}
-                      onChange={(event) => setAdsSearch(event.target.value)}
+                      type="text"
+                      placeholder="Search ads..."
+                      value={adsFilters.search}
+                      onChange={(event) =>
+                        setAdsFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        }))
+                      }
+                      className="h-12 w-[240px] pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                     />
                   </div>
-                </div>
+                  <button
+                    onClick={exportVisibleAdsCsv}
+                    className="h-12 px-6 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2"
+                    type="button"
+                  >
+                    <Download size={16} />
+                    Export
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAd(blankAd);
+                      setView("createAd");
+                    }}
+                    className="h-14 w-[104px] px-3 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center text-center leading-5"
+                    type="button"
+                  >
+                    Create new ad
+                  </button>
+              </div>
 
-                <div className="mb-4 text-sm text-gray-600">
-                  Showing {filteredAds.length} of {ads.length} ads
-                </div>
+              <div className="mb-4 text-sm text-gray-600">
+                Showing {sortedAds.length} of {adsNormalized.length} ads
+              </div>
 
-                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+              {sortedAds.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+                  <p className="text-gray-500">No ads found</p>
+                  <button
+                    onClick={() => {
+                      setAd(blankAd);
+                      setView("createAd");
+                    }}
+                    className="mt-4 px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
+                    type="button"
+                  >
+                    Create your first ad
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50">
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Ad Name
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Advertiser
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Schedule
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Status
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Payment
-                        </th>
-                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        <AdsSortableHeader
+                          label="Ad"
+                          sortKey="ad_name"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Advertiser"
+                          sortKey="advertiser"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Status"
+                          sortKey="status"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Post Type"
+                          sortKey="post_type"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Placement"
+                          sortKey="placement"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Schedule"
+                          sortKey="schedule"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Post Time"
+                          sortKey="post_time"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <AdsSortableHeader
+                          label="Payment"
+                          sortKey="payment"
+                          sortConfig={adsSortConfig}
+                          onSort={handleAdsSort}
+                        />
+                        <th className="text-right px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
                           Actions
                         </th>
                       </tr>
                     </thead>
-
-                    <tbody>
-                      {filteredAds.map((item) => (
-                        <tr
+                    <tbody className="divide-y divide-gray-100">
+                      {sortedAds.map((item) => (
+                        <AdsTableRow
                           key={item.id}
-                          className="border-b border-gray-100 align-top last:border-0"
-                        >
-                          <td className="px-6 py-4">
-                            <p className="text-sm font-medium text-gray-900">
-                              {item.ad_name || "-"}
-                            </p>
-                            <p className="mt-0.5 text-xs text-gray-500">
-                              {item.placement || "-"}
-                            </p>
-                          </td>
-
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {item.advertiser || "-"}
-                          </td>
-
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {formatDate(item.post_date)}{" "}
-                            {item.post_time ? `at ${item.post_time}` : ""}
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                item.status === "Published"
-                                  ? "bg-green-50 text-green-700"
-                                  : item.status === "Scheduled"
-                                    ? "bg-blue-50 text-blue-700"
-                                    : "bg-gray-100 text-gray-700"
-                              }`}
-                            >
-                              {item.status || "Draft"}
-                            </span>
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                                item.payment === "Paid"
-                                  ? "bg-green-50 text-green-700"
-                                  : "bg-amber-50 text-amber-700"
-                              }`}
-                            >
-                              {item.payment || "Unpaid"}
-                            </span>
-                          </td>
-
-                          <td className="px-6 py-4">
-                            <div className="flex justify-end gap-2 text-xs">
-                              <button
-                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                type="button"
-                                onClick={() => {
-                                  setAd({ ...blankAd, ...item });
-                                  setView("createAd");
-                                }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                type="button"
-                                onClick={() =>
-                                  run(
-                                    () => updateAdStatus(item.id, "Published"),
-                                    "Ad published.",
-                                  )
-                                }
-                              >
-                                Publish
-                              </button>
-                              <button
-                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                type="button"
-                                onClick={() =>
-                                  run(
-                                    () =>
-                                      updateAdPayment(
-                                        item.id,
-                                        item.payment === "Paid"
-                                          ? "Unpaid"
-                                          : "Paid",
-                                      ),
-                                    "Payment updated.",
-                                  )
-                                }
-                              >
-                                Toggle Pay
-                              </button>
-                              <button
-                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
-                                type="button"
-                                onClick={() =>
-                                  run(() => deleteAd(item.id), "Ad deleted.")
-                                }
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
+                          ad={item}
+                          onPreview={setAdsPreviewAd}
+                          onEdit={openAdEditor}
+                          onMarkPublished={markAdAsPublished}
+                          onDelete={deleteAdRecord}
+                        />
                       ))}
-
-                      {filteredAds.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={6}
-                            className="px-6 py-12 text-center text-sm text-gray-500"
-                          >
-                            No ads match your current filters.
-                          </td>
-                        </tr>
-                      ) : null}
                     </tbody>
                   </table>
                 </div>
-              </div>
+              )}
+
+              <AdsPreviewModal
+                ad={adsPreviewAd}
+                onClose={() => setAdsPreviewAd(null)}
+                onEdit={openAdEditor}
+                linkedInvoices={linkedPreviewInvoices}
+              />
             </div>
           )}
           {activeSection === "Ads" && view === "createAd" && (
@@ -1768,579 +4366,1623 @@ export default function AdsPage() {
           )}
 
           {activeSection === "Advertisers" && (
-            <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6 flex items-center justify-between gap-4">
-                <div>
-                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-                    Advertisers
-                  </h1>
-                  <p className="text-sm text-gray-500">
-                    Manage all advertiser accounts and spending
-                  </p>
-                </div>
-                <div className="relative w-full max-w-sm">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={16}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                    placeholder="Search advertisers..."
-                    value={advertiserSearch}
-                    onChange={(event) => setAdvertiserSearch(event.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
-                <div className="rounded-lg border border-gray-200 bg-white p-5">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
-                    {advertiser.id ? "Edit advertiser" : "Create advertiser"}
-                  </h2>
-                  <div className="space-y-3">
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
-                      placeholder="Advertiser name"
-                      value={advertiser.advertiser_name}
-                      onChange={(event) =>
-                        setAdvertiser({
-                          ...advertiser,
-                          advertiser_name: event.target.value,
-                        })
-                      }
-                    />
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
-                      placeholder="Email"
-                      value={advertiser.email}
-                      onChange={(event) =>
-                        setAdvertiser({ ...advertiser, email: event.target.value })
-                      }
-                    />
-                    <div className="grid grid-cols-2 gap-2">
+            <div>
+              {advertiserCreateOpen ? (
+                <div className="flex-1 overflow-auto bg-[#FAFAFA] -m-8">
+                  <div className="bg-white border-b border-gray-200 px-6 py-3">
+                    <div className="max-w-[1200px] mx-auto flex items-center justify-between relative">
                       <button
-                        className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
                         type="button"
-                        onClick={() =>
-                          run(() => {
-                            if (!advertiser.advertiser_name) {
-                              throw new Error("Advertiser name required");
-                            }
-                            upsertAdvertiser(advertiser);
-                            setAdvertiser(blankAdvertiser);
-                          }, "Advertiser saved.")
-                        }
+                        onClick={() => saveNewAdvertiser("cancel")}
+                        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
                       >
-                        Save
+                        <ArrowLeft size={18} />
+                        <span>Back</span>
+                      </button>
+
+                      <h1 className="text-sm font-medium text-gray-900 absolute left-1/2 -translate-x-1/2">
+                        New Advertiser
+                      </h1>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => saveNewAdvertiser("cancel")}
+                          className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveNewAdvertiser("save")}
+                          disabled={advertiserCreateLoading}
+                          className="px-5 py-2 text-sm font-medium text-white bg-black rounded-full hover:bg-gray-800 transition-colors disabled:opacity-50"
+                        >
+                          {advertiserCreateLoading ? "Saving..." : "Save Advertiser"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="max-w-[700px] mx-auto py-12 px-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-8">
+                      Add a new advertiser
+                    </h2>
+
+                    <div className="mb-10">
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                        Basic Information
+                      </h3>
+
+                      <div className="border border-gray-300 rounded-lg bg-white px-4 pt-3 pb-2.5 mb-4">
+                        <label className="block text-xs font-semibold text-gray-900 mb-0.5">
+                          Advertiser Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.advertiser_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm({
+                              ...advertiserCreateForm,
+                              advertiser_name: event.target.value,
+                            })
+                          }
+                          placeholder="Enter advertiser business name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="border border-gray-300 rounded-lg bg-white px-4 pt-3 pb-2.5 mb-4">
+                        <label className="block text-xs font-semibold text-gray-900 mb-0.5">
+                          Contact Name *
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.contact_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm({
+                              ...advertiserCreateForm,
+                              contact_name: event.target.value,
+                            })
+                          }
+                          placeholder="Enter primary contact name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="border border-gray-300 rounded-lg bg-white px-4 pt-3 pb-2.5 mb-4">
+                        <label className="block text-xs font-semibold text-gray-900 mb-0.5">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          value={advertiserCreateForm.email}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm({
+                              ...advertiserCreateForm,
+                              email: event.target.value,
+                            })
+                          }
+                          placeholder="contact@example.com"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="border border-gray-300 rounded-lg bg-white px-4 pt-3 pb-2.5">
+                        <label className="block text-xs font-semibold text-gray-900 mb-0.5">
+                          Phone Number
+                        </label>
+                        <input
+                          type="tel"
+                          value={advertiserCreateForm.phone_number}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm({
+                              ...advertiserCreateForm,
+                              phone_number: event.target.value,
+                            })
+                          }
+                          placeholder="555-0123"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mb-10">
+                      <h3 className="text-sm font-semibold text-gray-900 mb-4">
+                        Account Details
+                      </h3>
+
+                      <div className="relative border border-gray-300 rounded-lg bg-white px-4 pt-3 pb-2.5">
+                        <label className="block text-xs font-semibold text-gray-900 mb-0.5">
+                          Account Status
+                        </label>
+                        <select
+                          value={advertiserCreateForm.status}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm({
+                              ...advertiserCreateForm,
+                              status: event.target.value,
+                            })
+                          }
+                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none pr-6"
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                        <ChevronDown
+                          size={16}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h1 className="text-2xl font-semibold text-gray-900 mb-1">Advertisers</h1>
+                      <p className="text-sm text-gray-500">Manage all your advertiser accounts</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openAdvertiserCreate}
+                      className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+                    >
+                      <Plus size={18} />
+                      Add new Advertiser
+                    </button>
+                  </div>
+
+                  <div className="mb-6">
+                    <div className="relative max-w-md">
+                      <Search
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        size={18}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Search advertisers..."
+                        value={advertiserSearch}
+                        onChange={(event) => setAdvertiserSearch(event.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Advertiser Name
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Contact Name
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Email
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Phone Number
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Total Spend
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Next Ad Date
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Status
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredAdvertisers.length === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className="px-6 py-12 text-center text-xs text-gray-500"
+                            >
+                              {advertiserSearch
+                                ? "No advertisers found matching your search"
+                                : "No advertisers yet. Click 'Add new Advertiser' to get started."}
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredAdvertisers.map((item) => {
+                            const status = String(item.status || "active").toLowerCase();
+                            return (
+                              <tr
+                                key={item.id}
+                                className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                              >
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs font-medium text-gray-900">
+                                    {item.advertiser_name || "\u2014"}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs text-gray-900">
+                                    {item.contact_name || item.business_name || "\u2014"}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs text-gray-600">
+                                    {item.email || "\u2014"}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs text-gray-600">
+                                    {item.phone_number || item.phone || "\u2014"}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs font-medium text-gray-900">
+                                    {formatCurrency(item.total_spend ?? item.ad_spend ?? 0)}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs text-gray-600">
+                                    {formatAdvertiserDate(item.next_ad_date)}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <span
+                                    className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${getAdvertiserStatusClass(
+                                      status,
+                                    )}`}
+                                  >
+                                    {status === "active" ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-3.5 relative">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => openAdvertiserMenu(item.id, event)}
+                                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                                  >
+                                    <MoreVertical size={18} className="text-gray-600" />
+                                  </button>
+                                  {openAdvertiserMenuId === item.id ? (
+                                    <div
+                                      ref={advertiserMenuRef}
+                                      className={`absolute ${
+                                        advertiserMenuPosition.vertical === "top"
+                                          ? "bottom-full mb-1"
+                                          : "top-full mt-1"
+                                      } ${
+                                        advertiserMenuPosition.horizontal === "left"
+                                          ? "right-0"
+                                          : "left-auto"
+                                      } w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
+                                    >
+                                      <button
+                                        type="button"
+                                        onClick={() => openAdvertiserView(item)}
+                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                      >
+                                        <Eye size={16} />
+                                        View
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openAdvertiserEdit(item)}
+                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                      >
+                                        <Edit2 size={16} />
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setAdvertiserDeleteModal(item);
+                                          setOpenAdvertiserMenuId(null);
+                                        }}
+                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                      >
+                                        <Trash2 size={16} />
+                                        Delete
+                                      </button>
+                                    </div>
+                                  ) : null}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {advertiserViewModal ? (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+                    <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                      <h2 className="text-xl font-semibold text-gray-900">Advertiser Details</h2>
+                      <button
+                        type="button"
+                        onClick={() => setAdvertiserViewModal(null)}
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <div className="p-6 space-y-6">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                          Contact Information
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500">Advertiser Name</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {advertiserViewModal.advertiser.advertiser_name || "\u2014"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Contact Name</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {advertiserViewModal.advertiser.contact_name ||
+                                advertiserViewModal.advertiser.business_name ||
+                                "\u2014"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Email</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {advertiserViewModal.advertiser.email || "\u2014"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Phone Number</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {advertiserViewModal.advertiser.phone_number ||
+                                advertiserViewModal.advertiser.phone ||
+                                "\u2014"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Total Spend</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {formatCurrency(advertiserViewModal.advertiser.total_spend || 0)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Date Added</p>
+                            <p className="text-sm font-medium text-gray-900">
+                              {formatAdvertiserDate(advertiserViewModal.advertiser.created_at)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500">Status</p>
+                            <span
+                              className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${getAdvertiserStatusClass(
+                                advertiserViewModal.advertiser.status,
+                              )}`}
+                            >
+                              {String(
+                                advertiserViewModal.advertiser.status || "active",
+                              ).toLowerCase() === "active"
+                                ? "Active"
+                                : "Inactive"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                          Ads ({advertiserViewModal.ads.length})
+                        </h3>
+                        {advertiserViewModal.ads.length === 0 ? (
+                          <p className="text-sm text-gray-500">No ads for this advertiser yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {advertiserViewModal.ads.map((adItem) => {
+                              const adStatus = String(adItem.status || "").toLowerCase();
+                              return (
+                                <div
+                                  key={adItem.id}
+                                  className="p-3 border border-gray-200 rounded-lg"
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div>
+                                      <p className="text-sm font-medium text-gray-900">
+                                        {adItem.ad_name || "\u2014"}
+                                      </p>
+                                      <p className="text-xs text-gray-500 mt-1">
+                                        {adItem.post_type || "\u2014"} • {adItem.placement || "\u2014"} •{" "}
+                                        {formatAdvertiserDate(
+                                          adItem.post_date_from || adItem.post_date,
+                                        )}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className={`text-xs px-2 py-1 rounded-full ${
+                                        adStatus === "scheduled"
+                                          ? "bg-blue-100 text-blue-800"
+                                          : adStatus === "completed" || adStatus === "published"
+                                            ? "bg-green-100 text-green-800"
+                                            : "bg-gray-100 text-gray-600"
+                                      }`}
+                                    >
+                                      {adItem.status || "Draft"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {advertiserEditModal ? (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg max-w-md w-full">
+                    <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                      <h2 className="text-xl font-semibold text-gray-900">Edit Advertiser</h2>
+                      <button
+                        type="button"
+                        onClick={() => setAdvertiserEditModal(null)}
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      >
+                        <X size={20} />
+                      </button>
+                    </div>
+
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        saveAdvertiserModal();
+                      }}
+                      className="p-6 space-y-4"
+                    >
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Advertiser Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={advertiserEditModal.advertiser_name || ""}
+                          onChange={(event) =>
+                            setAdvertiserEditModal({
+                              ...advertiserEditModal,
+                              advertiser_name: event.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Contact Name
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserEditModal.contact_name || ""}
+                          onChange={(event) =>
+                            setAdvertiserEditModal({
+                              ...advertiserEditModal,
+                              contact_name: event.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          value={advertiserEditModal.email || ""}
+                          onChange={(event) =>
+                            setAdvertiserEditModal({
+                              ...advertiserEditModal,
+                              email: event.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Phone Number
+                        </label>
+                        <input
+                          type="tel"
+                          value={advertiserEditModal.phone_number || advertiserEditModal.phone || ""}
+                          onChange={(event) =>
+                            setAdvertiserEditModal({
+                              ...advertiserEditModal,
+                              phone_number: event.target.value,
+                              phone: event.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Status
+                        </label>
+                        <select
+                          value={advertiserEditModal.status || "active"}
+                          onChange={(event) =>
+                            setAdvertiserEditModal({
+                              ...advertiserEditModal,
+                              status: event.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+
+                      <div className="flex gap-3 pt-4">
+                        <button
+                          type="button"
+                          onClick={() => setAdvertiserEditModal(null)}
+                          className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={advertiserActionLoading}
+                          className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400"
+                        >
+                          {advertiserActionLoading ? "Saving..." : "Save Changes"}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              ) : null}
+
+              {advertiserDeleteModal ? (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg max-w-md w-full p-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-2">Delete Advertiser</h2>
+                    <p className="text-sm text-gray-600 mb-6">
+                      Are you sure you want to delete{" "}
+                      <strong>{advertiserDeleteModal.advertiser_name}</strong>? This will
+                      permanently delete the advertiser and all associated ads and reminders. This
+                      action cannot be undone.
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setAdvertiserDeleteModal(null)}
+                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
                       </button>
                       <button
-                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         type="button"
-                        onClick={() => setAdvertiser(blankAdvertiser)}
+                        onClick={confirmAdvertiserDelete}
+                        disabled={advertiserActionLoading}
+                        className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-red-400"
                       >
-                        Reset
+                        {advertiserActionLoading ? "Deleting..." : "Yes, I'm Sure"}
                       </button>
                     </div>
                   </div>
                 </div>
+              ) : null}
 
-                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50">
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Advertiser
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Email
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Spend
-                        </th>
-                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredAdvertisers.map((item) => (
-                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                          <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                            {item.advertiser_name}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {item.email || "-"}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-700">
-                            {formatCurrency(item.ad_spend || item.total_spend || 0)}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex justify-end gap-2 text-xs">
-                              <button
-                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                type="button"
-                                onClick={() =>
-                                  setAdvertiser({
-                                    id: item.id,
-                                    advertiser_name: item.advertiser_name || "",
-                                    email: item.email || "",
-                                    phone: item.phone || "",
-                                    business_name: item.business_name || "",
-                                  })
-                                }
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
-                                type="button"
-                                onClick={() =>
-                                  run(
-                                    () => deleteAdvertiser(item.id),
-                                    "Advertiser deleted.",
-                                  )
-                                }
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredAdvertisers.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={4}
-                            className="px-6 py-12 text-center text-sm text-gray-500"
-                          >
-                            No advertisers match your search.
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {openAdvertiserMenuId ? (
+                <div
+                  className="fixed inset-0 z-0"
+                  onClick={() => setOpenAdvertiserMenuId(null)}
+                />
+              ) : null}
             </div>
           )}
-
           {activeSection === "Products" && (
             <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6 flex items-center justify-between gap-4">
+              <div className="flex items-center justify-between mb-6 gap-4">
                 <div>
-                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-                    Products
-                  </h1>
+                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">Products</h1>
                   <p className="text-sm text-gray-500">
-                    Manage your ad packages and product pricing
+                    Manage your ad packages and products
                   </p>
                 </div>
-                <div className="relative w-full max-w-sm">
-                  <Search
-                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={16}
-                  />
-                  <input
-                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
-                    placeholder="Search products..."
-                    value={productSearch}
-                    onChange={(event) => setProductSearch(event.target.value)}
-                  />
-                </div>
+                <button
+                  type="button"
+                  onClick={openProductCreate}
+                  className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+                >
+                  <Plus size={18} />
+                  Add new Product
+                </button>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
-                <div className="rounded-lg border border-gray-200 bg-white p-5">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
-                    {product.id ? "Edit product" : "Create product"}
-                  </h2>
-                  <div className="space-y-3">
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
-                      placeholder="Product name"
-                      value={product.product_name}
-                      onChange={(event) =>
-                        setProduct({ ...product, product_name: event.target.value })
-                      }
-                    />
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
-                      placeholder="Price"
-                      type="number"
-                      value={product.price}
-                      onChange={(event) =>
-                        setProduct({ ...product, price: event.target.value })
-                      }
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
-                        type="button"
-                        onClick={() =>
-                          run(() => {
-                            if (!product.product_name) {
-                              throw new Error("Product name required");
-                            }
-                            upsertProduct(product);
-                            setProduct(blankProduct);
-                          }, "Product saved.")
+              {productCreateOpen ? (
+                <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-bold">New Product</h2>
+                    <button
+                      type="button"
+                      onClick={() => saveNewProduct("cancel")}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      {"\u2715"}
+                    </button>
+                  </div>
+                  <form
+                    className="space-y-4"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      saveNewProduct("save");
+                    }}
+                  >
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Product Name
+                      </label>
+                      <input
+                        type="text"
+                        value={product.product_name}
+                        onChange={(event) =>
+                          setProduct({ ...product, product_name: event.target.value })
                         }
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"
+                        placeholder="e.g., Premium WhatsApp Package"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Placement
+                      </label>
+                      <select
+                        value={product.placement || "WhatsApp"}
+                        onChange={(event) =>
+                          setProduct({ ...product, placement: event.target.value })
+                        }
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"
+                        required
                       >
-                        Save
+                        <option value="WhatsApp">WhatsApp</option>
+                        <option value="Website">Website</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Price
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-2 text-gray-500">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={product.price}
+                          onChange={(event) =>
+                            setProduct({ ...product, price: event.target.value })
+                          }
+                          className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"
+                          placeholder="0.00"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 pt-4">
+                      <button
+                        type="submit"
+                        disabled={productActionLoading}
+                        className="flex-1 bg-black text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      >
+                        {productActionLoading ? "Creating..." : "Create Product"}
                       </button>
                       <button
-                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         type="button"
-                        onClick={() => setProduct(blankProduct)}
+                        onClick={() => saveNewProduct("cancel")}
+                        className="px-6 py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                       >
-                        Reset
+                        Cancel
                       </button>
                     </div>
-                  </div>
+                  </form>
                 </div>
+              ) : null}
 
-                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50">
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                          Product
+              {filteredProducts.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
+                  <p className="text-gray-500">
+                    No products yet. Click "Add new Product" to create your first ad package!
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
+                          Product Name
                         </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
+                          Placement
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
                           Price
                         </th>
-                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
+                          Created
+                        </th>
+                        <th className="px-6 py-3 text-right text-[11px] font-semibold text-gray-700">
                           Actions
                         </th>
                       </tr>
                     </thead>
-                    <tbody>
+                    <tbody className="divide-y divide-gray-200">
                       {filteredProducts.map((item) => (
-                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                          <td className="px-6 py-4">
-                            <p className="text-sm font-medium text-gray-900">
-                              {item.product_name}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">
-                              {item.description || "-"}
-                            </p>
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-3.5 text-xs text-gray-900">
+                            {item.product_name}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-700">
+                          <td className="px-6 py-3.5">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+                              {item.placement || "N/A"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3.5 text-xs font-semibold text-gray-900">
                             {formatCurrency(item.price)}
                           </td>
-                          <td className="px-6 py-4">
-                            <div className="flex justify-end gap-2 text-xs">
-                              <button
-                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                                type="button"
-                                onClick={() =>
-                                  setProduct({
-                                    id: item.id,
-                                    product_name: item.product_name || "",
-                                    price: item.price || "",
-                                    description: item.description || "",
-                                  })
-                                }
+                          <td className="px-6 py-3.5 text-xs text-gray-500">
+                            {formatProductsDate(item.created_at)}
+                          </td>
+                          <td
+                            className="px-6 py-3.5 text-right relative"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={(event) => openProductMenu(item.id, event)}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <MoreVertical size={18} className="text-gray-500" />
+                            </button>
+
+                            {openProductMenuId === item.id ? (
+                              <div
+                                ref={productMenuRef}
+                                className={`absolute ${
+                                  productMenuPosition.vertical === "top"
+                                    ? "bottom-full mb-1"
+                                    : "top-full mt-1"
+                                } ${
+                                  productMenuPosition.horizontal === "left"
+                                    ? "right-0"
+                                    : "left-auto"
+                                } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
                               >
-                                Edit
-                              </button>
-                              <button
-                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
-                                type="button"
-                                onClick={() =>
-                                  run(() => deleteProduct(item.id), "Product deleted.")
-                                }
-                              >
-                                Delete
-                              </button>
-                            </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openProductEdit(item)}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <Edit2 size={16} className="text-gray-400" />
+                                  Edit
+                                </button>
+                                <div className="border-t border-gray-100 my-1" />
+                                <button
+                                  type="button"
+                                  onClick={() => openProductDelete(item)}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <Trash2 size={16} className="text-red-500" />
+                                  Delete
+                                </button>
+                              </div>
+                            ) : null}
                           </td>
                         </tr>
                       ))}
-                      {filteredProducts.length === 0 ? (
-                        <tr>
-                          <td
-                            colSpan={3}
-                            className="px-6 py-12 text-center text-sm text-gray-500"
-                          >
-                            No products match your search.
-                          </td>
-                        </tr>
-                      ) : null}
                     </tbody>
                   </table>
                 </div>
-              </div>
+              )}
+
+              {productEditModal ? (
+                <>
+                  <div
+                    onClick={() => setProductEditModal(null)}
+                    className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+                  />
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+                      <div className="px-6 py-5 border-b border-gray-200">
+                        <h2 className="text-xl font-semibold text-gray-900">Edit Product</h2>
+                      </div>
+
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          saveProductModal();
+                        }}
+                        className="p-6 space-y-4"
+                      >
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Product Name
+                          </label>
+                          <input
+                            type="text"
+                            value={productEditModal.product_name}
+                            onChange={(event) =>
+                              setProductEditModal({
+                                ...productEditModal,
+                                product_name: event.target.value,
+                              })
+                            }
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Placement
+                          </label>
+                          <select
+                            value={productEditModal.placement || "WhatsApp"}
+                            onChange={(event) =>
+                              setProductEditModal({
+                                ...productEditModal,
+                                placement: event.target.value,
+                              })
+                            }
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            required
+                          >
+                            <option value="WhatsApp">WhatsApp</option>
+                            <option value="Website">Website</option>
+                            <option value="App">App</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Price
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={productEditModal.price}
+                            onChange={(event) =>
+                              setProductEditModal({
+                                ...productEditModal,
+                                price: event.target.value,
+                              })
+                            }
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                            required
+                          />
+                        </div>
+
+                        <div className="flex gap-3 pt-4">
+                          <button
+                            type="submit"
+                            disabled={productActionLoading}
+                            className="flex-1 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+                          >
+                            {productActionLoading ? "Updating..." : "Update Product"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setProductEditModal(null)}
+                            className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {productDeleteModal ? (
+                <>
+                  <div
+                    onClick={() => setProductDeleteModal(null)}
+                    className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+                  />
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                      <h2 className="text-xl font-semibold text-gray-900 mb-4">
+                        Delete Product
+                      </h2>
+                      <p className="text-gray-600 mb-6">
+                        Are you sure you want to delete "
+                        {productDeleteModal.product_name}
+                        "? This action cannot be undone.
+                      </p>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          onClick={confirmProductDelete}
+                          disabled={productActionLoading}
+                          className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-red-400"
+                        >
+                          {productActionLoading ? "Deleting..." : "Delete"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductDeleteModal(null)}
+                          className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
           {activeSection === "Billing" && view === "list" && (
             <div className="max-w-[1400px] mx-auto">
-              <div className="mb-6 flex items-center justify-between gap-4">
+              <div className="flex items-start justify-between mb-8">
                 <div>
-                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-                    Invoices
-                  </h1>
+                  <h1 className="text-3xl font-semibold text-gray-900 mb-2">Billing</h1>
                   <p className="text-sm text-gray-500">
-                    Track billing status and advertiser payments
+                    Manage invoices, track payments, and view billing history.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 w-full max-w-[560px]">
-                  <div className="relative flex-1">
+                <div className="relative" ref={invoiceCreateMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowInvoiceCreateMenu((current) => !current)}
+                    className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
+                  >
+                    <Plus size={16} />
+                    Create Invoice
+                    <ChevronDown size={16} />
+                  </button>
+                  {showInvoiceCreateMenu ? (
+                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInvoice(blankInvoice);
+                          setView("newInvoice");
+                          setShowInvoiceCreateMenu(false);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                      >
+                        <Plus size={16} />
+                        <div>
+                          <div className="font-medium">New Invoice</div>
+                          <div className="text-xs text-gray-500">Create a single invoice</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowInvoiceCreateMenu(false);
+                          setMessage("Batch Invoice is coming soon.");
+                          window.setTimeout(() => setMessage(""), 1800);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                      >
+                        <Receipt size={16} />
+                        <div>
+                          <div className="font-medium">Batch Invoice</div>
+                          <div className="text-xs text-gray-500">Invoice by date range</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowInvoiceCreateMenu(false);
+                          setMessage("Recurring Invoice is coming soon.");
+                          window.setTimeout(() => setMessage(""), 1800);
+                        }}
+                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                      >
+                        <RefreshCw size={16} />
+                        <div>
+                          <div className="font-medium">Recurring Invoice</div>
+                          <div className="text-xs text-gray-500">Generate for period</div>
+                        </div>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                    Outstanding
+                  </div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {formatCurrency(invoiceSummary.totalOutstanding)}
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                    Collected
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-600">
+                    {formatCurrency(invoiceSummary.totalPaid)}
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                    Overdue
+                  </div>
+                  <div className="text-2xl font-bold text-rose-600">
+                    {invoiceSummary.overdueCount} invoice
+                    {invoiceSummary.overdueCount !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-6 gap-4">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 text-sm text-gray-600 mr-2">
+                    <Filter size={16} />
+                    <span className="font-medium">Filter</span>
+                  </div>
+                  <select
+                    value={invoiceFilters.status}
+                    onChange={(event) =>
+                      setInvoiceFilters((current) => ({
+                        ...current,
+                        status: event.target.value,
+                      }))
+                    }
+                    className="px-4 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:border-gray-300 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-0 focus:border-gray-900 appearance-none cursor-pointer transition-all"
+                    style={adsSelectStyle}
+                  >
+                    <option value="All">All</option>
+                    <option value="Paid">Paid</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Overdue">Overdue</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="relative">
                     <Search
-                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
                       size={16}
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
                     />
                     <input
-                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                      type="text"
                       placeholder="Search invoices..."
-                      value={invoiceSearch}
-                      onChange={(event) => setInvoiceSearch(event.target.value)}
+                      value={invoiceFilters.search}
+                      onChange={(event) =>
+                        setInvoiceFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        }))
+                      }
+                      className="pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 w-[260px] transition-all"
                     />
                   </div>
+                </div>
+              </div>
+
+              {filteredInvoices.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+                  <FileText size={48} className="mx-auto text-gray-300 mb-4" />
+                  <p className="text-gray-500 mb-2">No invoices found</p>
+                  <p className="text-sm text-gray-400 mb-4">
+                    Create your first invoice to get started
+                  </p>
                   <button
-                    className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
                     type="button"
                     onClick={() => {
                       setInvoice(blankInvoice);
                       setView("newInvoice");
                     }}
+                    className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
                   >
-                    <Plus size={16} />
-                    New Invoice
+                    Create Invoice
                   </button>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <InvoiceSortableHeader
+                            label="Invoice"
+                            sortKey="invoice_number"
+                            onSort={handleInvoiceSort}
+                          />
+                          <InvoiceSortableHeader
+                            label="Advertiser"
+                            sortKey="advertiser_name"
+                            onSort={handleInvoiceSort}
+                          />
+                          <InvoiceSortableHeader label="Date" sortKey="date" onSort={handleInvoiceSort} />
+                          <InvoiceSortableHeader
+                            label="Status"
+                            sortKey="status"
+                            onSort={handleInvoiceSort}
+                          />
+                          <InvoiceSortableHeader
+                            label="Items"
+                            sortKey="items"
+                            onSort={handleInvoiceSort}
+                          />
+                          <InvoiceSortableHeader
+                            label="Total"
+                            sortKey="total"
+                            onSort={handleInvoiceSort}
+                          />
+                          <th className="text-right px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {filteredInvoices.map((item) => {
+                          const advertiserName =
+                            item.advertiser_name ||
+                            advertisers.find((adv) => adv.id === item.advertiser_id)
+                              ?.advertiser_name ||
+                            "-";
+                          const status = normalizeInvoiceStatus(item.status);
+                          const itemCount = Array.isArray(item.ad_ids) ? item.ad_ids.length : 0;
+                          return (
+                            <tr
+                              key={item.id}
+                              className="hover:bg-gray-50 transition-colors cursor-pointer group"
+                              onClick={() => openInvoicePreview(item)}
+                            >
+                              <td className="px-6 py-4">
+                                <div className="text-xs font-semibold text-gray-900">
+                                  #{item.invoice_number || item.id}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-xs font-medium text-gray-900">
+                                  {advertiserName}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-xs text-gray-700 font-medium">
+                                  {formatInvoiceListDate(item.due_date || item.created_at)}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span
+                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
+                                    status,
+                                  )}`}
+                                >
+                                  {status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-xs text-gray-700 font-medium">
+                                  {itemCount} item{itemCount !== 1 ? "s" : ""}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="text-xs font-semibold text-gray-900">
+                                  {formatCurrency(item.amount)}
+                                </span>
+                              </td>
+                              <td
+                                className="px-6 py-4 text-right relative"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(event) => openInvoiceMenu(item.id, event)}
+                                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                >
+                                  <MoreVertical size={18} className="text-gray-500" />
+                                </button>
+                                {openInvoiceMenuId === item.id ? (
+                                  <div
+                                    ref={invoiceMenuRef}
+                                    className={`absolute ${
+                                      invoiceMenuPosition.vertical === "top"
+                                        ? "bottom-full mb-1"
+                                        : "top-full mt-1"
+                                    } ${
+                                      invoiceMenuPosition.horizontal === "left"
+                                        ? "right-0"
+                                        : "left-auto"
+                                    } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => openInvoicePreview(item)}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                    >
+                                      <Eye size={16} className="text-gray-400" />
+                                      View Invoice
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openInvoiceEditor(item)}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                    >
+                                      <Edit2 size={16} className="text-gray-400" />
+                                      Edit Invoice
+                                    </button>
+                                    {status !== "Paid" ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => markInvoiceAsPaid(item)}
+                                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                      >
+                                        <CheckCircle size={16} className="text-gray-400" />
+                                        Mark as Paid
+                                      </button>
+                                    ) : null}
+                                    <div className="border-t border-gray-100 my-1" />
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteInvoiceRecord(item.id)}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                    >
+                                      <Trash2 size={16} className="text-red-500" />
+                                      Delete
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
-              <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Invoice
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Advertiser
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Amount
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Due
-                      </th>
-                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
-                        Actions
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredInvoices.map((item) => (
-                      <tr key={item.id} className="border-b border-gray-100 last:border-0">
-                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                          {item.invoice_number || item.id}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
-                          {advertisers.find((adv) => adv.id === item.advertiser_id)
-                            ?.advertiser_name || "-"}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
-                          {formatCurrency(item.amount)}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">
-                          {formatDate(item.due_date)}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
-                              item.status === "Paid"
-                                ? "bg-green-50 text-green-700"
-                                : item.status === "Overdue"
-                                  ? "bg-red-50 text-red-700"
-                                  : "bg-amber-50 text-amber-700"
-                            }`}
-                          >
-                            {item.status}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex justify-end gap-2 text-xs">
-                            <button
-                              className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
-                              type="button"
-                              onClick={() => {
-                                setInvoice({
-                                  ...blankInvoice,
-                                  ...item,
-                                  ad_ids: item.ad_ids || [],
-                                });
-                                setView("newInvoice");
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
-                              type="button"
-                              onClick={() =>
-                                run(() => deleteInvoice(item.id), "Invoice deleted.")
-                              }
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredInvoices.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          className="px-6 py-12 text-center text-sm text-gray-500"
+              {invoicePreviewModal ? (
+                <>
+                  <div
+                    onClick={() => setInvoicePreviewModal(null)}
+                    className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+                  />
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-[580px] w-full max-h-[90vh] overflow-hidden">
+                      <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                        <h2 className="text-lg font-semibold text-gray-900">
+                          Invoice #{invoicePreviewModal.invoice_number || invoicePreviewModal.id}
+                        </h2>
+                        <button
+                          type="button"
+                          onClick={() => setInvoicePreviewModal(null)}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                         >
-                          No invoices match your search.
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
+                          <X size={20} className="text-gray-600" />
+                        </button>
+                      </div>
+                      <div className="p-6 text-sm space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                              Bill to
+                            </p>
+                            <p className="font-medium text-gray-900">
+                              {invoicePreviewModal.advertiser_name || "-"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                              Date
+                            </p>
+                            <p className="font-medium text-gray-900">
+                              {formatInvoiceListDate(
+                                invoicePreviewModal.due_date ||
+                                  invoicePreviewModal.created_at,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                              Status
+                            </p>
+                            <span
+                              className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
+                                invoicePreviewModal.status,
+                              )}`}
+                            >
+                              {normalizeInvoiceStatus(invoicePreviewModal.status)}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
+                              Amount Due
+                            </p>
+                            <p className="text-lg font-bold text-gray-900">
+                              {formatCurrency(invoicePreviewModal.amount)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="border-t border-gray-200 pt-4">
+                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">
+                            Linked Ads
+                          </p>
+                          <div className="space-y-1.5 max-h-36 overflow-auto">
+                            {(invoicePreviewModal.ad_ids || []).length === 0 ? (
+                              <p className="text-xs text-gray-500">No linked ads.</p>
+                            ) : (
+                              (invoicePreviewModal.ad_ids || []).map((adId) => (
+                                <p key={adId} className="text-xs text-gray-700 truncate">
+                                  {ads.find((item) => item.id === adId)?.ad_name || adId}
+                                </p>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex justify-end gap-2 border-t border-gray-200 pt-4">
+                          {normalizeInvoiceStatus(invoicePreviewModal.status) !== "Paid" ? (
+                            <button
+                              type="button"
+                              onClick={() => markInvoiceAsPaid(invoicePreviewModal)}
+                              className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              Mark as Paid
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => openInvoiceEditor(invoicePreviewModal)}
+                            className="px-4 py-2 rounded-lg bg-black text-sm text-white hover:bg-gray-800"
+                          >
+                            Edit Invoice
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
 
           {activeSection === "Billing" && view === "newInvoice" && (
-            <div className="max-w-[900px] mx-auto">
+            <div className="max-w-[1400px] mx-auto">
               <button
-                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 type="button"
                 onClick={() => {
                   setView("list");
                   setInvoice(blankInvoice);
                 }}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all mb-6"
               >
-                <ArrowLeft size={16} />
+                <ChevronLeft size={16} />
                 Back to Billing
               </button>
 
-              <div className="rounded-lg border border-gray-200 bg-white p-6 text-sm">
-                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                  {invoice.id ? "Edit Invoice" : "Create Invoice"}
-                </h2>
-                <p className="text-sm text-gray-500 mb-6">
-                  Select an advertiser and include linked ads for billing
-                </p>
+              <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-8">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+                  <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                    {invoice.id ? "Edit Invoice" : "Create Invoice"}
+                  </h2>
+                  <p className="text-sm text-gray-500 mb-8">
+                    Select an advertiser and include linked ads for billing
+                  </p>
 
-                <div className="space-y-4">
-                  <input
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
-                    placeholder="Invoice number"
-                    value={invoice.invoice_number}
-                    onChange={(event) =>
-                      setInvoice({ ...invoice, invoice_number: event.target.value })
-                    }
-                  />
-                  <select
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
-                    value={invoice.advertiser_id}
-                    onChange={(event) =>
-                      setInvoice({
-                        ...invoice,
-                        advertiser_id: event.target.value,
-                        ad_ids: [],
-                      })
-                    }
-                  >
-                    <option value="">Select advertiser</option>
-                    {advertisers.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.advertiser_name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
-                      placeholder="Amount"
-                      type="number"
-                      value={invoice.amount}
-                      onChange={(event) =>
-                        setInvoice({ ...invoice, amount: event.target.value })
-                      }
-                    />
-                    <input
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
-                      type="date"
-                      value={invoice.due_date}
-                      onChange={(event) =>
-                        setInvoice({ ...invoice, due_date: event.target.value })
-                      }
-                    />
-                  </div>
-                  <select
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
-                    value={invoice.status}
-                    onChange={(event) =>
-                      setInvoice({ ...invoice, status: event.target.value })
-                    }
-                  >
-                    {["Unpaid", "Paid", "Pending", "Overdue"].map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="rounded-lg border border-gray-200 p-3 max-h-40 overflow-auto">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                      Link Ads
-                    </p>
-                    <div className="space-y-1">
-                      {visibleAdsForInvoice.map((item) => (
-                        <label key={item.id} className="flex items-center gap-2 text-xs">
-                          <input
-                            type="checkbox"
-                            checked={invoice.ad_ids.includes(item.id)}
-                            onChange={() =>
-                              setInvoice((current) => ({
-                                ...current,
-                                ad_ids: current.ad_ids.includes(item.id)
-                                  ? current.ad_ids.filter((id) => id !== item.id)
-                                  : [...current.ad_ids, item.id],
-                              }))
-                            }
-                          />
-                          {item.ad_name}
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">
+                        Invoice Number
+                      </label>
+                      <input
+                        type="text"
+                        value={invoice.invoice_number}
+                        onChange={(event) =>
+                          setInvoice({ ...invoice, invoice_number: event.target.value })
+                        }
+                        placeholder="INV-000001"
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">
+                        Advertiser
+                      </label>
+                      <select
+                        value={invoice.advertiser_id}
+                        onChange={(event) =>
+                          setInvoice({
+                            ...invoice,
+                            advertiser_id: event.target.value,
+                            ad_ids: [],
+                          })
+                        }
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                      >
+                        <option value="">Select advertiser</option>
+                        {advertisers.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.advertiser_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                          Amount
                         </label>
-                      ))}
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={invoice.amount}
+                          onChange={(event) =>
+                            setInvoice({ ...invoice, amount: event.target.value })
+                          }
+                          placeholder="0.00"
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                          Issue Date
+                        </label>
+                        <input
+                          type="date"
+                          value={invoice.due_date}
+                          onChange={(event) =>
+                            setInvoice({ ...invoice, due_date: event.target.value })
+                          }
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-2">
+                        Status
+                      </label>
+                      <select
+                        value={normalizeInvoiceStatus(invoice.status)}
+                        onChange={(event) =>
+                          setInvoice({ ...invoice, status: event.target.value })
+                        }
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                      >
+                        <option value="Paid">Paid</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Overdue">Overdue</option>
+                      </select>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-200 p-4 max-h-56 overflow-auto">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
+                        Link Ads
+                      </p>
+                      <div className="space-y-2">
+                        {visibleAdsForInvoice.length === 0 ? (
+                          <p className="text-xs text-gray-500">
+                            No ads available for this advertiser.
+                          </p>
+                        ) : (
+                          visibleAdsForInvoice.map((item) => (
+                            <label
+                              key={item.id}
+                              className="flex items-center justify-between gap-3 text-xs"
+                            >
+                              <span className="truncate text-gray-700">{item.ad_name}</span>
+                              <input
+                                type="checkbox"
+                                checked={invoice.ad_ids.includes(item.id)}
+                                onChange={() =>
+                                  setInvoice((current) => ({
+                                    ...current,
+                                    ad_ids: current.ad_ids.includes(item.id)
+                                      ? current.ad_ids.filter((id) => id !== item.id)
+                                      : [...current.ad_ids, item.id],
+                                  }))
+                                }
+                              />
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={saveInvoiceForm}
+                        className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all"
+                      >
+                        Save Invoice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setInvoice(blankInvoice)}
+                        className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all"
+                      >
+                        Reset
+                      </button>
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      className="rounded-lg bg-black px-4 py-2 text-white hover:bg-gray-800"
-                      type="button"
-                      onClick={() =>
-                        run(() => {
-                          if (!invoice.advertiser_id) {
-                            throw new Error("Advertiser required");
-                          }
-                          if (!invoice.amount) {
-                            throw new Error("Amount required");
-                          }
-                          upsertInvoice(invoice);
-                          setInvoice(blankInvoice);
-                          setView("list");
-                        }, "Invoice saved.")
-                      }
-                    >
-                      Save
-                    </button>
-                    <button
-                      className="rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
-                      type="button"
-                      onClick={() => setInvoice(blankInvoice)}
-                    >
-                      Reset
-                    </button>
+                </div>
+
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit sticky top-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Invoice Preview</h3>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Invoice</span>
+                      <span className="font-medium text-gray-900">
+                        {invoice.invoice_number || "Auto-generated"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Advertiser</span>
+                      <span className="font-medium text-gray-900">
+                        {advertisers.find((item) => item.id === invoice.advertiser_id)
+                          ?.advertiser_name || "-"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Issue Date</span>
+                      <span className="font-medium text-gray-900">
+                        {formatInvoiceListDate(invoice.due_date)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Status</span>
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
+                          invoice.status,
+                        )}`}
+                      >
+                        {normalizeInvoiceStatus(invoice.status)}
+                      </span>
+                    </div>
+                    <div className="pt-3 border-t border-gray-200">
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                        Linked Ads
+                      </div>
+                      <div className="space-y-1.5 max-h-32 overflow-auto">
+                        {invoice.ad_ids.length === 0 ? (
+                          <p className="text-xs text-gray-500">No ads selected.</p>
+                        ) : (
+                          invoice.ad_ids.map((adId) => (
+                            <p key={adId} className="text-xs text-gray-700 truncate">
+                              {ads.find((item) => item.id === adId)?.ad_name || adId}
+                            </p>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <div className="pt-3 border-t border-gray-200 flex justify-between">
+                      <span className="text-sm font-semibold text-gray-900">Total</span>
+                      <span className="text-sm font-bold text-gray-900">
+                        {formatCurrency(invoice.amount)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
