@@ -16,7 +16,8 @@ import {
   Users,
   DollarSign,
   FileText,
-  CalendarDays,
+  Calendar,
+  RefreshCw,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { getSignedInUser } from "@/lib/localAuth";
@@ -136,6 +137,43 @@ const formatTime = (value) => {
   return `${displayHour}:${minuteText} ${period}`;
 };
 
+const formatRelativeTime = (value) => {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return "-";
+  }
+  const now = new Date();
+  const diffMs = now.valueOf() - date.valueOf();
+  const diffMins = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 60) {
+    return `${Math.max(diffMins, 0)}m ago`;
+  }
+  if (diffHours < 24) {
+    return `${Math.max(diffHours, 0)}h ago`;
+  }
+  return `${Math.max(diffDays, 0)}d ago`;
+};
+
+const getInvoiceOutstanding = (invoice) => {
+  const total = Number(invoice?.total ?? invoice?.amount ?? 0) || 0;
+  const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
+  const status = String(invoice?.status || "").toLowerCase();
+  if (status === "paid") {
+    return 0;
+  }
+  const outstanding = total - amountPaid;
+  if (outstanding > 0) {
+    return outstanding;
+  }
+  return total;
+};
+
 function StatCard({ label, value }) {
   return (
     <div className="rounded-xl border bg-white p-4">
@@ -166,6 +204,7 @@ export default function AdsPage() {
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -231,10 +270,35 @@ export default function AdsPage() {
     }
     return ads.filter((item) => item.advertiser_id === invoice.advertiser_id);
   }, [ads, invoice.advertiser_id]);
+
   const dashboardStats = useMemo(() => {
-    const paidRevenue = ads
-      .filter((item) => item.payment === "Paid")
-      .reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+    const now = new Date();
+    const paidAds = ads.filter((item) => item.payment === "Paid");
+    const paidRevenue = paidAds.reduce(
+      (sum, item) => sum + (Number(item.price) || 0),
+      0,
+    );
+    const monthRevenue = paidAds.reduce((sum, item) => {
+      const sourceDate = item.post_date || item.created_at;
+      if (!sourceDate) {
+        return sum;
+      }
+      const parsed = new Date(sourceDate);
+      if (Number.isNaN(parsed.valueOf())) {
+        return sum;
+      }
+      if (
+        parsed.getMonth() !== now.getMonth() ||
+        parsed.getFullYear() !== now.getFullYear()
+      ) {
+        return sum;
+      }
+      return sum + (Number(item.price) || 0);
+    }, 0);
+    const outstandingRevenue = invoices.reduce(
+      (sum, item) => sum + getInvoiceOutstanding(item),
+      0,
+    );
 
     return {
       totalAds: ads.length,
@@ -242,6 +306,8 @@ export default function AdsPage() {
         .length,
       activeAdvertisers: advertisers.length,
       paidRevenue,
+      outstandingRevenue,
+      monthRevenue,
       overdueInvoices: invoices.filter((item) => item.status === "Overdue")
         .length,
     };
@@ -301,24 +367,182 @@ export default function AdsPage() {
     [invoices],
   );
 
+  const capacityWarnings = useMemo(() => {
+    const maxAdsPerDay =
+      Number(db.admin_settings?.max_ads_per_day) ||
+      Number(db.admin_settings?.max_ads_per_slot) ||
+      0;
+    if (maxAdsPerDay <= 0) {
+      return [];
+    }
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const dayMap = new Map();
+    for (let offset = 0; offset < 7; offset += 1) {
+      const date = new Date(start);
+      date.setDate(start.getDate() + offset);
+      const key = date.toISOString().slice(0, 10);
+      dayMap.set(key, {
+        date: key,
+        count: 0,
+        max: maxAdsPerDay,
+      });
+    }
+
+    for (const ad of upcomingAds) {
+      const key = String(ad.post_date || "").slice(0, 10);
+      const bucket = dayMap.get(key);
+      if (bucket) {
+        bucket.count += 1;
+      }
+    }
+
+    return [...dayMap.values()].filter((item) => item.count >= item.max);
+  }, [db.admin_settings, upcomingAds]);
+
   const topAdvertisers = useMemo(() => {
-    return [...advertisers]
-      .map((item) => ({
-        ...item,
-        total_spend:
-          Number(item.total_spend) || Number(item.ad_spend) || Number(item.spend) || 0,
-      }))
-      .sort((a, b) => b.total_spend - a.total_spend)
+    const lookup = new Map();
+
+    for (const ad of ads) {
+      if (ad.payment !== "Paid") {
+        continue;
+      }
+
+      const key =
+        ad.advertiser_id ||
+        `name:${String(ad.advertiser || "Unknown advertiser").toLowerCase()}`;
+      const name =
+        advertisers.find((item) => item.id === ad.advertiser_id)?.advertiser_name ||
+        ad.advertiser ||
+        "Unknown advertiser";
+
+      const current = lookup.get(key) || {
+        id: ad.advertiser_id || key,
+        advertiser_name: name,
+        total_spent: 0,
+      };
+      current.total_spent += Number(ad.price) || 0;
+      lookup.set(key, current);
+    }
+
+    for (const advertiser of advertisers) {
+      const key = advertiser.id || `name:${String(advertiser.advertiser_name || "").toLowerCase()}`;
+      const fallbackSpend =
+        Number(advertiser.total_spend) ||
+        Number(advertiser.ad_spend) ||
+        Number(advertiser.spend) ||
+        0;
+
+      if (!lookup.has(key)) {
+        lookup.set(key, {
+          id: advertiser.id || key,
+          advertiser_name: advertiser.advertiser_name || "Unknown advertiser",
+          total_spent: fallbackSpend,
+        });
+      } else if (fallbackSpend > 0) {
+        const existing = lookup.get(key);
+        existing.total_spent = Math.max(existing.total_spent, fallbackSpend);
+      }
+    }
+
+    return [...lookup.values()]
+      .sort((a, b) => b.total_spent - a.total_spent)
       .slice(0, 5);
-  }, [advertisers]);
+  }, [ads, advertisers]);
+
+  const revenueTrend = useMemo(() => {
+    const points = [];
+    const now = new Date();
+
+    for (let offset = 5; offset >= 0; offset -= 1) {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      const monthKey = `${monthDate.getFullYear()}-${String(
+        monthDate.getMonth() + 1,
+      ).padStart(2, "0")}`;
+      points.push({
+        month: monthKey,
+        revenue: 0,
+      });
+    }
+
+    const byMonth = new Map(points.map((item) => [item.month, item]));
+    for (const ad of ads) {
+      if (ad.payment !== "Paid") {
+        continue;
+      }
+      const sourceDate = ad.post_date || ad.created_at;
+      if (!sourceDate) {
+        continue;
+      }
+
+      const date = new Date(sourceDate);
+      if (Number.isNaN(date.valueOf())) {
+        continue;
+      }
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+        2,
+        "0",
+      )}`;
+      const bucket = byMonth.get(key);
+      if (bucket) {
+        bucket.revenue += Number(ad.price) || 0;
+      }
+    }
+
+    return points;
+  }, [ads]);
+
+  const maxRevenueValue = useMemo(
+    () =>
+      Math.max(
+        ...revenueTrend.map((point) => Number(point.revenue) || 0),
+        1,
+      ),
+    [revenueTrend],
+  );
+
+  const dashboardInsights = useMemo(() => {
+    const avgAdPrice =
+      ads.length > 0
+        ? ads.reduce((sum, item) => sum + (Number(item.price) || 0), 0) / ads.length
+        : 0;
+
+    const byType = new Map();
+    const byPlacement = new Map();
+    for (const ad of ads) {
+      const postType = String(ad.post_type || "N/A");
+      byType.set(postType, (byType.get(postType) || 0) + 1);
+
+      const placement =
+        ad.placement ||
+        products.find((item) => item.id === ad.product_id)?.placement ||
+        "N/A";
+      byPlacement.set(placement, (byPlacement.get(placement) || 0) + 1);
+    }
+
+    const [mostPopularType = "N/A"] = [...byType.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+    const [mostPopularPlacement = "N/A"] =
+      [...byPlacement.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+
+    return {
+      avgAdPrice,
+      mostPopularType,
+      mostPopularPlacement,
+    };
+  }, [ads, products]);
 
   const recentAds = useMemo(() => {
     return [...ads]
-      .sort((a, b) =>
-        `${b.post_date || ""} ${b.post_time || ""}`.localeCompare(
-          `${a.post_date || ""} ${a.post_time || ""}`,
-        ),
-      )
+      .sort((a, b) => {
+        const dateA = new Date(
+          a.created_at || `${a.post_date || ""}T${a.post_time || "00:00:00"}`,
+        );
+        const dateB = new Date(
+          b.created_at || `${b.post_date || ""}T${b.post_time || "00:00:00"}`,
+        );
+        return dateB.valueOf() - dateA.valueOf();
+      })
       .slice(0, 5);
   }, [ads]);
 
@@ -426,10 +650,36 @@ export default function AdsPage() {
     setShowProfileDropdown(false);
   };
 
-  if (!ready || !user) {
+  const syncDashboardData = () => {
+    if (syncing) {
+      return;
+    }
+    setSyncing(true);
+    setDb(readDb());
+    setMessage("Dashboard synced.");
+    window.setTimeout(() => setMessage(""), 1800);
+    window.setTimeout(() => setSyncing(false), 500);
+  };
+
+  if (!ready) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-gray-600">Loading dashboard...</p>
+      <div className="p-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="h-8 bg-gray-200 rounded w-1/4 mb-8" />
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+            {[1, 2, 3, 4].map((item) => (
+              <div key={item} className="h-24 bg-gray-200 rounded" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <p className="text-gray-600">Redirecting to sign in...</p>
       </div>
     );
   }
@@ -523,18 +773,29 @@ export default function AdsPage() {
           ) : null}
           {activeSection === "Dashboard" && (
             <div className="max-w-7xl mx-auto">
-              <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-                <p className="text-gray-600 mt-1">Overview of your ad management</p>
+              <div className="mb-8 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+                  <p className="text-gray-600 mt-1">Overview of your ad management</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={syncDashboardData}
+                  disabled={syncing}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "Syncing..." : "Sync Data"}
+                </button>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-8">
                 <div className="bg-white border border-gray-200 rounded-lg p-5">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Active Ads
                     </p>
-                    <CalendarDays className="w-4 h-4 text-gray-400" />
+                    <Calendar className="w-4 h-4 text-gray-400" />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {dashboardStats.totalAds}
@@ -556,27 +817,55 @@ export default function AdsPage() {
                 <div className="bg-white border border-gray-200 rounded-lg p-5">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Paid Revenue
+                      Outstanding
                     </p>
-                    <TrendingUp className="w-4 h-4 text-gray-400" />
+                    <AlertCircle className="w-4 h-4 text-gray-400" />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
-                    {formatCurrency(dashboardStats.paidRevenue)}
+                    {formatCurrency(dashboardStats.outstandingRevenue)}
                   </p>
                 </div>
 
                 <div className="bg-white border border-gray-200 rounded-lg p-5">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      Overdue Invoices
+                      This Month
                     </p>
-                    <AlertCircle className="w-4 h-4 text-gray-400" />
+                    <TrendingUp className="w-4 h-4 text-gray-400" />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
-                    {dashboardStats.overdueInvoices}
+                    {formatCurrency(dashboardStats.monthRevenue)}
                   </p>
                 </div>
               </div>
+
+              {capacityWarnings.length > 0 && (
+                <div className="bg-white border border-gray-200 rounded-lg mb-6">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Capacity Warnings (Next 7 Days)
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-7 gap-2">
+                      {capacityWarnings.map((warning) => (
+                        <div
+                          key={warning.date}
+                          className="bg-gray-50 border border-gray-200 rounded p-3 text-center"
+                        >
+                          <p className="text-xs text-gray-600 mb-1">
+                            {formatDate(warning.date)}
+                          </p>
+                          <p className="text-sm font-bold text-gray-900">
+                            {warning.count}/{warning.max}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">at capacity</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-6 lg:grid-cols-2 mb-6">
                 <div className="bg-white border border-gray-200 rounded-lg">
@@ -598,14 +887,22 @@ export default function AdsPage() {
                                 {item.ad_name}
                               </p>
                               <p className="mt-0.5 text-xs text-gray-500">
-                                {item.advertiser || "-"} • {item.placement || "-"}
+                                {item.advertiser || "-"}
+                                {" \u2022 "}
+                                {item.placement || "-"}
                               </p>
                             </div>
                             <div className="ml-4 text-right flex-shrink-0">
                               <p className="text-xs font-semibold text-gray-700">
                                 {formatTime(item.post_time)}
                               </p>
-                              <span className="inline-block mt-1 rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
+                              <span
+                                className={`inline-block mt-1 rounded px-2 py-0.5 text-xs font-medium ${
+                                  item.status === "Published"
+                                    ? "bg-gray-100 text-gray-700"
+                                    : "bg-gray-50 text-gray-600"
+                                }`}
+                              >
                                 {item.status || "Draft"}
                               </span>
                             </div>
@@ -643,10 +940,10 @@ export default function AdsPage() {
                             </div>
                             <div className="ml-4 text-right flex-shrink-0">
                               <p className="text-xs font-semibold text-gray-900">
-                                {formatCurrency(item.amount)}
+                                {formatCurrency(getInvoiceOutstanding(item))}
                               </p>
                               <p className="mt-0.5 text-xs text-gray-500">
-                                Due {formatDate(item.due_date)}
+                                {formatDate(item.issue_date || item.due_date)}
                               </p>
                             </div>
                           </div>
@@ -659,7 +956,52 @@ export default function AdsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-2">
+              <div className="grid gap-6 lg:grid-cols-2 mb-6">
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Revenue Trend (6 Months)
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {revenueTrend.length > 0 ? (
+                      <div className="space-y-2">
+                        {revenueTrend.map((item) => (
+                          <div
+                            key={item.month}
+                            className="flex items-center justify-between"
+                          >
+                            <span className="w-20 text-xs text-gray-600">
+                              {new Date(`${item.month}-01`).toLocaleDateString("en-US", {
+                                month: "short",
+                                year: "numeric",
+                              })}
+                            </span>
+                            <div className="flex-1 mx-3">
+                              <div className="bg-gray-100 rounded-full h-2">
+                                <div
+                                  className="bg-gray-900 h-2 rounded-full"
+                                  style={{
+                                    width: `${Math.min(
+                                      ((Number(item.revenue) || 0) / maxRevenueValue) * 100,
+                                      100,
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <span className="w-20 text-right text-xs font-semibold text-gray-900">
+                              {formatCurrency(item.revenue)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No revenue data.</p>
+                    )}
+                  </div>
+                </div>
+
                 <div className="bg-white border border-gray-200 rounded-lg">
                   <div className="px-5 py-4 border-b border-gray-200">
                     <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
@@ -678,18 +1020,66 @@ export default function AdsPage() {
                               <span className="w-4 text-xs font-bold text-gray-400">
                                 {index + 1}
                               </span>
-                              <span className="text-sm text-gray-900 truncate">
+                              <span className="text-sm text-gray-900">
                                 {item.advertiser_name}
                               </span>
                             </div>
                             <span className="text-sm font-semibold text-gray-900">
-                              {formatCurrency(item.total_spend)}
+                              {formatCurrency(item.total_spent)}
                             </span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-sm text-gray-500">No advertiser data yet.</p>
+                      <p className="text-sm text-gray-500">No advertiser data.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Recent Activity
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {recentAds.length > 0 ? (
+                      <div className="space-y-3">
+                        {recentAds.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm text-gray-900 truncate">{item.ad_name}</p>
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                {item.advertiser || "-"}
+                              </p>
+                            </div>
+                            <div className="ml-4 text-right flex-shrink-0">
+                              <span
+                                className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+                                  item.status === "Published"
+                                    ? "bg-gray-100 text-gray-700"
+                                    : "bg-gray-50 text-gray-600"
+                                }`}
+                              >
+                                {item.status || "Draft"}
+                              </span>
+                              <p className="mt-1 text-xs text-gray-500">
+                                {formatRelativeTime(
+                                  item.created_at ||
+                                    `${item.post_date || ""}T${item.post_time || "00:00:00"}`,
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No recent activity.</p>
                     )}
                   </div>
                 </div>
@@ -700,40 +1090,44 @@ export default function AdsPage() {
                       Quick Stats
                     </h2>
                   </div>
-                  <div className="p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">Total Advertisers</span>
+                  <div className="p-5">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">Total Advertisers</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {dashboardStats.activeAdvertisers}
+                        </span>
                       </div>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {dashboardStats.activeAdvertisers}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">Average Ad Value</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">Avg Ad Price</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {formatCurrency(dashboardInsights.avgAdPrice)}
+                        </span>
                       </div>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(
-                          ads.length > 0
-                            ? ads.reduce(
-                                (sum, item) => sum + (Number(item.price) || 0),
-                                0,
-                              ) / ads.length
-                            : 0,
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-600">Recent Ads</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Calendar className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">Most Popular Type</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {dashboardInsights.mostPopularType}
+                        </span>
                       </div>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {recentAds.length}
-                      </span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">Popular Placement</span>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {dashboardInsights.mostPopularPlacement}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
