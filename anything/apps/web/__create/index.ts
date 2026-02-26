@@ -53,7 +53,13 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseEnabled = process.env.CBN_ENABLE_DATABASE === 'true';
+const databaseUrl = databaseEnabled ? process.env.DATABASE_URL : undefined;
+
+if (databaseEnabled && !databaseUrl) {
+  console.warn('CBN_ENABLE_DATABASE is true but DATABASE_URL is missing. Database mode disabled.');
+}
+
 const pool = databaseUrl
   ? new Pool({
       connectionString: databaseUrl,

@@ -8,7 +8,11 @@ export async function GET() {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    if (!process.env.DATABASE_URL) {
+    const databaseEnabled =
+      process.env.CBN_ENABLE_DATABASE === "true" &&
+      Boolean(process.env.DATABASE_URL);
+
+    if (!databaseEnabled) {
       return Response.json({
         user: {
           id: session.user.id,

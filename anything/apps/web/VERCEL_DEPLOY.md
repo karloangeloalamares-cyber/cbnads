@@ -30,9 +30,17 @@ None for local-mode deployment.
 
 ## Local Mode (No Database)
 
-- If `DATABASE_URL` is not set, sign-in falls back to local browser storage.
+- Database is disabled by default.
+- Sign-in falls back to local browser storage.
 - This is temporary and intended for staging/testing before Supabase is added.
 - In local mode, local users are treated as `admin`.
+
+## Enable Database Later
+
+When you are ready for Supabase:
+
+- Set `CBN_ENABLE_DATABASE=true`
+- Set `DATABASE_URL=<your-supabase-postgres-url>`
 
 ## Local Verification
 
