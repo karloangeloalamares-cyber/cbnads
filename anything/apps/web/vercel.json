@@ -3,16 +3,19 @@
   "buildCommand": "npm run build",
   "outputDirectory": "build/client",
   "functions": {
-    "api/index.mjs": {
+    "api/_ssr/[...path].mjs": {
       "includeFiles": "build/server/**",
       "maxDuration": 60,
       "regions": ["iad1"]
     }
   },
-  "rewrites": [
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "/api"
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/api/_ssr/$1"
     }
   ]
 }

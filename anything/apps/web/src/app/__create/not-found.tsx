@@ -1,12 +1,23 @@
-import fg from 'fast-glob';
 import type { Route } from './+types/not-found';
 import { useNavigate } from 'react-router';
 import { useCallback, useEffect, useState } from 'react';
 
 export async function loader({ params }: Route.LoaderArgs) {
+  const missingPath = params['*'] ?? '';
+
+  // Route discovery is only needed in local dev. In production/serverless,
+  // skip filesystem globbing so unknown routes fail fast.
+  if (!import.meta.env.DEV) {
+    return {
+      path: `/${missingPath}`,
+      pages: [],
+    };
+  }
+
+  const { default: fg } = await import('fast-glob');
   const matches = await fg('src/**/page.{js,jsx,ts,tsx}');
   return {
-    path: `/${params['*']}`,
+    path: `/${missingPath}`,
     pages: matches
       .sort((a, b) => a.length - b.length)
       .map((match) => {

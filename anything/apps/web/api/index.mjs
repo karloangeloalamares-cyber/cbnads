@@ -1,8 +1,25 @@
 import { handle } from 'hono/vercel';
 
 const serverEntryUrl = new URL('../build/server/index.js', import.meta.url);
+const SSR_PREFIX = '/api/_ssr';
 
 let cachedHandlerPromise;
+
+function normalizeRequest(request) {
+  const url = new URL(request.url);
+
+  if (url.pathname === SSR_PREFIX) {
+    url.pathname = '/';
+    return new Request(url, request);
+  }
+
+  if (url.pathname.startsWith(`${SSR_PREFIX}/`)) {
+    url.pathname = url.pathname.slice(SSR_PREFIX.length) || '/';
+    return new Request(url, request);
+  }
+
+  return request;
+}
 
 async function createHandler() {
   // The react-router-hono-server builder compiles __create/index.ts into this output.
@@ -34,7 +51,7 @@ async function getHandler() {
 export default async function vercelHandler(request, context) {
   try {
     const handler = await getHandler();
-    return await handler(request, context);
+    return await handler(normalizeRequest(request), context);
   } catch (error) {
     console.error('Fatal error in Vercel function bootstrap', error);
     return new Response(

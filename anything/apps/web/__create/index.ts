@@ -69,6 +69,9 @@ const adapter = pool ? NeonAdapter(pool) : null;
 
 const app = new Hono();
 
+// Avoid running full SSR for missing favicon requests in serverless environments.
+app.get('/favicon.ico', (c) => c.body(null, 204));
+
 app.use('*', async (c, next) => {
   Object.defineProperty(c, 'env', { value: process.env, writable: true });
   await next();
