@@ -79,7 +79,7 @@ const getRenderIdVisitor =
           });
 
           // Ensure PolymorphicComponent import exists at top‑level
-          const program = path.findParent((p) => p.isProgram());
+          const program = path.findParent((p): p is NodePath<t.Program> => p.isProgram());
           if (!program) {
             console.warn(
               `No program found for ${filename} so unable to add CreatePolymorphicComponent import`
@@ -87,11 +87,12 @@ const getRenderIdVisitor =
             return;
           }
           idToJsx.current[renderId] = { code: path.getSource() };
+          const programNode = program.node as t.Program;
 
           const body = program.get('body');
+          const bodyPaths = Array.isArray(body) ? body : [body];
           const alreadyImported =
-            Array.isArray(body) &&
-            body.some(
+            bodyPaths.some(
               (p) =>
                 t.isImportDeclaration(p.node) &&
                 p.node.source.value === '@/__create/PolymorphicComponent'
@@ -101,13 +102,16 @@ const getRenderIdVisitor =
               [t.importDefaultSpecifier(t.identifier('CreatePolymorphicComponent'))],
               t.stringLiteral('@/__create/PolymorphicComponent')
             );
-            const firstImport = Array.isArray(body)
-              ? body.findIndex((p) => p.isImportDeclaration())
-              : -1;
+            const firstImport = bodyPaths.findIndex((p) => p.isImportDeclaration());
             if (firstImport === -1) {
-              program.unshiftContainer('body', importDecl);
+              programNode.body.unshift(importDecl);
             } else {
-              body[firstImport].insertBefore(importDecl);
+              const firstImportPath = bodyPaths[firstImport];
+              if (firstImportPath) {
+                firstImportPath.insertBefore(importDecl);
+              } else {
+                programNode.body.unshift(importDecl);
+              }
             }
           }
 

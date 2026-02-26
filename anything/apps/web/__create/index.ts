@@ -18,6 +18,12 @@ import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
 
+declare module 'hono' {
+  interface ContextVariableMap {
+    requestId: string;
+  }
+}
+
 // ws is only needed for Neon WebSocket in Node.js environments.
 // On Vercel, Neon uses fetch natively.
 if (!process.env.VERCEL) {

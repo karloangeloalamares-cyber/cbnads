@@ -1,5 +1,6 @@
 const originalFetch = fetch;
 const isBackend = () => typeof window === 'undefined';
+type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
 const safeStringify = (value: unknown) =>
   JSON.stringify(value, (_k, v) => {
@@ -9,10 +10,11 @@ const safeStringify = (value: unknown) =>
     return v;
   });
 
-const postToParent = (level: string, text: string, extra: unknown) => {
+const postToParent = (level: ConsoleLevel, text: string, extra: unknown) => {
   try {
     if (isBackend() || !window.parent || window.parent === window) {
-      ('level' in console ? console[level] : console.log)(text, extra);
+      const writer = console[level] as (...args: unknown[]) => void;
+      writer(text, extra);
       return;
     }
     window.parent.postMessage(
