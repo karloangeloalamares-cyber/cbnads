@@ -1,4 +1,3 @@
-// Get minimum date (today) - fixed to handle timezone correctly
 const getMinDate = () => {
   const today = new Date();
   const year = today.getFullYear();
@@ -7,9 +6,9 @@ const getMinDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const formatDateLong = (dateStr) => {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", {
+const formatDateLong = (dateString) => {
+  const date = new Date(`${dateString}T00:00:00`);
+  return date.toLocaleDateString("en-US", {
     month: "long",
     day: "numeric",
     year: "numeric",
@@ -30,14 +29,12 @@ export function ScheduleSection({
   pastTimeError,
   fullyBookedDates,
 }) {
-  const hasBookedDates = fullyBookedDates && fullyBookedDates.length > 0;
+  const hasBookedDates = Array.isArray(fullyBookedDates) && fullyBookedDates.length > 0;
 
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-900 mb-4">Schedule</h3>
-      <p className="text-xs text-gray-500 mb-4">
-        All times are in Eastern Time (ET)
-      </p>
+      <p className="text-xs text-gray-500 mb-4">All times are in Eastern Time (ET)</p>
 
       {postType === "One-Time Post" && (
         <>
@@ -51,7 +48,7 @@ export function ScheduleSection({
                 required
                 min={getMinDate()}
                 value={formData.post_date_from}
-                onChange={(e) => onChange("post_date_from", e.target.value)}
+                onChange={(event) => onChange("post_date_from", event.target.value)}
                 onBlur={onCheckAvailability}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
@@ -64,30 +61,25 @@ export function ScheduleSection({
                 type="time"
                 required
                 value={formData.post_time}
-                onChange={(e) => onChange("post_time", e.target.value)}
+                onChange={(event) => onChange("post_time", event.target.value)}
                 onBlur={onCheckAvailability}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
               {checkingAvailability && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Checking availability...
-                </p>
+                <p className="text-xs text-gray-500 mt-1">Checking availability...</p>
               )}
               {pastTimeError && (
                 <p className="text-xs text-red-500 mt-1">{pastTimeError}</p>
               )}
             </div>
           </div>
+
           {availabilityError && !hasBookedDates && (
             <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg mt-4">
               <div className="flex items-start gap-2">
-                <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">
-                  ❌
-                </span>
+                <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">!</span>
                 <div className="flex-1">
-                  <p className="text-sm font-semibold text-red-900">
-                    {availabilityError}
-                  </p>
+                  <p className="text-sm font-semibold text-red-900">{availabilityError}</p>
                 </div>
               </div>
             </div>
@@ -107,7 +99,7 @@ export function ScheduleSection({
                 required
                 min={getMinDate()}
                 value={formData.post_date_from}
-                onChange={(e) => onChange("post_date_from", e.target.value)}
+                onChange={(event) => onChange("post_date_from", event.target.value)}
                 onBlur={onCheckAvailability}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
@@ -121,16 +113,14 @@ export function ScheduleSection({
                 required
                 min={formData.post_date_from || getMinDate()}
                 value={formData.post_date_to}
-                onChange={(e) => onChange("post_date_to", e.target.value)}
+                onChange={(event) => onChange("post_date_to", event.target.value)}
                 onBlur={onCheckAvailability}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
             </div>
           </div>
           {checkingAvailability && (
-            <p className="text-xs text-gray-500 mt-2">
-              Checking availability...
-            </p>
+            <p className="text-xs text-gray-500 mt-2">Checking availability...</p>
           )}
         </>
       )}
@@ -139,14 +129,12 @@ export function ScheduleSection({
         <div>
           <div className="grid grid-cols-[1fr_auto] gap-2 mb-3">
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
-                Add Date
-              </label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Add Date</label>
               <input
                 type="date"
                 min={getMinDate()}
                 value={customDate}
-                onChange={(e) => setCustomDate(e.target.value)}
+                onChange={(event) => setCustomDate(event.target.value)}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
             </div>
@@ -154,9 +142,10 @@ export function ScheduleSection({
               type="button"
               onClick={() => {
                 onAddCustomDate();
-                // Trigger availability check after a short delay to let state update
                 setTimeout(() => {
-                  if (onCheckAvailability) onCheckAvailability();
+                  if (onCheckAvailability) {
+                    onCheckAvailability();
+                  }
                 }, 100);
               }}
               className="self-end px-6 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
@@ -164,6 +153,7 @@ export function ScheduleSection({
               Add
             </button>
           </div>
+
           {formData.custom_dates.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {formData.custom_dates.map((date) => (
@@ -177,27 +167,23 @@ export function ScheduleSection({
                     onClick={() => onRemoveCustomDate(date)}
                     className="hover:text-gray-600"
                   >
-                    ×
+                    x
                   </button>
                 </span>
               ))}
             </div>
           )}
+
           {checkingAvailability && (
-            <p className="text-xs text-gray-500 mt-2">
-              Checking availability...
-            </p>
+            <p className="text-xs text-gray-500 mt-2">Checking availability...</p>
           )}
         </div>
       )}
 
-      {/* Blocking red error for fully booked dates (public form - no counts shown) */}
       {hasBookedDates && (
         <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg mt-4">
           <div className="flex items-start gap-2">
-            <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">
-              ❌
-            </span>
+            <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">!</span>
             <div className="flex-1">
               <p className="text-sm font-semibold text-red-900">
                 The following dates are fully booked:
@@ -209,9 +195,7 @@ export function ScheduleSection({
                   </li>
                 ))}
               </ul>
-              <p className="text-sm text-red-700 mt-2">
-                Please choose different dates.
-              </p>
+              <p className="text-sm text-red-700 mt-2">Please choose different dates.</p>
             </div>
           </div>
         </div>

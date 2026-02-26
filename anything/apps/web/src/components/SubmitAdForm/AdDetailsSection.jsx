@@ -1,4 +1,3 @@
-import { ChevronDown } from "lucide-react";
 import { MediaUploadSection } from "./MediaUploadSection";
 
 export function AdDetailsSection({
@@ -21,7 +20,7 @@ export function AdDetailsSection({
             type="text"
             required
             value={formData.ad_name}
-            onChange={(e) => onChange("ad_name", e.target.value)}
+            onChange={(event) => onChange("ad_name", event.target.value)}
             placeholder="Enter ad name"
             className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
           />
@@ -34,7 +33,7 @@ export function AdDetailsSection({
         </label>
         <textarea
           value={formData.ad_text}
-          onChange={(e) => onChange("ad_text", e.target.value)}
+          onChange={(event) => onChange("ad_text", event.target.value)}
           rows={4}
           placeholder="Enter your ad copy here..."
           className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-none"

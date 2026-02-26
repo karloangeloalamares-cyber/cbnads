@@ -359,19 +359,33 @@ export const updateAdPayment = (adId, payment) => {
 export const submitPendingAd = (input) => {
   let saved = null;
   updateDb((db) => {
+    const postDateFrom = input.post_date_from || input.post_date || '';
+    const postDateTo = input.post_date_to || '';
+    const customDates = Array.isArray(input.custom_dates) ? input.custom_dates.filter(Boolean) : [];
+    const phone = (input.phone || input.phone_number || '').trim();
     const payload = {
       id: createId('pending'),
       advertiser_name: (input.advertiser_name || '').trim(),
+      contact_name: (input.contact_name || '').trim(),
       email: (input.email || '').trim(),
-      phone: (input.phone || '').trim(),
+      phone,
+      phone_number: phone,
       business_name: (input.business_name || '').trim(),
       ad_name: (input.ad_name || '').trim(),
       post_type: input.post_type || 'one_time',
-      post_date: input.post_date || '',
+      post_date: input.post_date || postDateFrom || customDates[0] || '',
+      post_date_from: postDateFrom,
+      post_date_to: postDateTo,
+      custom_dates: customDates,
       post_time: input.post_time || '',
+      reminder_minutes: Number(input.reminder_minutes) || 15,
+      ad_text: input.ad_text || '',
+      media: Array.isArray(input.media) ? input.media : [],
+      placement: input.placement || '',
       notes: input.notes || '',
       status: 'pending',
       created_at: nowIso(),
+      updated_at: nowIso(),
     };
     db.pending_ads.unshift(payload);
     saved = payload;
@@ -387,6 +401,12 @@ export const approvePendingAd = (pendingAdId) => {
       return db;
     }
 
+    const postDate =
+      pending.post_date ||
+      pending.post_date_from ||
+      (Array.isArray(pending.custom_dates) ? pending.custom_dates[0] : '') ||
+      '';
+
     let advertiser =
       db.advertisers.find(
         (item) => item.email && pending.email && item.email.toLowerCase() === pending.email.toLowerCase()
@@ -397,10 +417,10 @@ export const approvePendingAd = (pendingAdId) => {
         id: createId('adv'),
         advertiser_name: pending.advertiser_name || pending.email || 'New advertiser',
         email: pending.email || '',
-        phone: pending.phone || '',
+        phone: pending.phone || pending.phone_number || '',
         business_name: pending.business_name || '',
         ad_spend: '0.00',
-        next_ad_date: pending.post_date || '',
+        next_ad_date: postDate,
         created_at: nowIso(),
         updated_at: nowIso(),
       };
@@ -417,8 +437,15 @@ export const approvePendingAd = (pendingAdId) => {
       post_type: pending.post_type || 'one_time',
       status: 'Draft',
       payment: 'Unpaid',
-      post_date: pending.post_date || '',
+      post_date: postDate,
+      post_date_from: pending.post_date_from || postDate,
+      post_date_to: pending.post_date_to || '',
+      custom_dates: Array.isArray(pending.custom_dates) ? pending.custom_dates : [],
       post_time: pending.post_time || '',
+      ad_text: pending.ad_text || '',
+      media: Array.isArray(pending.media) ? pending.media : [],
+      placement: pending.placement || '',
+      reminder_minutes: Number(pending.reminder_minutes) || 15,
       notes: pending.notes || '',
       price: '0.00',
       media_urls: [],
