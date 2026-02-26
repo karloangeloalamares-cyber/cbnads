@@ -2,6 +2,7 @@
     "name": "cbn-ads-workspace",
     "version": "1.0.0",
     "private": true,
+    "type": "module",
     "scripts": {
         "dev": "npm run dev:web",
         "dev:web": "cd anything/apps/web && npm run dev",
