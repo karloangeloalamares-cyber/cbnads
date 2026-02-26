@@ -41,7 +41,7 @@ export default async function handler(request, context) {
     const h = await getHandler();
 
     // Vercel routes send /(.*) → /api?__pathname=/$1
-    const url = new URL(request.url, `https://${request.headers.get('host') || 'localhost'}`);
+    const url = new URL(request.url, `https://${request.headers.host || 'localhost'}`);
     const pathname = url.searchParams.get('__pathname');
     if (pathname) {
       url.pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
