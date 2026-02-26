@@ -1,7 +1,8 @@
-import sql from "@/app/api/utils/sql";
+import { advertiserResponse, db, table } from "@/app/api/utils/supabase-db";
 
 export async function POST(request) {
   try {
+    const supabase = db();
     const body = await request.json();
     const {
       advertiser_name,
@@ -18,24 +19,43 @@ export async function POST(request) {
       );
     }
 
-    const result = await sql`
-      INSERT INTO advertisers (
-        advertiser_name,
-        contact_name,
-        email,
-        phone_number,
-        status
-      ) VALUES (
-        ${advertiser_name},
-        ${contact_name},
-        ${email || null},
-        ${phone_number || null},
-        ${status}
-      )
-      RETURNING *
-    `;
+    const now = new Date().toISOString();
+    const basePayload = {
+      advertiser_name,
+      contact_name,
+      email: email || null,
+      phone: phone_number || null,
+      created_at: now,
+      updated_at: now,
+    };
 
-    return Response.json({ advertiser: result[0] });
+    const extendedPayload = {
+      ...basePayload,
+      phone_number: phone_number || null,
+      status: String(status || "active").toLowerCase(),
+    };
+
+    let insertResult = await supabase
+      .from(table("advertisers"))
+      .insert(extendedPayload)
+      .select("*")
+      .single();
+
+    if (insertResult.error) {
+      const message = String(insertResult.error.message || "");
+      const missingCompatColumn =
+        message.includes("phone_number") || message.includes("status");
+      if (!missingCompatColumn) throw insertResult.error;
+
+      insertResult = await supabase
+        .from(table("advertisers"))
+        .insert(basePayload)
+        .select("*")
+        .single();
+      if (insertResult.error) throw insertResult.error;
+    }
+
+    return Response.json({ advertiser: advertiserResponse(insertResult.data) });
   } catch (error) {
     console.error("Error creating advertiser:", error);
     return Response.json(

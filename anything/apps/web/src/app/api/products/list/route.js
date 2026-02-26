@@ -1,13 +1,16 @@
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
 
 export async function GET() {
   try {
-    const products = await sql`
-      SELECT * FROM products
-      ORDER BY created_at DESC
-    `;
+    const supabase = db();
+    const { data, error } = await supabase
+      .from(table("products"))
+      .select("*")
+      .order("created_at", { ascending: false });
 
-    return Response.json(products);
+    if (error) throw error;
+
+    return Response.json(data || []);
   } catch (error) {
     console.error("Error fetching products:", error);
     return Response.json(

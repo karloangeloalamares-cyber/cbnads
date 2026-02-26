@@ -1,8 +1,9 @@
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
 import { sendEmail } from "@/app/api/utils/send-email";
 
 export async function POST(request) {
   try {
+    const supabase = db();
     const body = await request.json();
     const {
       advertiser_name,
@@ -32,24 +33,28 @@ export async function POST(request) {
 
     // Additional validation for One-Time Post
     if (post_type === "One-Time Post" && post_date_from && post_time) {
-      // Check availability one more time on the backend
-      const availabilityCheck = await sql`
-        SELECT COUNT(*) as count
-        FROM (
-          SELECT id FROM ads 
-          WHERE post_date_from = ${post_date_from}
-          AND post_type = 'One-Time Post'
-          AND post_time = ${post_time}
-          UNION ALL
-          SELECT id FROM pending_ads 
-          WHERE post_date_from = ${post_date_from}
-          AND post_type = 'One-Time Post'
-          AND post_time = ${post_time}
-          AND status = 'pending'
-        ) combined
-      `;
+      const [adsSlot, pendingSlot] = await Promise.all([
+        supabase
+          .from(table("ads"))
+          .select("id", { count: "exact" })
+          .eq("post_type", "One-Time Post")
+          .eq("post_date_from", post_date_from)
+          .eq("post_time", post_time),
+        supabase
+          .from(table("pending_ads"))
+          .select("id", { count: "exact" })
+          .eq("post_type", "One-Time Post")
+          .eq("post_date_from", post_date_from)
+          .eq("post_time", post_time)
+          .eq("status", "pending"),
+      ]);
 
-      if (parseInt(availabilityCheck[0].count) > 0) {
+      if (adsSlot.error) throw adsSlot.error;
+      if (pendingSlot.error) throw pendingSlot.error;
+
+      const bookedCount = (adsSlot.count || 0) + (pendingSlot.count || 0);
+
+      if (bookedCount > 0) {
         return Response.json(
           {
             error:
@@ -68,62 +73,62 @@ export async function POST(request) {
     );
 
     // Insert pending ad
-    const result = await sql`
-      INSERT INTO pending_ads (
+    const nowIso = new Date().toISOString();
+    const { data: insertedPendingAd, error: insertError } = await supabase
+      .from(table("pending_ads"))
+      .insert({
         advertiser_name,
         contact_name,
         email,
-        phone_number,
+        phone_number: phone_number || null,
+        phone: phone_number || null,
         ad_name,
         post_type,
-        post_date_from,
-        post_date_to,
-        custom_dates,
-        post_time,
-        reminder_minutes,
-        ad_text,
-        media,
-        placement,
-        notes,
-        status
-      ) VALUES (
-        ${advertiser_name},
-        ${contact_name},
-        ${email},
-        ${phone_number || null},
-        ${ad_name},
-        ${post_type},
-        ${post_date_from || null},
-        ${post_date_to || null},
-        ${custom_dates ? JSON.stringify(custom_dates) : null},
-        ${post_time || null},
-        ${reminder_minutes || 15},
-        ${ad_text || null},
-        ${media ? JSON.stringify(media) : "[]"},
-        ${placement || null},
-        ${notes || null},
-        'pending'
-      )
-      RETURNING *
-    `;
+        post_date: post_date_from || null,
+        post_date_from: post_date_from || null,
+        post_date_to: post_date_to || null,
+        custom_dates: Array.isArray(custom_dates) ? custom_dates : [],
+        post_time: post_time || null,
+        reminder_minutes: reminder_minutes || 15,
+        ad_text: ad_text || null,
+        media: Array.isArray(media) ? media : [],
+        placement: placement || null,
+        notes: notes || null,
+        status: "pending",
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select("*")
+      .single();
+    if (insertError) throw insertError;
 
     console.log(
       "[submit-ad] Inserted pending ad, returned date:",
-      result[0].post_date_from,
+      insertedPendingAd.post_date_from,
     );
 
-    // Get all admins with email notifications enabled
-    const adminPrefs = await sql`
-      SELECT anp.email_address, au.email, au.name
-      FROM admin_notification_preferences anp
-      JOIN auth_users au ON anp.user_id = au.id
-      WHERE anp.email_enabled = true
-      AND (anp.email_address IS NOT NULL OR au.email IS NOT NULL)
-    `;
+    // Get all admin emails configured for notifications.
+    const { data: adminPrefs, error: adminPrefError } = await supabase
+      .from(table("admin_notification_preferences"))
+      .select("email_address, email_enabled")
+      .eq("email_enabled", true);
+    if (adminPrefError) throw adminPrefError;
 
-    const adminEmails = adminPrefs
-      .map((admin) => admin.email_address || admin.email)
-      .filter(Boolean);
+    const { data: globalPrefs, error: globalPrefError } = await supabase
+      .from(table("notification_preferences"))
+      .select("reminder_email, email_enabled")
+      .order("id", { ascending: true })
+      .limit(1);
+    if (globalPrefError) throw globalPrefError;
+
+    const adminEmails = Array.from(
+      new Set(
+        [
+          ...(adminPrefs || []).map((admin) => admin.email_address),
+          ...(globalPrefs?.[0]?.email_enabled ? [globalPrefs?.[0]?.reminder_email] : []),
+        ].filter(Boolean),
+      ),
+    );
 
     // Create advertiser confirmation email
     const advertiserEmailHTML = `
@@ -347,7 +352,7 @@ export async function POST(request) {
 
     return Response.json({
       success: true,
-      pending_ad: result[0],
+      pending_ad: insertedPendingAd,
     });
   } catch (error) {
     console.error("Error creating pending ad:", error);

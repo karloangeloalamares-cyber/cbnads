@@ -1,22 +1,8 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table } from "@/app/api/utils/supabase-db";
 
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const userRole = await sql`
-      SELECT role FROM auth_users WHERE id = ${session.user.id}
-    `;
-
-    if (!userRole[0] || userRole[0].role !== "admin") {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-
+    const supabase = db();
     const body = await request.json();
     const { pending_ad_id } = body;
 
@@ -24,12 +10,15 @@ export async function POST(request) {
       return Response.json({ error: "Missing pending_ad_id" }, { status: 400 });
     }
 
-    await sql`
-      UPDATE pending_ads
-      SET status = 'not_approved',
-          rejected_at = NOW()
-      WHERE id = ${pending_ad_id}
-    `;
+    const { error } = await supabase
+      .from(table("pending_ads"))
+      .update({
+        status: "not_approved",
+        rejected_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", pending_ad_id);
+    if (error) throw error;
 
     return Response.json({ success: true });
   } catch (error) {
@@ -37,3 +26,4 @@ export async function POST(request) {
     return Response.json({ error: "Failed to reject ad" }, { status: 500 });
   }
 }
+

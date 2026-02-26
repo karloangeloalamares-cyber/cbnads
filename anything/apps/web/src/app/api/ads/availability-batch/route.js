@@ -1,9 +1,12 @@
-import sql from "@/app/api/utils/sql";
+import { adDatesForDayCheck, dateOnly, db, table, toNumber } from "@/app/api/utils/supabase-db";
+
+const includesDate = (ad, date) => adDatesForDayCheck(ad).includes(date);
 
 export async function POST(request) {
   try {
+    const supabase = db();
     const body = await request.json();
-    const { dates, post_type, exclude_ad_id } = body;
+    const { dates, exclude_ad_id } = body;
 
     if (!dates || !Array.isArray(dates) || dates.length === 0) {
       return Response.json(
@@ -12,48 +15,31 @@ export async function POST(request) {
       );
     }
 
-    // Get max ads per day setting
-    const settings = await sql`
-      SELECT max_ads_per_day FROM admin_settings ORDER BY id LIMIT 1
-    `;
-    const maxAdsPerDay = settings[0]?.max_ads_per_day || 5;
+    const normalizedDates = dates.map(dateOnly).filter(Boolean);
 
-    // Build a query that counts ads for each requested date
+    const { data: settingsRows, error: settingsError } = await supabase
+      .from(table("admin_settings"))
+      .select("*")
+      .order("id", { ascending: true })
+      .limit(1);
+    if (settingsError) throw settingsError;
+
+    const maxAdsPerDay =
+      toNumber(settingsRows?.[0]?.max_ads_per_day, 0) ||
+      toNumber(settingsRows?.[0]?.max_ads_per_slot, 0) ||
+      5;
+
+    const { data: ads, error: adsError } = await supabase
+      .from(table("ads"))
+      .select("id, post_type, post_date_from, post_date_to, custom_dates");
+    if (adsError) throw adsError;
+
+    const visibleAds = (ads || []).filter((ad) => ad.id !== exclude_ad_id);
     const results = {};
 
-    for (const date of dates) {
-      let totalQuery;
-      let totalValues;
-
-      if (exclude_ad_id) {
-        totalQuery = `
-          SELECT COUNT(*) as total
-          FROM ads 
-          WHERE (
-            (post_date_from = $1 AND post_type = 'One-Time Post')
-            OR (post_date_from <= $1 AND post_date_to >= $1 AND post_type = 'Daily Run')
-            OR (custom_dates IS NOT NULL AND custom_dates::jsonb @> $2::jsonb AND post_type = 'Custom Schedule')
-          )
-          AND id != $3
-        `;
-        totalValues = [date, JSON.stringify([date]), exclude_ad_id];
-      } else {
-        totalQuery = `
-          SELECT COUNT(*) as total
-          FROM ads 
-          WHERE (
-            (post_date_from = $1 AND post_type = 'One-Time Post')
-            OR (post_date_from <= $1 AND post_date_to >= $1 AND post_type = 'Daily Run')
-            OR (custom_dates IS NOT NULL AND custom_dates::jsonb @> $2::jsonb AND post_type = 'Custom Schedule')
-          )
-        `;
-        totalValues = [date, JSON.stringify([date])];
-      }
-
-      const totalResult = await sql(totalQuery, totalValues);
-      const totalAdsOnDate = parseInt(totalResult[0].total);
-
-      results[date] = {
+    for (const day of normalizedDates) {
+      const totalAdsOnDate = visibleAds.filter((ad) => includesDate(ad, day)).length;
+      results[day] = {
         total_ads_on_date: totalAdsOnDate,
         max_ads_per_day: maxAdsPerDay,
         is_full: totalAdsOnDate >= maxAdsPerDay,

@@ -1,34 +1,22 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table } from "@/app/api/utils/supabase-db";
 
 export async function GET(request) {
   try {
-    const session = await auth();
-    if (!session?.user) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if user is admin
-    const userRole = await sql`
-      SELECT role FROM auth_users WHERE id = ${session.user.id}
-    `;
-
-    if (!userRole[0] || userRole[0].role !== "admin") {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const supabase = db();
 
     // Only show pending and rejected (not_approved) ads
     // Approved ads are deleted and moved to the ads table
-    const pendingAds = await sql`
-      SELECT * FROM pending_ads
-      WHERE status IN ('pending', 'not_approved')
-      ORDER BY 
-        CASE status 
-          WHEN 'pending' THEN 1 
-          WHEN 'not_approved' THEN 2 
-        END,
-        created_at DESC
-    `;
+    const { data, error } = await supabase
+      .from(table("pending_ads"))
+      .select("*")
+      .in("status", ["pending", "not_approved"])
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    const pendingAds = (data || []).sort((a, b) => {
+      const priority = (value) => (value === "pending" ? 1 : value === "not_approved" ? 2 : 3);
+      return priority(a.status) - priority(b.status);
+    });
 
     return Response.json({ pending_ads: pendingAds });
   } catch (error) {

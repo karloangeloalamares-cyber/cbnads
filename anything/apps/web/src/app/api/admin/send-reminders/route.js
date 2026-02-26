@@ -1,6 +1,6 @@
-import sql from "@/app/api/utils/sql";
+import { dateOnly, db, normalizePostType, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
-// Eastern Time (New York) timezone helper
 function getNowInET() {
   const now = new Date();
   const etTimeStr = now.toLocaleString("en-US", {
@@ -9,255 +9,244 @@ function getNowInET() {
   return new Date(etTimeStr);
 }
 
-function getETDateParts(date) {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  return formatter.format(date); // returns "YYYY-MM-DD"
+function parseETDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const [year, month, day] = String(dateStr).split("-").map((v) => Number(v));
+  const [hour, minute, second] = String(timeStr).split(":").map((v) => Number(v || 0));
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+  return new Date(year, month - 1, day, hour, minute, Number.isFinite(second) ? second : 0);
 }
 
-// Helper: parse a date string + time string as Eastern local time
-// dateStr: "2026-02-23", timeStr: "07:15:00"
-function parseETTime(dateStr, timeStr) {
-  const parts = dateStr.split("-");
-  const timeParts = timeStr.split(":");
-  return new Date(
-    parseInt(parts[0]),
-    parseInt(parts[1]) - 1,
-    parseInt(parts[2]),
-    parseInt(timeParts[0]),
-    parseInt(timeParts[1]),
-    parseInt(timeParts[2] || "0"),
-  );
+function reminderWindowToMinutes(value, unit) {
+  const amount = toNumber(value, 1);
+  if (unit === "minutes") return amount;
+  if (unit === "days") return amount * 1440;
+  return amount * 60;
 }
 
-// Convert admin reminder_time_value + reminder_time_unit to minutes
-function adminReminderToMinutes(value, unit) {
-  const v = parseInt(value) || 1;
-  switch (unit) {
-    case "minutes":
-      return v;
-    case "hours":
-      return v * 60;
-    case "days":
-      return v * 1440;
-    default:
-      return v * 60;
-  }
-}
-
-// Check if an ad should trigger a reminder given a reminder window in minutes
-function shouldNotifyForAd(ad, nowET, todayET, reminderMinutes) {
-  let scheduledTimeET = null;
-  let shouldNotify = false;
-
-  if (ad.post_type === "One-Time Post" && ad.schedule && ad.post_time) {
-    const dateStr = new Date(ad.schedule).toISOString().split("T")[0];
-    scheduledTimeET = parseETTime(dateStr, ad.post_time);
-
-    const timeDiffMs = scheduledTimeET.getTime() - nowET.getTime();
-    const timeDiffMinutes = timeDiffMs / (1000 * 60);
-
-    shouldNotify = timeDiffMinutes > -5 && timeDiffMinutes <= reminderMinutes;
-  } else if (
-    ad.post_type === "Daily Run" &&
-    ad.post_date_from &&
-    ad.post_date_to &&
-    ad.post_time
-  ) {
-    const startDate = new Date(ad.post_date_from).toISOString().split("T")[0];
-    const endDate = new Date(ad.post_date_to).toISOString().split("T")[0];
-
-    if (todayET >= startDate && todayET <= endDate) {
-      scheduledTimeET = parseETTime(todayET, ad.post_time);
-      const timeDiffMs = scheduledTimeET.getTime() - nowET.getTime();
-      const timeDiffMinutes = timeDiffMs / (1000 * 60);
-
-      shouldNotify = timeDiffMinutes > -5 && timeDiffMinutes <= reminderMinutes;
-    }
-  } else if (ad.post_type === "Custom Schedule" && ad.custom_dates) {
-    const customDates = Array.isArray(ad.custom_dates) ? ad.custom_dates : [];
-    for (const dateObj of customDates) {
-      if (dateObj.date && dateObj.time) {
-        scheduledTimeET = parseETTime(dateObj.date, dateObj.time);
-        const timeDiffMs = scheduledTimeET.getTime() - nowET.getTime();
-        const timeDiffMinutes = timeDiffMs / (1000 * 60);
-        if (timeDiffMinutes > -5 && timeDiffMinutes <= reminderMinutes) {
-          shouldNotify = true;
-          break;
-        }
-      }
-    }
-  }
-
-  return { shouldNotify, scheduledTimeET };
-}
-
-// Build common time/date display info
-function buildTimeInfo(scheduledTimeET, nowET) {
-  const dayOfWeek = scheduledTimeET.toLocaleDateString("en-US", {
-    weekday: "long",
-  });
-  const formattedDate = scheduledTimeET.toLocaleDateString("en-US", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const formattedTime = scheduledTimeET.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
-  const minutesUntil = Math.round(
-    (scheduledTimeET.getTime() - nowET.getTime()) / (1000 * 60),
-  );
-  let timeUntilText = "";
-  if (minutesUntil < 0) {
-    timeUntilText = "now";
-  } else if (minutesUntil < 60) {
-    timeUntilText = `in ${minutesUntil} minute${minutesUntil !== 1 ? "s" : ""}`;
-  } else if (minutesUntil < 1440) {
+function timeUntilText(scheduledAt, nowET) {
+  const minutesUntil = Math.round((scheduledAt.getTime() - nowET.getTime()) / (1000 * 60));
+  if (minutesUntil < 0) return "now";
+  if (minutesUntil < 60) return `in ${minutesUntil} minute${minutesUntil !== 1 ? "s" : ""}`;
+  if (minutesUntil < 1440) {
     const hours = Math.round(minutesUntil / 60);
-    timeUntilText = `in ${hours} hour${hours !== 1 ? "s" : ""}`;
-  } else {
-    const days = Math.round(minutesUntil / 1440);
-    timeUntilText = `in ${days} day${days !== 1 ? "s" : ""}`;
+    return `in ${hours} hour${hours !== 1 ? "s" : ""}`;
+  }
+  const days = Math.round(minutesUntil / 1440);
+  return `in ${days} day${days !== 1 ? "s" : ""}`;
+}
+
+function greetingForHour(hour) {
+  if (hour >= 17) return "Good Evening";
+  if (hour >= 12) return "Good Afternoon";
+  return "Good Morning";
+}
+
+function computeScheduledTimes(ad, todayET) {
+  const type = normalizePostType(ad?.post_type);
+  const times = [];
+
+  if (type === "one_time") {
+    const dateStr = dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
+    const dt = parseETDateTime(dateStr, ad?.post_time);
+    if (dt) times.push(dt);
+    return times;
   }
 
-  const etHour = nowET.getHours();
-  let greeting = "Good Morning";
-  if (etHour >= 12 && etHour < 17) greeting = "Good Afternoon";
-  if (etHour >= 17) greeting = "Good Evening";
+  if (type === "daily_run") {
+    const from = dateOnly(ad?.post_date_from || ad?.schedule || ad?.post_date);
+    const to = dateOnly(ad?.post_date_to || from);
+    if (!from || !to || !ad?.post_time) return times;
+    if (todayET < from || todayET > to) return times;
+    const dt = parseETDateTime(todayET, ad.post_time);
+    if (dt) times.push(dt);
+    return times;
+  }
 
-  return { dayOfWeek, formattedDate, formattedTime, timeUntilText, greeting };
+  if (type === "custom_schedule") {
+    if (!Array.isArray(ad?.custom_dates)) return times;
+    for (const entry of ad.custom_dates) {
+      if (typeof entry === "string") {
+        const dt = parseETDateTime(dateOnly(entry), ad?.post_time);
+        if (dt) times.push(dt);
+        continue;
+      }
+      const dt = parseETDateTime(dateOnly(entry?.date), entry?.time || ad?.post_time);
+      if (dt) times.push(dt);
+    }
+  }
+
+  return times;
+}
+
+function isWithinReminderWindow(scheduledAt, nowET, windowMinutes) {
+  const diffMinutes = (scheduledAt.getTime() - nowET.getTime()) / (1000 * 60);
+  return diffMinutes > -5 && diffMinutes <= windowMinutes;
+}
+
+async function hasRecentReminder(supabase, adId, recipientType) {
+  const thresholdIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from(table("sent_reminders"))
+    .select("id")
+    .eq("ad_id", adId)
+    .eq("recipient_type", recipientType)
+    .gt("sent_at", thresholdIso)
+    .limit(1);
+  if (error) throw error;
+  return (data || []).length > 0;
+}
+
+async function storeReminder(supabase, adId, type, recipientType) {
+  const { error } = await supabase.from(table("sent_reminders")).insert({
+    ad_id: adId,
+    reminder_type: type,
+    recipient_type: recipientType,
+    sent_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+function buildMediaFields(media) {
+  const items = Array.isArray(media) ? media : [];
+  const images = items.filter((item) => item?.type === "image");
+  const videos = items.filter((item) => item?.type === "video");
+  const fields = {};
+
+  images.forEach((item, index) => {
+    fields[`image${index + 1}Url`] = item.url || item.cdnUrl || "";
+  });
+  videos.forEach((item, index) => {
+    fields[`video${index + 1}Url`] = item.url || item.cdnUrl || "";
+  });
+
+  return { images, videos, fields };
+}
+
+async function sendZapier(payload) {
+  if (!process.env.ZAPIER_WEBHOOK_URL) {
+    throw new Error("ZAPIER_WEBHOOK_URL is not configured");
+  }
+
+  const response = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Zapier webhook returned status ${response.status}: ${text}`);
+  }
 }
 
 export async function POST(request) {
   try {
-    const url = new URL(request.url);
-    const debugMode = url.searchParams.get("debug") === "true";
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      const configuredSecret = String(process.env.CRON_SECRET || "").trim();
+      const bearerToken = String(request.headers.get("authorization") || "")
+        .replace(/^Bearer\s+/i, "")
+        .trim();
+      const cronHeaderSecret = String(
+        request.headers.get("x-cron-secret") || "",
+      ).trim();
 
+      if (
+        configuredSecret &&
+        bearerToken !== configuredSecret &&
+        cronHeaderSecret !== configuredSecret
+      ) {
+        return Response.json({ error: admin.error }, { status: 401 });
+      }
+    }
+
+    const { searchParams } = new URL(request.url);
+    const debugMode = searchParams.get("debug") === "true";
+
+    const supabase = db();
     const nowUTC = new Date();
     const nowET = getNowInET();
-    const todayET = getETDateParts(nowUTC);
+    const todayET = dateOnly(nowET);
 
-    console.log("🔔 REMINDER CHECK STARTED:", nowUTC.toISOString());
-    console.log("🕐 Server UTC time:", nowUTC.toISOString());
-    console.log("🕐 Eastern time:", nowET.toLocaleString());
-    console.log("📅 Today in ET:", todayET);
+    const { data: adminPrefsRows, error: adminPrefsError } = await supabase
+      .from(table("admin_notification_preferences"))
+      .select("id, email_enabled, sms_enabled, reminder_time_value, reminder_time_unit, email_address, phone_number")
+      .order("updated_at", { ascending: false });
+    if (adminPrefsError) throw adminPrefsError;
 
-    // Get all admin users with notification preferences
-    const adminPrefs = await sql`
-      SELECT 
-        au.id as user_id,
-        au.name as user_name,
-        au.email as user_email,
-        anp.email_enabled,
-        anp.sms_enabled,
-        anp.reminder_time_value,
-        anp.reminder_time_unit,
-        anp.email_address,
-        anp.phone_number
-      FROM auth_users au
-      LEFT JOIN admin_notification_preferences anp ON au.id = anp.user_id
-      WHERE au.role = 'admin'
-    `;
+    const { data: fallbackNotification, error: fallbackNotificationError } = await supabase
+      .from(table("notification_preferences"))
+      .select("email_enabled, reminder_email")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fallbackNotificationError) throw fallbackNotificationError;
 
-    console.log(`📋 Found ${adminPrefs.length} admin(s) to check`);
+    const adminPrefs = [...(adminPrefsRows || [])];
+    const fallbackEmail = String(fallbackNotification?.reminder_email || "").trim();
+    if (
+      adminPrefs.length === 0 &&
+      fallbackNotification?.email_enabled &&
+      fallbackEmail
+    ) {
+      adminPrefs.push({
+        id: "fallback",
+        email_enabled: true,
+        sms_enabled: false,
+        reminder_time_value: 1,
+        reminder_time_unit: "hours",
+        email_address: fallbackEmail,
+        phone_number: null,
+      });
+    }
 
-    // Get all scheduled ads
-    const upcomingAds = await sql`
-      SELECT 
-        id,
-        ad_name,
-        advertiser,
-        post_type,
-        placement,
-        post_date_from,
-        post_date_to,
-        custom_dates,
-        schedule,
-        post_time::TEXT as post_time,
-        media,
-        ad_text,
-        reminder_minutes
-      FROM ads
-      WHERE status = 'Scheduled'
-    `;
+    const { data: upcomingAds, error: upcomingAdsError } = await supabase
+      .from(table("ads"))
+      .select("id, ad_name, advertiser, post_type, placement, post_date, post_date_from, post_date_to, custom_dates, schedule, post_time, media, ad_text, reminder_minutes, status")
+      .eq("status", "Scheduled")
+      .eq("archived", false);
+    if (upcomingAdsError) throw upcomingAdsError;
 
-    console.log(`📢 Found ${upcomingAds.length} scheduled ad(s)`);
+    const { data: advertisers, error: advertisersError } = await supabase
+      .from(table("advertisers"))
+      .select("*");
+    if (advertisersError) throw advertisersError;
 
-    // Get all advertisers for matching
-    const allAdvertisers = await sql`
-      SELECT id, advertiser_name, contact_name, email, phone_number
-      FROM advertisers
-    `;
+    const advertiserByName = new Map(
+      (advertisers || []).map((row) => [String(row.advertiser_name || "").trim().toLowerCase(), row]),
+    );
 
     const results = [];
-    const debugInfo = [];
+    const debug = [];
 
-    // ═══════════════════════════════════════════════════════
-    // 1) ADMIN REMINDERS — uses admin's reminder_time settings
-    // ═══════════════════════════════════════════════════════
     for (const pref of adminPrefs) {
-      console.log(
-        `\n👤 Checking admin: ${pref.user_name} (email_enabled: ${pref.email_enabled})`,
-      );
-
-      if (!pref.email_enabled && !pref.sms_enabled) {
-        console.log("   ⏭️  Skipping - notifications disabled");
-        continue;
-      }
-
-      // Use admin's own reminder timing from settings
-      const adminReminderMinutes = adminReminderToMinutes(
+      if (!pref.email_enabled && !pref.sms_enabled) continue;
+      const reminderMinutes = reminderWindowToMinutes(
         pref.reminder_time_value || 1,
         pref.reminder_time_unit || "hours",
       );
 
-      console.log(
-        `   ⏰ Admin reminder window: ${adminReminderMinutes} minutes (${pref.reminder_time_value} ${pref.reminder_time_unit})`,
-      );
-
-      for (const ad of upcomingAds) {
-        const { shouldNotify, scheduledTimeET } = shouldNotifyForAd(
-          ad,
-          nowET,
-          todayET,
-          adminReminderMinutes,
+      for (const ad of upcomingAds || []) {
+        const scheduledTimes = computeScheduledTimes(ad, todayET);
+        const scheduledAt = scheduledTimes.find((time) =>
+          isWithinReminderWindow(time, nowET, reminderMinutes),
         );
 
         if (debugMode) {
-          debugInfo.push({
+          debug.push({
             type: "admin",
-            admin: pref.user_name,
             ad_id: ad.id,
             ad_name: ad.ad_name,
-            reminderWindow: adminReminderMinutes,
-            shouldNotify,
+            reminderWindow: reminderMinutes,
+            shouldNotify: Boolean(scheduledAt),
           });
         }
 
-        if (!shouldNotify || !scheduledTimeET) continue;
+        if (!scheduledAt) continue;
 
-        // Check duplicate — only for admin reminders
-        const existingReminder = await sql`
-          SELECT id FROM sent_reminders
-          WHERE ad_id = ${ad.id}
-          AND recipient_type = 'admin'
-          AND sent_at > NOW() - INTERVAL '24 hours'
-          LIMIT 1
-        `;
-
-        if (existingReminder.length > 0) {
-          console.log(
-            `   ⏭️  Skipping admin reminder for "${ad.ad_name}" - already sent within 24 hours`,
-          );
+        const alreadySent = await hasRecentReminder(supabase, ad.id, "admin");
+        if (alreadySent) {
           results.push({
             type: "admin_email",
             ad_id: ad.id,
@@ -268,170 +257,113 @@ export async function POST(request) {
           continue;
         }
 
-        const {
-          dayOfWeek,
-          formattedDate,
-          formattedTime,
-          timeUntilText,
-          greeting,
-        } = buildTimeInfo(scheduledTimeET, nowET);
+        const formattedDate = scheduledAt.toLocaleDateString("en-US", {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+        const formattedTime = scheduledAt.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        });
+        const dayOfWeek = scheduledAt.toLocaleDateString("en-US", {
+          weekday: "long",
+        });
+        const greeting = greetingForHour(nowET.getHours());
+        const untilText = timeUntilText(scheduledAt, nowET);
+        const media = buildMediaFields(ad.media);
+        const advertiserInfo = advertiserByName.get(
+          String(ad.advertiser || "").trim().toLowerCase(),
+        );
 
-        const media = Array.isArray(ad.media) ? ad.media : [];
-        const images = media.filter((m) => m.type === "image");
-        const videos = media.filter((m) => m.type === "video");
-
-        // Send admin email
-        if (pref.email_enabled && (pref.email_address || pref.user_email)) {
-          const recipientEmail = pref.email_address || pref.user_email;
+        if (pref.email_enabled && pref.email_address) {
           try {
-            console.log(
-              `   📧 Sending ADMIN email to ${recipientEmail} for ad "${ad.ad_name}"`,
-            );
-
-            const userName = pref.user_name || "Admin";
-            const firstName = userName.split(" ")[0];
-
-            const mediaFields = {};
-            images.forEach((img, i) => {
-              mediaFields[`image${i + 1}Url`] = img.url || img.cdnUrl || "";
+            await sendZapier({
+              recipientType: "admin",
+              to: pref.email_address,
+              from: "Ad Manager <advertise@cbnads.com>",
+              subject: `Ad Reminder | ${ad.advertiser} | ${dayOfWeek}, ${formattedTime} ET`,
+              greeting,
+              firstName: "Admin",
+              adName: ad.ad_name,
+              advertiser: ad.advertiser,
+              advertiserEmail: advertiserInfo?.email || "",
+              advertiserPhone: advertiserInfo?.phone_number || advertiserInfo?.phone || "",
+              placement: ad.placement,
+              formattedTime: `${formattedTime} ET`,
+              formattedDate,
+              timeUntilText: untilText,
+              adText: ad.ad_text || "",
+              imageCount: media.images.length,
+              videoCount: media.videos.length,
+              ...media.fields,
             });
-            videos.forEach((vid, i) => {
-              mediaFields[`video${i + 1}Url`] = vid.url || vid.cdnUrl || "";
-            });
 
-            // Find advertiser info for this ad
-            const advertiserInfo = allAdvertisers.find(
-              (adv) =>
-                adv.advertiser_name.toLowerCase() ===
-                ad.advertiser.toLowerCase(),
-            );
-
-            const webhookResponse = await fetch(
-              process.env.ZAPIER_WEBHOOK_URL,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  recipientType: "admin",
-                  to: recipientEmail,
-                  from: "Ad Manager <advertise@cbnads.com>",
-                  subject: `Ad Reminder | ${ad.advertiser} | ${dayOfWeek}, ${formattedTime} ET`,
-                  greeting: greeting,
-                  firstName: firstName,
-                  adName: ad.ad_name,
-                  advertiser: ad.advertiser,
-                  advertiserEmail: advertiserInfo?.email || "",
-                  advertiserPhone: advertiserInfo?.phone_number || "",
-                  placement: ad.placement,
-                  formattedTime: formattedTime + " ET",
-                  formattedDate: formattedDate,
-                  timeUntilText: timeUntilText,
-                  adText: ad.ad_text || "",
-                  imageCount: images.length,
-                  videoCount: videos.length,
-                  ...mediaFields,
-                }),
-              },
-            );
-
-            if (!webhookResponse.ok) {
-              const errText = await webhookResponse.text();
-              throw new Error(
-                `Zapier webhook returned status ${webhookResponse.status}: ${errText}`,
-              );
-            }
-
-            console.log(`   ✅ Admin webhook sent successfully!`);
-
+            await storeReminder(supabase, ad.id, "email", "admin");
             results.push({
               type: "admin_email",
-              to: recipientEmail,
+              to: pref.email_address,
               ad_name: ad.ad_name,
               status: "sent",
             });
-
-            await sql`
-              INSERT INTO sent_reminders (ad_id, reminder_type, recipient_type)
-              VALUES (${ad.id}, 'email', 'admin')
-            `;
-          } catch (err) {
-            console.error(`   ❌ Failed to send admin email:`, err);
+          } catch (error) {
             results.push({
               type: "admin_email",
-              to: recipientEmail,
+              to: pref.email_address,
               ad_name: ad.ad_name,
               status: "failed",
-              error: err.message,
+              error: error.message,
             });
           }
         }
 
-        // Send admin SMS
         if (pref.sms_enabled && pref.phone_number) {
           try {
-            const message = `Reminder: Ad "${ad.ad_name}" for ${ad.advertiser} is scheduled to be posted ${timeUntilText}. Placement: ${ad.placement}`;
-            console.log(`   📱 Admin SMS to ${pref.phone_number}: ${message}`);
+            await storeReminder(supabase, ad.id, "sms", "admin");
             results.push({
               type: "admin_sms",
               to: pref.phone_number,
               ad_name: ad.ad_name,
               status: "logged",
             });
-
-            await sql`
-              INSERT INTO sent_reminders (ad_id, reminder_type, recipient_type)
-              VALUES (${ad.id}, 'sms', 'admin')
-            `;
-          } catch (err) {
-            console.error("   ❌ Failed to send admin SMS:", err);
+          } catch (error) {
             results.push({
               type: "admin_sms",
               to: pref.phone_number,
               ad_name: ad.ad_name,
               status: "failed",
-              error: err.message,
+              error: error.message,
             });
           }
         }
       }
     }
 
-    // ═══════════════════════════════════════════════════════
-    // 2) ADVERTISER REMINDERS — uses the ad's reminder_minutes
-    // ═══════════════════════════════════════════════════════
-    for (const ad of upcomingAds) {
-      const adReminderMinutes = ad.reminder_minutes || 15;
-
-      const { shouldNotify, scheduledTimeET } = shouldNotifyForAd(
-        ad,
-        nowET,
-        todayET,
-        adReminderMinutes,
+    for (const ad of upcomingAds || []) {
+      const reminderMinutes = toNumber(ad.reminder_minutes, 15);
+      const scheduledTimes = computeScheduledTimes(ad, todayET);
+      const scheduledAt = scheduledTimes.find((time) =>
+        isWithinReminderWindow(time, nowET, reminderMinutes),
       );
 
       if (debugMode) {
-        debugInfo.push({
+        debug.push({
           type: "advertiser",
           ad_id: ad.id,
           ad_name: ad.ad_name,
-          advertiser: ad.advertiser,
-          reminderWindow: adReminderMinutes,
-          shouldNotify,
+          reminderWindow: reminderMinutes,
+          shouldNotify: Boolean(scheduledAt),
         });
       }
 
-      if (!shouldNotify || !scheduledTimeET) continue;
+      if (!scheduledAt) continue;
 
-      // Find the advertiser's info
-      const advertiserMatch = allAdvertisers.find(
-        (adv) =>
-          adv.advertiser_name.toLowerCase() === ad.advertiser.toLowerCase(),
+      const advertiserInfo = advertiserByName.get(
+        String(ad.advertiser || "").trim().toLowerCase(),
       );
-
-      if (!advertiserMatch || !advertiserMatch.email) {
-        console.log(
-          `   ⏭️  Skipping advertiser reminder for "${ad.ad_name}" - no matching advertiser or no email on file`,
-        );
+      if (!advertiserInfo?.email) {
         results.push({
           type: "advertiser_email",
           ad_id: ad.id,
@@ -442,19 +374,8 @@ export async function POST(request) {
         continue;
       }
 
-      // Check duplicate — only for advertiser reminders
-      const existingReminder = await sql`
-        SELECT id FROM sent_reminders
-        WHERE ad_id = ${ad.id}
-        AND recipient_type = 'advertiser'
-        AND sent_at > NOW() - INTERVAL '24 hours'
-        LIMIT 1
-      `;
-
-      if (existingReminder.length > 0) {
-        console.log(
-          `   ⏭️  Skipping advertiser reminder for "${ad.ad_name}" - already sent within 24 hours`,
-        );
+      const alreadySent = await hasRecentReminder(supabase, ad.id, "advertiser");
+      if (alreadySent) {
         results.push({
           type: "advertiser_email",
           ad_id: ad.id,
@@ -465,98 +386,68 @@ export async function POST(request) {
         continue;
       }
 
-      const {
-        dayOfWeek,
-        formattedDate,
-        formattedTime,
-        timeUntilText,
-        greeting,
-      } = buildTimeInfo(scheduledTimeET, nowET);
-
-      const advertiserName =
-        advertiserMatch.contact_name || advertiserMatch.advertiser_name;
-      const advertiserFirstName = advertiserName.split(" ")[0];
-
-      const media = Array.isArray(ad.media) ? ad.media : [];
-      const images = media.filter((m) => m.type === "image");
-      const videos = media.filter((m) => m.type === "video");
+      const formattedDate = scheduledAt.toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      const formattedTime = scheduledAt.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const dayOfWeek = scheduledAt.toLocaleDateString("en-US", {
+        weekday: "long",
+      });
+      const untilText = timeUntilText(scheduledAt, nowET);
+      const media = buildMediaFields(ad.media);
+      const advertiserName = advertiserInfo.contact_name || advertiserInfo.advertiser_name;
+      const advertiserFirstName = String(advertiserName || "Advertiser")
+        .split(" ")
+        .filter(Boolean)[0];
 
       try {
-        console.log(
-          `   📧 Sending ADVERTISER email to ${advertiserMatch.email} for ad "${ad.ad_name}"`,
-        );
-
-        const mediaFields = {};
-        images.forEach((img, i) => {
-          mediaFields[`image${i + 1}Url`] = img.url || img.cdnUrl || "";
-        });
-        videos.forEach((vid, i) => {
-          mediaFields[`video${i + 1}Url`] = vid.url || vid.cdnUrl || "";
-        });
-
-        const webhookResponse = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipientType: "advertiser",
-            to: advertiserMatch.email,
-            advertiserEmail: advertiserMatch.email,
-            advertiserPhone: advertiserMatch.phone_number || "",
-            from: "Ad Manager <advertise@cbnads.com>",
-            subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${dayOfWeek}, ${formattedTime} ET`,
-            greeting: `Hello ${advertiserFirstName}`,
-            firstName: advertiserFirstName,
-            advertiserName: advertiserName,
-            adName: ad.ad_name,
-            advertiser: ad.advertiser,
-            placement: ad.placement,
-            formattedTime: formattedTime + " ET",
-            formattedDate: formattedDate,
-            timeUntilText: timeUntilText,
-            adText: ad.ad_text || "",
-            imageCount: images.length,
-            videoCount: videos.length,
-            ...mediaFields,
-          }),
+        await sendZapier({
+          recipientType: "advertiser",
+          to: advertiserInfo.email,
+          advertiserEmail: advertiserInfo.email,
+          advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
+          from: "Ad Manager <advertise@cbnads.com>",
+          subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${dayOfWeek}, ${formattedTime} ET`,
+          greeting: `Hello ${advertiserFirstName}`,
+          firstName: advertiserFirstName,
+          advertiserName,
+          adName: ad.ad_name,
+          advertiser: ad.advertiser,
+          placement: ad.placement,
+          formattedTime: `${formattedTime} ET`,
+          formattedDate,
+          timeUntilText: untilText,
+          adText: ad.ad_text || "",
+          imageCount: media.images.length,
+          videoCount: media.videos.length,
+          ...media.fields,
         });
 
-        if (!webhookResponse.ok) {
-          const errText = await webhookResponse.text();
-          throw new Error(
-            `Zapier webhook returned status ${webhookResponse.status}: ${errText}`,
-          );
-        }
-
-        console.log(`   ✅ Advertiser webhook sent successfully!`);
-
+        await storeReminder(supabase, ad.id, "email", "advertiser");
         results.push({
           type: "advertiser_email",
-          to: advertiserMatch.email,
+          to: advertiserInfo.email,
           ad_name: ad.ad_name,
           advertiser: advertiserName,
           status: "sent",
         });
-
-        await sql`
-          INSERT INTO sent_reminders (ad_id, reminder_type, recipient_type)
-          VALUES (${ad.id}, 'email', 'advertiser')
-        `;
-      } catch (err) {
-        console.error(`   ❌ Failed to send advertiser email:`, err);
+      } catch (error) {
         results.push({
           type: "advertiser_email",
-          to: advertiserMatch.email,
+          to: advertiserInfo.email,
           ad_name: ad.ad_name,
           status: "failed",
-          error: err.message,
+          error: error.message,
         });
       }
     }
-
-    console.log(`\n✅ REMINDER CHECK COMPLETE:`, {
-      totalResults: results.length,
-      resultsSummary: results.map((r) => `${r.type}:${r.status}`),
-    });
 
     const response = {
       success: true,
@@ -570,15 +461,15 @@ export async function POST(request) {
         easternTime: nowET.toLocaleString(),
         todayET,
         adminCount: adminPrefs.length,
-        adCount: upcomingAds.length,
-        advertiserCount: allAdvertisers.length,
-        checks: debugInfo,
+        adCount: (upcomingAds || []).length,
+        advertiserCount: (advertisers || []).length,
+        checks: debug,
       };
     }
 
     return Response.json(response);
   } catch (err) {
-    console.error("❌ POST /api/admin/send-reminders error", err);
+    console.error("POST /api/admin/send-reminders error", err);
     return Response.json(
       { error: "Internal Server Error", details: err.message },
       { status: 500 },

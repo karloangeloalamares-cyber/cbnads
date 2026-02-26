@@ -1,32 +1,59 @@
-import sql from "@/app/api/utils/sql";
+import { db, table, toNumber } from "@/app/api/utils/supabase-db";
 
 /**
- * Recalculates an advertiser's total_spend based on all "Paid" invoices
- * @param {number} advertiserId - The advertiser ID to recalculate
- * @returns {Promise<number>} The new total_spend value
+ * Recalculates an advertiser's spend based on all paid invoices.
+ * Keeps both `total_spend` and `ad_spend` in sync for compatibility.
+ * @param {string} advertiserId
+ * @returns {Promise<number>}
  */
 export async function recalculateAdvertiserSpend(advertiserId) {
-  if (!advertiserId) {
-    return 0;
+  if (!advertiserId) return 0;
+
+  const supabase = db();
+
+  const { data: invoices, error: invoicesError } = await supabase
+    .from(table("invoices"))
+    .select("total, amount, status, deleted_at")
+    .eq("advertiser_id", advertiserId)
+    .eq("status", "Paid")
+    .is("deleted_at", null);
+
+  if (invoicesError) {
+    throw invoicesError;
   }
 
-  // Sum all "Paid" invoices for this advertiser (excluding soft-deleted)
-  const result = await sql`
-    SELECT COALESCE(SUM(total), 0) as total_spend
-    FROM invoices
-    WHERE advertiser_id = ${parseInt(advertiserId)}
-    AND status = 'Paid'
-    AND deleted_at IS NULL
-  `;
+  const totalSpend = (invoices || []).reduce((sum, invoice) => {
+    const total = invoice?.total ?? invoice?.amount ?? 0;
+    return sum + toNumber(total, 0);
+  }, 0);
 
-  const totalSpend = parseFloat(result[0].total_spend) || 0;
+  let updateResult = await supabase
+    .from(table("advertisers"))
+    .update({
+      total_spend: totalSpend,
+      ad_spend: totalSpend,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", advertiserId);
 
-  // Update the advertiser's total_spend
-  await sql`
-    UPDATE advertisers
-    SET total_spend = ${totalSpend}
-    WHERE id = ${parseInt(advertiserId)}
-  `;
+  if (updateResult.error) {
+    const message = String(updateResult.error.message || "");
+    if (!message.includes("total_spend")) {
+      throw updateResult.error;
+    }
+
+    updateResult = await supabase
+      .from(table("advertisers"))
+      .update({
+        ad_spend: totalSpend,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", advertiserId);
+
+    if (updateResult.error) {
+      throw updateResult.error;
+    }
+  }
 
   return totalSpend;
 }

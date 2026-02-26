@@ -1,19 +1,22 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
-export async function POST(request) {
+export async function POST() {
   try {
-    const session = await auth();
-    if (!session) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    // Get all advertisers
-    const advertisers = await sql`SELECT id, advertiser_name FROM advertisers`;
+    const supabase = db();
+    const { data: advertisers, error } = await supabase
+      .from(table("advertisers"))
+      .select("id, advertiser_name");
+    if (error) throw error;
 
     const results = [];
-    for (const advertiser of advertisers) {
+    for (const advertiser of advertisers || []) {
       const newTotal = await recalculateAdvertiserSpend(advertiser.id);
       results.push({
         id: advertiser.id,
@@ -24,7 +27,7 @@ export async function POST(request) {
 
     return Response.json({
       success: true,
-      message: `Recalculated spending for ${advertisers.length} advertisers`,
+      message: `Recalculated spending for ${(advertisers || []).length} advertisers`,
       results,
     });
   } catch (error) {
@@ -35,3 +38,4 @@ export async function POST(request) {
     );
   }
 }
+

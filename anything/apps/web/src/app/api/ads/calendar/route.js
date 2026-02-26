@@ -1,4 +1,12 @@
-import sql from "@/app/api/utils/sql";
+import { adDatesForDayCheck, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
+
+const toLegacyPostType = (value) => {
+  const normalized = normalizePostType(value);
+  if (normalized === "one_time") return "One-Time Post";
+  if (normalized === "daily_run") return "Daily Run";
+  if (normalized === "custom_schedule") return "Custom Schedule";
+  return value || "One-Time Post";
+};
 
 export async function GET(request) {
   try {
@@ -13,44 +21,18 @@ export async function GET(request) {
       );
     }
 
-    // Fetch all ads
-    const ads = await sql`SELECT * FROM ads ORDER BY created_at DESC`;
+    const supabase = db();
+    const { data: ads, error } = await supabase
+      .from(table("ads"))
+      .select("id, ad_name, advertiser, status, post_type, placement, payment, schedule, post_date, post_date_from, post_date_to, custom_dates")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
 
-    // Calculate which dates each ad appears on
     const calendarData = {};
 
-    ads.forEach((ad) => {
-      const dates = [];
-
-      if (ad.post_type === "One-Time Post" && ad.schedule) {
-        // One-time post - just the single date
-        dates.push(ad.schedule);
-      } else if (
-        ad.post_type === "Daily Run" &&
-        ad.post_date_from &&
-        ad.post_date_to
-      ) {
-        // Daily run - all dates between from and to
-        const startDate = new Date(ad.post_date_from);
-        const endDate = new Date(ad.post_date_to);
-
-        for (
-          let d = new Date(startDate);
-          d <= endDate;
-          d.setDate(d.getDate() + 1)
-        ) {
-          dates.push(new Date(d).toISOString().split("T")[0]);
-        }
-      } else if (ad.post_type === "Custom Schedule" && ad.custom_dates) {
-        // Custom schedule - specific dates
-        const customDates = Array.isArray(ad.custom_dates)
-          ? ad.custom_dates
-          : [];
-        dates.push(...customDates);
-      }
-
-      // Add this ad to each date it appears on
-      dates.forEach((dateStr) => {
+    for (const ad of ads || []) {
+      const dates = adDatesForDayCheck(ad);
+      for (const dateStr of dates) {
         if (!calendarData[dateStr]) {
           calendarData[dateStr] = [];
         }
@@ -59,12 +41,12 @@ export async function GET(request) {
           ad_name: ad.ad_name,
           advertiser: ad.advertiser,
           status: ad.status,
-          post_type: ad.post_type,
+          post_type: toLegacyPostType(ad.post_type),
           placement: ad.placement,
           payment: ad.payment,
         });
-      });
-    });
+      }
+    }
 
     return Response.json({ calendarData });
   } catch (error) {
@@ -75,3 +57,4 @@ export async function GET(request) {
     );
   }
 }
+

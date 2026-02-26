@@ -1,55 +1,62 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table, toNumber } from "@/app/api/utils/supabase-db";
 
 // PUT - Update product
 export async function PUT(request, { params }) {
   try {
-    const session = await auth();
-    if (!session || session.user?.role !== "admin") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const supabase = db();
     const { id } = params;
     const body = await request.json();
     const { product_name, placement, price, update_unpaid_invoices } = body;
 
-    if (!product_name || !placement || price === undefined) {
+    if (!product_name || price === undefined) {
       return Response.json(
-        { error: "Product name, placement, and price are required" },
+        { error: "Product name and price are required" },
         { status: 400 },
       );
     }
 
-    // Get current product to check for price changes
-    const currentProduct =
-      await sql`SELECT price FROM products WHERE id = ${id}`;
+    const newPrice = toNumber(price, 0);
 
-    if (currentProduct.length === 0) {
+    const { data: currentProduct, error: currentProductError } = await supabase
+      .from(table("products"))
+      .select("id, price")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (currentProductError) throw currentProductError;
+    if (!currentProduct) {
       return Response.json({ error: "Product not found" }, { status: 404 });
     }
 
-    const oldPrice = parseFloat(currentProduct[0].price);
-    const newPrice = parseFloat(price);
+    const oldPrice = toNumber(currentProduct.price, 0);
 
-    // If price changed, check for unpaid invoices using this product
+    // Optional invoice item update warning flow
     if (oldPrice !== newPrice) {
-      const unpaidInvoices = await sql`
-        SELECT COUNT(DISTINCT i.id) as count
-        FROM invoices i
-        INNER JOIN invoice_items ii ON ii.invoice_id = i.id
-        WHERE ii.product_id = ${id}
-        AND i.status != 'Paid'
-      `;
+      const { data: invoiceItems, error: invoiceItemsError } = await supabase
+        .from(table("invoice_items"))
+        .select("invoice_id")
+        .eq("product_id", id);
+      if (invoiceItemsError) throw invoiceItemsError;
 
-      const unpaidCount = parseInt(unpaidInvoices[0]?.count || 0);
+      const invoiceIds = Array.from(new Set((invoiceItems || []).map((row) => row.invoice_id)));
 
-      // If there are unpaid invoices and we're not explicitly updating them, return a warning
-      if (unpaidCount > 0 && !update_unpaid_invoices) {
+      let unpaidInvoiceIds = [];
+      if (invoiceIds.length > 0) {
+        const { data: invoices, error: invoicesError } = await supabase
+          .from(table("invoices"))
+          .select("id, status")
+          .in("id", invoiceIds)
+          .neq("status", "Paid");
+        if (invoicesError) throw invoicesError;
+        unpaidInvoiceIds = (invoices || []).map((row) => row.id);
+      }
+
+      if (unpaidInvoiceIds.length > 0 && !update_unpaid_invoices) {
         return Response.json(
           {
             warning: true,
-            message: `${unpaidCount} unpaid invoice${unpaidCount > 1 ? "s" : ""} use${unpaidCount === 1 ? "s" : ""} the old price of $${oldPrice.toFixed(2)}. Would you like to update them to the new price of $${newPrice.toFixed(2)}?`,
-            unpaidCount,
+            message: `${unpaidInvoiceIds.length} unpaid invoice${unpaidInvoiceIds.length > 1 ? "s" : ""} use${unpaidInvoiceIds.length === 1 ? "s" : ""} the old price of $${oldPrice.toFixed(2)}. Would you like to update them to the new price of $${newPrice.toFixed(2)}?`,
+            unpaidCount: unpaidInvoiceIds.length,
             oldPrice,
             newPrice,
           },
@@ -57,60 +64,59 @@ export async function PUT(request, { params }) {
         );
       }
 
-      // If we should update unpaid invoices, do it
-      if (update_unpaid_invoices && unpaidCount > 0) {
-        // Update all invoice items with this product in unpaid invoices
-        await sql`
-          UPDATE invoice_items
-          SET unit_price = ${newPrice},
-              amount = quantity * ${newPrice}
-          WHERE product_id = ${id}
-          AND invoice_id IN (
-            SELECT id FROM invoices WHERE status != 'Paid'
-          )
-        `;
+      if (update_unpaid_invoices && unpaidInvoiceIds.length > 0) {
+        const { data: itemsToUpdate, error: itemsToUpdateError } = await supabase
+          .from(table("invoice_items"))
+          .select("id, quantity, invoice_id")
+          .eq("product_id", id)
+          .in("invoice_id", unpaidInvoiceIds);
+        if (itemsToUpdateError) throw itemsToUpdateError;
 
-        // Recalculate totals for affected invoices
-        const affectedInvoices = await sql`
-          SELECT DISTINCT i.id, i.discount, i.tax
-          FROM invoices i
-          INNER JOIN invoice_items ii ON ii.invoice_id = i.id
-          WHERE ii.product_id = ${id}
-          AND i.status != 'Paid'
-        `;
-
-        for (const invoice of affectedInvoices) {
-          const items = await sql`
-            SELECT SUM(amount) as subtotal
-            FROM invoice_items
-            WHERE invoice_id = ${invoice.id}
-          `;
-          const subtotal = parseFloat(items[0]?.subtotal || 0);
-          const total =
-            subtotal -
-            parseFloat(invoice.discount || 0) +
-            parseFloat(invoice.tax || 0);
-
-          await sql`
-            UPDATE invoices
-            SET total = ${total}
-            WHERE id = ${invoice.id}
-          `;
+        for (const item of itemsToUpdate || []) {
+          const quantity = Number(item.quantity) || 1;
+          await supabase
+            .from(table("invoice_items"))
+            .update({
+              unit_price: newPrice,
+              amount: quantity * newPrice,
+            })
+            .eq("id", item.id);
         }
       }
     }
 
-    const result = await sql`
-      UPDATE products
-      SET
-        product_name = ${product_name},
-        placement = ${placement},
-        price = ${price}
-      WHERE id = ${id}
-      RETURNING *
-    `;
+    const basePatch = {
+      product_name,
+      price: newPrice,
+      updated_at: new Date().toISOString(),
+    };
+    const extendedPatch = {
+      ...basePatch,
+      placement: placement || "Standard",
+    };
 
-    return Response.json(result[0]);
+    let updateResult = await supabase
+      .from(table("products"))
+      .update(extendedPatch)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (updateResult.error) {
+      const message = String(updateResult.error.message || "");
+      const missingPlacement = message.includes("placement");
+      if (!missingPlacement) throw updateResult.error;
+
+      updateResult = await supabase
+        .from(table("products"))
+        .update(basePatch)
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (updateResult.error) throw updateResult.error;
+    }
+
+    return Response.json(updateResult.data);
   } catch (error) {
     console.error("Error updating product:", error);
     return Response.json(
@@ -123,28 +129,27 @@ export async function PUT(request, { params }) {
 // DELETE - Delete product
 export async function DELETE(request, { params }) {
   try {
-    const session = await auth();
-    if (!session || session.user?.role !== "admin") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const supabase = db();
     const { id } = params;
     const { searchParams } = new URL(request.url);
     const force = searchParams.get("force") === "true";
 
-    // Check if product is used in ads or invoices
-    const adsUsage = await sql`
-      SELECT COUNT(*) as count FROM ads WHERE product_id = ${id} AND status != 'Published'
-    `;
+    const { count: adsCountRaw, error: adsCountError } = await supabase
+      .from(table("ads"))
+      .select("*", { count: "exact", head: true })
+      .eq("product_id", id)
+      .neq("status", "Published");
+    if (adsCountError) throw adsCountError;
 
-    const invoiceUsage = await sql`
-      SELECT COUNT(*) as count FROM invoice_items WHERE product_id = ${id}
-    `;
+    const { count: invoiceCountRaw, error: invoiceCountError } = await supabase
+      .from(table("invoice_items"))
+      .select("*", { count: "exact", head: true })
+      .eq("product_id", id);
+    if (invoiceCountError) throw invoiceCountError;
 
-    const adsCount = parseInt(adsUsage[0]?.count || 0);
-    const invoiceCount = parseInt(invoiceUsage[0]?.count || 0);
+    const adsCount = adsCountRaw || 0;
+    const invoiceCount = invoiceCountRaw || 0;
 
-    // If product is in use and not forced, return warning
     if ((adsCount > 0 || invoiceCount > 0) && !force) {
       return Response.json(
         {
@@ -157,12 +162,15 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    const result = await sql`
-      DELETE FROM products WHERE id = ${id}
-      RETURNING *
-    `;
+    const { data: removed, error: removeError } = await supabase
+      .from(table("products"))
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
 
-    if (result.length === 0) {
+    if (removeError) throw removeError;
+    if (!removed) {
       return Response.json({ error: "Product not found" }, { status: 404 });
     }
 

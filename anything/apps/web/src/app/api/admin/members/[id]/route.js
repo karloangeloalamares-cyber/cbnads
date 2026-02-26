@@ -1,38 +1,53 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table } from "@/app/api/utils/supabase-db";
+import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
 
 // Remove admin role from a member
 export async function DELETE(request, { params }) {
   try {
-    const session = await auth();
-    if (!session || !session.user?.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    // Check if current user is admin
-    const currentUserRows =
-      await sql`SELECT role FROM auth_users WHERE id = ${session.user.id} LIMIT 1`;
-    const currentUser = currentUserRows?.[0];
-
-    if (currentUser?.role !== "admin") {
-      return Response.json(
-        { error: "Forbidden: Admin access required" },
-        { status: 403 },
-      );
+    const memberId = params?.id;
+    if (!memberId) {
+      return Response.json({ error: "Member ID is required" }, { status: 400 });
     }
 
-    const memberId = params.id;
+    const currentUser = await getSessionUser();
+    const supabase = db();
 
-    // Prevent removing yourself
-    if (memberId === session.user.id) {
+    const { data: member, error: memberError } = await supabase
+      .from(table("team_members"))
+      .select("id, email")
+      .eq("id", memberId)
+      .maybeSingle();
+    if (memberError) throw memberError;
+    if (!member) {
+      return Response.json({ error: "Member not found" }, { status: 404 });
+    }
+
+    const sameAsCurrentById =
+      currentUser?.id && String(currentUser.id) === String(member.id);
+    const sameAsCurrentByEmail =
+      currentUser?.email &&
+      String(currentUser.email).trim().toLowerCase() ===
+        String(member.email || "").trim().toLowerCase();
+    if (sameAsCurrentById || sameAsCurrentByEmail) {
       return Response.json(
         { error: "You cannot remove yourself" },
         { status: 400 },
       );
     }
 
-    // Demote user from admin to regular user
-    await sql`UPDATE auth_users SET role = 'user' WHERE id = ${memberId}`;
+    const { error: updateError } = await supabase
+      .from(table("team_members"))
+      .update({
+        role: "member",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", memberId);
+    if (updateError) throw updateError;
 
     return Response.json({
       success: true,
@@ -43,3 +58,4 @@ export async function DELETE(request, { params }) {
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+

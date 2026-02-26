@@ -1,5 +1,4 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table, toNumber } from "@/app/api/utils/supabase-db";
 import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
 function generateInvoiceNumber() {
@@ -18,11 +17,7 @@ function generateInvoiceNumber() {
 
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    const supabase = db();
     const body = await request.json();
     const {
       advertiser_id,
@@ -52,45 +47,65 @@ export async function POST(request) {
       );
     }
 
-    // Calculate total from items
-    let subtotal = 0;
-    for (const item of items) {
-      subtotal += parseFloat(item.amount) || 0;
-    }
-    const total =
-      subtotal - (parseFloat(discount) || 0) + (parseFloat(tax) || 0);
-
+    const subtotal = items.reduce((sum, item) => sum + toNumber(item.amount, 0), 0);
+    const total = subtotal - toNumber(discount, 0) + toNumber(tax, 0);
+    const nowIso = new Date().toISOString();
     const invoiceNumber = generateInvoiceNumber();
 
-    // Create invoice
-    const invoiceResult = await sql`
-      INSERT INTO invoices (invoice_number, advertiser_id, advertiser_name, contact_name, contact_email, bill_to, issue_date, status, discount, tax, total, notes)
-      VALUES (${invoiceNumber}, ${advertiser_id || null}, ${advertiser_name}, ${contact_name || null}, ${contact_email || null}, ${bill_to || advertiser_name}, ${issue_date || new Date().toISOString().split("T")[0]}, ${status}, ${parseFloat(discount) || 0}, ${parseFloat(tax) || 0}, ${total}, ${notes || null})
-      RETURNING *
-    `;
+    const { data: invoice, error: invoiceError } = await supabase
+      .from(table("invoices"))
+      .insert({
+        invoice_number: invoiceNumber,
+        advertiser_id: advertiser_id || null,
+        advertiser_name,
+        contact_name: contact_name || null,
+        contact_email: contact_email || null,
+        bill_to: bill_to || advertiser_name,
+        issue_date: issue_date || nowIso.slice(0, 10),
+        status,
+        discount: toNumber(discount, 0),
+        tax: toNumber(tax, 0),
+        total,
+        amount: total,
+        amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
+        notes: notes || null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select("*")
+      .single();
+    if (invoiceError) throw invoiceError;
 
-    const invoice = invoiceResult[0];
-
-    // Create line items
     for (const item of items) {
-      await sql`
-        INSERT INTO invoice_items (invoice_id, ad_id, product_id, description, quantity, unit_price, amount)
-        VALUES (${invoice.id}, ${item.ad_id || null}, ${item.product_id || null}, ${item.description}, ${item.quantity || 1}, ${parseFloat(item.unit_price) || 0}, ${parseFloat(item.amount) || 0})
-      `;
+      const quantity = toNumber(item.quantity, 1) || 1;
+      const unitPrice = toNumber(item.unit_price, 0);
+      const amount = toNumber(item.amount, quantity * unitPrice);
+      const { error: itemError } = await supabase.from(table("invoice_items")).insert({
+        invoice_id: invoice.id,
+        ad_id: item.ad_id || null,
+        product_id: item.product_id || null,
+        description: item.description || "",
+        quantity,
+        unit_price: unitPrice,
+        amount,
+        created_at: nowIso,
+      });
+      if (itemError) throw itemError;
     }
 
-    // Fetch items back
-    const invoiceItems = await sql`
-      SELECT * FROM invoice_items WHERE invoice_id = ${invoice.id} ORDER BY id ASC
-    `;
+    const { data: invoiceItems, error: itemsError } = await supabase
+      .from(table("invoice_items"))
+      .select("*")
+      .eq("invoice_id", invoice.id)
+      .order("created_at", { ascending: true });
+    if (itemsError) throw itemsError;
 
-    // Recalculate advertiser's total_spend if invoice is Paid
-    if (status === "Paid" && advertiser_id) {
+    if (String(status).toLowerCase() === "paid" && advertiser_id) {
       await recalculateAdvertiserSpend(advertiser_id);
     }
 
     return Response.json(
-      { invoice: { ...invoice, items: invoiceItems } },
+      { invoice: { ...invoice, items: invoiceItems || [] } },
       { status: 201 },
     );
   } catch (error) {
@@ -101,3 +116,4 @@ export async function POST(request) {
     );
   }
 }
+

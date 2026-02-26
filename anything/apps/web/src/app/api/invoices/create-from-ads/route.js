@@ -1,153 +1,148 @@
-import sql from "@/app/api/utils/sql";
+import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { adAmount, nextSequentialInvoiceNumber } from "@/app/api/utils/invoice-helpers";
+import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
 export async function POST(request) {
   try {
-    const { adIds, invoiceData } = await request.json();
+    const { adIds, invoiceData = {} } = await request.json();
 
-    if (!adIds || adIds.length === 0) {
+    if (!Array.isArray(adIds) || adIds.length === 0) {
       return Response.json({ error: "No ads selected" }, { status: 400 });
     }
 
-    // Get ad details
-    const ads = await sql`
-      SELECT 
-        a.id,
-        a.ad_name,
-        a.advertiser,
-        a.payment,
-        p.price as product_price,
-        p.product_name,
-        p.placement
-      FROM ads a
-      LEFT JOIN products p ON a.product_id = p.id
-      WHERE a.id = ANY(${adIds})
-    `;
+    const supabase = db();
+    const uniqueAdIds = [...new Set(adIds.map(String))];
 
-    if (ads.length === 0) {
+    const { data: ads, error: adsError } = await supabase
+      .from(table("ads"))
+      .select("id, ad_name, advertiser, advertiser_id, product_id, payment, price")
+      .in("id", uniqueAdIds);
+    if (adsError) throw adsError;
+
+    if (!ads || ads.length === 0) {
       return Response.json({ error: "No valid ads found" }, { status: 404 });
     }
 
-    // Use first ad's advertiser info or provided data
-    const firstAd = ads[0];
-
-    // Get advertiser details
-    const advertiser = await sql`
-      SELECT * FROM advertisers 
-      WHERE advertiser_name = ${invoiceData.advertiserName || firstAd.advertiser}
-      LIMIT 1
-    `;
-
-    // Generate invoice number
-    const lastInvoice = await sql`
-      SELECT invoice_number 
-      FROM invoices 
-      WHERE deleted_at IS NULL
-      ORDER BY created_at DESC 
-      LIMIT 1
-    `;
-
-    let invoiceNumber;
-    if (lastInvoice.length > 0) {
-      const lastNum = parseInt(
-        lastInvoice[0].invoice_number.replace(/\D/g, ""),
-      );
-      invoiceNumber = `INV-${String(lastNum + 1).padStart(4, "0")}`;
-    } else {
-      invoiceNumber = "INV-0001";
+    const productIds = [...new Set(ads.map((ad) => ad.product_id).filter(Boolean))];
+    const productsById = new Map();
+    if (productIds.length > 0) {
+      const { data: products, error: productsError } = await supabase
+        .from(table("products"))
+        .select("id, product_name, price")
+        .in("id", productIds);
+      if (productsError) throw productsError;
+      for (const product of products || []) {
+        productsById.set(product.id, product);
+      }
     }
 
-    // Calculate totals
+    const firstAd = ads[0];
+    const targetAdvertiserName =
+      invoiceData.advertiserName || firstAd.advertiser || "";
+
+    let advertiser = null;
+    if (invoiceData.advertiserId) {
+      const { data, error } = await supabase
+        .from(table("advertisers"))
+        .select("*")
+        .eq("id", invoiceData.advertiserId)
+        .maybeSingle();
+      if (error) throw error;
+      advertiser = data;
+    } else if (targetAdvertiserName) {
+      const { data, error } = await supabase
+        .from(table("advertisers"))
+        .select("*")
+        .ilike("advertiser_name", targetAdvertiserName)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      advertiser = data;
+    }
+
+    const invoiceNumber = await nextSequentialInvoiceNumber(
+      supabase,
+      table("invoices"),
+    );
+
     let subtotal = 0;
     const lineItems = ads.map((ad) => {
-      // Try to extract amount from payment field
-      let amount = 0;
-      if (ad.payment && ad.payment.startsWith("$")) {
-        amount = parseFloat(ad.payment.replace(/[$,]/g, ""));
-      } else if (ad.product_price) {
-        amount = parseFloat(ad.product_price);
-      }
-
+      const product = productsById.get(ad.product_id);
+      const amount = adAmount({
+        payment: ad.payment,
+        price: ad.price,
+        product_price: product?.price,
+      });
       subtotal += amount;
-
       return {
         ad_id: ad.id,
-        product_id: ad.product_id,
-        description: ad.ad_name,
+        product_id: ad.product_id || null,
+        description: ad.ad_name || product?.product_name || "Ad placement",
         quantity: 1,
         unit_price: amount,
-        amount: amount,
+        amount,
       };
     });
 
-    const discount = invoiceData.discount || 0;
-    const tax = invoiceData.tax || 0;
+    const discount = toNumber(invoiceData.discount, 0);
+    const tax = toNumber(invoiceData.tax, 0);
     const total = subtotal - discount + tax;
+    const status = invoiceData.status || "Pending";
+    const nowIso = new Date().toISOString();
 
-    // Create invoice
-    const [invoice] = await sql`
-      INSERT INTO invoices (
-        invoice_number,
-        advertiser_id,
-        advertiser_name,
-        contact_name,
-        contact_email,
-        bill_to,
-        issue_date,
+    const { data: invoice, error: invoiceError } = await supabase
+      .from(table("invoices"))
+      .insert({
+        invoice_number: invoiceNumber,
+        advertiser_id: advertiser?.id || null,
+        advertiser_name: targetAdvertiserName,
+        contact_name: invoiceData.contactName || advertiser?.contact_name || null,
+        contact_email: invoiceData.contactEmail || advertiser?.email || null,
+        bill_to: invoiceData.billTo || targetAdvertiserName || null,
+        issue_date: invoiceData.issueDate || nowIso.slice(0, 10),
         status,
         discount,
         tax,
         total,
-        amount_paid,
-        notes
-      ) VALUES (
-        ${invoiceNumber},
-        ${advertiser.length > 0 ? advertiser[0].id : null},
-        ${invoiceData.advertiserName || firstAd.advertiser},
-        ${invoiceData.contactName || (advertiser.length > 0 ? advertiser[0].contact_name : "")},
-        ${invoiceData.contactEmail || (advertiser.length > 0 ? advertiser[0].email : "")},
-        ${invoiceData.billTo || ""},
-        ${invoiceData.issueDate || new Date().toISOString().split("T")[0]},
-        ${invoiceData.status || "Pending"},
-        ${discount},
-        ${tax},
-        ${total},
-        ${invoiceData.status === "Paid" ? total : 0},
-        ${invoiceData.notes || ""}
-      )
-      RETURNING *
-    `;
+        amount: total,
+        amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
+        notes: invoiceData.notes || null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select("*")
+      .single();
+    if (invoiceError) throw invoiceError;
 
-    // Create line items
     for (const item of lineItems) {
-      await sql`
-        INSERT INTO invoice_items (
-          invoice_id,
-          ad_id,
-          product_id,
-          description,
-          quantity,
-          unit_price,
-          amount
-        ) VALUES (
-          ${invoice.id},
-          ${item.ad_id},
-          ${item.product_id},
-          ${item.description},
-          ${item.quantity},
-          ${item.unit_price},
-          ${item.amount}
-        )
-      `;
+      const { error: itemError } = await supabase.from(table("invoice_items")).insert({
+        invoice_id: invoice.id,
+        ad_id: item.ad_id,
+        product_id: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        amount: item.amount,
+        created_at: nowIso,
+      });
+      if (itemError) throw itemError;
     }
 
-    // If invoice is paid, update linked ads
-    if (invoiceData.status === "Paid") {
-      await sql`
-        UPDATE ads 
-        SET payment = 'Paid',
-            paid_via_invoice_id = ${invoice.id}
-        WHERE id = ANY(${adIds})
-      `;
+    if (String(status).toLowerCase() === "paid") {
+      const { error: adUpdateError } = await supabase
+        .from(table("ads"))
+        .update({
+          payment: "Paid",
+          paid_via_invoice_id: invoice.id,
+          updated_at: nowIso,
+        })
+        .in("id", uniqueAdIds);
+      if (adUpdateError) throw adUpdateError;
+
+      if (advertiser?.id) {
+        await recalculateAdvertiserSpend(advertiser.id);
+      }
     }
 
     return Response.json({

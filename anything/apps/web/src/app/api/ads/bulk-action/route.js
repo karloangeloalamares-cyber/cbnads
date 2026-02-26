@@ -1,4 +1,4 @@
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function POST(request) {
@@ -6,62 +6,79 @@ export async function POST(request) {
     const body = await request.json();
     const { action, adIds, newStatus } = body;
 
-    if (!action || !adIds || !Array.isArray(adIds) || adIds.length === 0) {
+    if (!action || !Array.isArray(adIds) || adIds.length === 0) {
       return Response.json(
         { error: "Invalid request. Action and adIds are required." },
         { status: 400 },
       );
     }
 
-    // Get all affected advertisers before making changes
-    const placeholders = adIds.map((_, i) => `$${i + 1}`).join(",");
-    const affectedAds = await sql(
-      `SELECT DISTINCT advertiser FROM ads WHERE id IN (${placeholders})`,
-      adIds,
-    );
-    const affectedAdvertisers = affectedAds.map((ad) => ad.advertiser);
+    const supabase = db();
+    const uniqueAdIds = [...new Set(adIds.map(String))];
+
+    const { data: affectedAds, error: affectedAdsError } = await supabase
+      .from(table("ads"))
+      .select("id, advertiser")
+      .in("id", uniqueAdIds);
+    if (affectedAdsError) throw affectedAdsError;
+
+    const affectedAdvertisers = [
+      ...new Set((affectedAds || []).map((ad) => ad.advertiser).filter(Boolean)),
+    ];
 
     if (action === "delete") {
-      // Delete multiple ads
-      await sql(`DELETE FROM ads WHERE id IN (${placeholders})`, adIds);
+      await supabase.from(table("sent_reminders")).delete().in("ad_id", uniqueAdIds);
+      const { error } = await supabase.from(table("ads")).delete().in("id", uniqueAdIds);
+      if (error) throw error;
 
-      // Update next_ad_date for all affected advertisers
       for (const advertiser of affectedAdvertisers) {
         await updateAdvertiserNextAdDate(advertiser);
       }
 
       return Response.json({
         success: true,
-        message: `${adIds.length} ad(s) deleted successfully`,
+        message: `${uniqueAdIds.length} ad(s) deleted successfully`,
       });
-    } else if (action === "mark-published") {
-      // Mark multiple ads as published
-      await sql(
-        `UPDATE ads SET status = 'Published' WHERE id IN (${placeholders})`,
-        adIds,
-      );
+    }
 
-      // Update next_ad_date for all affected advertisers
+    if (action === "mark-published") {
+      const { error } = await supabase
+        .from(table("ads"))
+        .update({
+          status: "Published",
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", uniqueAdIds);
+      if (error) throw error;
+
       for (const advertiser of affectedAdvertisers) {
         await updateAdvertiserNextAdDate(advertiser);
       }
 
       return Response.json({
         success: true,
-        message: `${adIds.length} ad(s) marked as published`,
+        message: `${uniqueAdIds.length} ad(s) marked as published`,
       });
-    } else if (action === "mark-paid") {
-      // Mark multiple ads as paid
-      await sql(
-        `UPDATE ads SET payment = 'Paid' WHERE id IN (${placeholders})`,
-        adIds,
-      );
+    }
+
+    if (action === "mark-paid") {
+      const { error } = await supabase
+        .from(table("ads"))
+        .update({
+          payment: "Paid",
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", uniqueAdIds);
+      if (error) throw error;
 
       return Response.json({
         success: true,
-        message: `${adIds.length} ad(s) marked as paid`,
+        message: `${uniqueAdIds.length} ad(s) marked as paid`,
       });
-    } else if (action === "update-status") {
+    }
+
+    if (action === "update-status") {
       if (!newStatus) {
         return Response.json(
           { error: "New status is required" },
@@ -69,12 +86,20 @@ export async function POST(request) {
         );
       }
 
-      await sql(`UPDATE ads SET status = $1 WHERE id IN (${placeholders})`, [
-        newStatus,
-        ...adIds,
-      ]);
+      const updates = {
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+      };
+      if (newStatus === "Published") {
+        updates.published_at = new Date().toISOString();
+      }
 
-      // Update next_ad_date for all affected advertisers if status changed to Published
+      const { error } = await supabase
+        .from(table("ads"))
+        .update(updates)
+        .in("id", uniqueAdIds);
+      if (error) throw error;
+
       if (newStatus === "Published") {
         for (const advertiser of affectedAdvertisers) {
           await updateAdvertiserNextAdDate(advertiser);
@@ -83,11 +108,11 @@ export async function POST(request) {
 
       return Response.json({
         success: true,
-        message: `${adIds.length} ad(s) updated to ${newStatus}`,
+        message: `${uniqueAdIds.length} ad(s) updated to ${newStatus}`,
       });
-    } else {
-      return Response.json({ error: "Invalid action" }, { status: 400 });
     }
+
+    return Response.json({ error: "Invalid action" }, { status: 400 });
   } catch (error) {
     console.error("Error performing bulk action:", error);
     return Response.json(
@@ -96,3 +121,4 @@ export async function POST(request) {
     );
   }
 }
+

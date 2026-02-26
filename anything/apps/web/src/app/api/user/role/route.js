@@ -1,21 +1,27 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { getSessionUser, requireAuth } from "@/app/api/utils/auth-check";
 
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session || !session.user?.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const authState = await requireAuth();
+    if (!authState.authorized) {
+      return Response.json({ error: authState.error }, { status: 401 });
     }
 
-    const userId = session.user.id;
-    const rows =
-      await sql`SELECT id, name, email, image, role FROM auth_users WHERE id = ${userId} LIMIT 1`;
-    const user = rows?.[0] || null;
-
-    return Response.json({ user });
+    const user = await getSessionUser();
+    return Response.json({
+      user: user
+        ? {
+            id: user.id,
+            name: user.name || null,
+            email: user.email || null,
+            image: user.image || null,
+            role: user.role || "user",
+          }
+        : null,
+    });
   } catch (err) {
     console.error("GET /api/user/role error", err);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+

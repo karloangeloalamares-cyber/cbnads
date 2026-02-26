@@ -1,5 +1,26 @@
 import { auth } from "@/auth";
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
+
+async function resolveUserRole(sessionUser) {
+  const rawRole = String(sessionUser?.role || "").trim().toLowerCase();
+  if (rawRole) return rawRole;
+
+  const email = String(sessionUser?.email || "").trim().toLowerCase();
+  if (!email) return "user";
+
+  try {
+    const supabase = db();
+    const { data, error } = await supabase
+      .from(table("team_members"))
+      .select("role")
+      .ilike("email", email)
+      .maybeSingle();
+    if (error) throw error;
+    return String(data?.role || "user").trim().toLowerCase();
+  } catch {
+    return "user";
+  }
+}
 
 /**
  * Check if the current user is authenticated and is an admin
@@ -15,12 +36,8 @@ export async function requireAdmin() {
     };
   }
 
-  // Fetch user role from database
-  const userRows = await sql`
-    SELECT role FROM auth_users WHERE id = ${session.user.id}
-  `;
-
-  if (userRows.length === 0 || userRows[0].role !== "admin") {
+  const role = await resolveUserRole(session.user);
+  if (role !== "admin") {
     return {
       authorized: false,
       error: "Unauthorized - Admin access required",
@@ -50,5 +67,16 @@ export async function requireAuth() {
   return {
     authorized: true,
     user: session.user,
+  };
+}
+
+export async function getSessionUser() {
+  const session = await auth();
+  if (!session || !session.user?.id) return null;
+
+  const role = await resolveUserRole(session.user);
+  return {
+    ...session.user,
+    role,
   };
 }

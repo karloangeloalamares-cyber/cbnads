@@ -1,30 +1,40 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
+import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
+
+const ARCHIVE_AFTER_DAYS = 90;
 
 // POST - Archive old published ads (Published + older than 90 days)
-export async function POST(request) {
+export async function POST() {
   try {
-    const session = await auth();
-    if (!session || session.user?.role !== "admin") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    // Archive ads that are Published and published_at is more than 90 days ago
-    const result = await sql`
-      UPDATE ads
-      SET archived = TRUE
-      WHERE status = 'Published'
-      AND published_at IS NOT NULL
-      AND published_at < NOW() - INTERVAL '90 days'
-      AND archived = FALSE
-      RETURNING id, ad_name, published_at
-    `;
+    const supabase = db();
+    const cutoff = new Date(
+      Date.now() - ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
 
+    const { data, error } = await supabase
+      .from(table("ads"))
+      .update({
+        archived: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("status", "Published")
+      .eq("archived", false)
+      .not("published_at", "is", null)
+      .lt("published_at", cutoff)
+      .select("id, ad_name, published_at");
+    if (error) throw error;
+
+    const archivedAds = data || [];
     return Response.json({
       success: true,
-      archivedCount: result.length,
-      archivedAds: result,
-      message: `Archived ${result.length} old published ad${result.length !== 1 ? "s" : ""}`,
+      archivedCount: archivedAds.length,
+      archivedAds,
+      message: `Archived ${archivedAds.length} old published ad${archivedAds.length !== 1 ? "s" : ""}`,
     });
   } catch (error) {
     console.error("Error archiving old ads:", error);
@@ -38,9 +48,9 @@ export async function POST(request) {
 // PUT - Manually archive/unarchive specific ad
 export async function PUT(request) {
   try {
-    const session = await auth();
-    if (!session || session.user?.role !== "admin") {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
     const body = await request.json();
@@ -53,20 +63,25 @@ export async function PUT(request) {
       );
     }
 
-    const result = await sql`
-      UPDATE ads
-      SET archived = ${archived}
-      WHERE id = ${id}
-      RETURNING *
-    `;
+    const supabase = db();
+    const { data, error } = await supabase
+      .from(table("ads"))
+      .update({
+        archived: Boolean(archived),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
 
-    if (result.length === 0) {
+    if (!data) {
       return Response.json({ error: "Ad not found" }, { status: 404 });
     }
 
     return Response.json({
       success: true,
-      ad: result[0],
+      ad: data,
       message: archived ? "Ad archived" : "Ad unarchived",
     });
   } catch (error) {
@@ -77,3 +92,4 @@ export async function PUT(request) {
     );
   }
 }
+

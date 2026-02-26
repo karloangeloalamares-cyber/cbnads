@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Local env (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Build/cache
+.react-router/
+dist/
+build/

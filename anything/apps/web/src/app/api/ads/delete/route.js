@@ -1,8 +1,9 @@
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function DELETE(request) {
   try {
+    const supabase = db();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -10,24 +11,26 @@ export async function DELETE(request) {
       return Response.json({ error: "Ad ID is required" }, { status: 400 });
     }
 
-    const result = await sql(
-      "DELETE FROM ads WHERE id = $1 RETURNING *, post_time::TEXT as post_time",
-      [id],
-    );
+    const { data: removedAd, error } = await supabase
+      .from(table("ads"))
+      .delete()
+      .eq("id", id)
+      .select("*")
+      .maybeSingle();
+    if (error) throw error;
 
-    if (result.length === 0) {
+    if (!removedAd) {
       return Response.json({ error: "Ad not found" }, { status: 404 });
     }
 
-    // Update the advertiser's next_ad_date after deletion
-    const advertiser = result[0].advertiser;
-    if (advertiser) {
-      await updateAdvertiserNextAdDate(advertiser);
+    if (removedAd.advertiser) {
+      await updateAdvertiserNextAdDate(removedAd.advertiser);
     }
 
-    return Response.json({ success: true, ad: result[0] });
+    return Response.json({ success: true, ad: removedAd });
   } catch (error) {
     console.error("Error deleting ad:", error);
     return Response.json({ error: "Failed to delete ad" }, { status: 500 });
   }
 }
+

@@ -20,8 +20,11 @@ Create `.env` from `.env.example` and set:
 Open Supabase SQL Editor and run the script:
 
 - `supabase/init.cbnads_web.sql`
+- `supabase/migrations/20260226141504_extend_cbnads_web_schema_client_parity.sql`
 
 If you use a different namespace, duplicate the script and replace `cbnads_web_` prefix.
+
+No storage bucket is required for current media flow. Uploads use external URL-based media handling.
 
 ## 3) Why this prevents leaks
 
@@ -44,3 +47,10 @@ If you use a different namespace, duplicate the script and replace `cbnads_web_`
   - `adminTableName(baseName)`
   - `adminBucketName(baseName)`
 
+## 5) Client schema reference
+
+If you are migrating from the client SQL dump, use:
+
+- `supabase/CLIENT_SCHEMA_ANALYSIS.md`
+
+It documents the full table model, relationships, risks, and how to apply namespace isolation.

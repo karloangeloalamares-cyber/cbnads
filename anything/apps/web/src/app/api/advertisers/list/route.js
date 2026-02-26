@@ -1,23 +1,16 @@
-import sql from "@/app/api/utils/sql";
+import { advertiserResponse, db, table } from "@/app/api/utils/supabase-db";
 
 export async function GET(request) {
   try {
-    const advertisers = await sql`
-      SELECT 
-        id,
-        advertiser_name,
-        contact_name,
-        email,
-        phone_number,
-        total_spend,
-        next_ad_date,
-        status,
-        created_at
-      FROM advertisers
-      ORDER BY created_at DESC
-    `;
+    const supabase = db();
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("*")
+      .order("created_at", { ascending: false });
 
-    return Response.json({ advertisers });
+    if (error) throw error;
+
+    return Response.json({ advertisers: (data || []).map(advertiserResponse) });
   } catch (error) {
     console.error("Error fetching advertisers:", error);
     return Response.json(

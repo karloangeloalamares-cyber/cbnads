@@ -1,28 +1,33 @@
-import sql from "@/app/api/utils/sql";
+import { db, table } from "@/app/api/utils/supabase-db";
 
 export async function GET(request, { params }) {
   try {
     const { id } = params;
+    if (!id) {
+      return Response.json({ error: "Ad ID is required" }, { status: 400 });
+    }
 
-    // Get all invoices that include this ad
-    const invoices = await sql`
-      SELECT DISTINCT
-        i.id,
-        i.invoice_number,
-        i.advertiser_name,
-        i.issue_date,
-        i.status,
-        i.total,
-        i.amount_paid,
-        i.created_at
-      FROM invoices i
-      INNER JOIN invoice_items ii ON ii.invoice_id = i.id
-      WHERE ii.ad_id = ${id}
-        AND i.deleted_at IS NULL
-      ORDER BY i.created_at DESC
-    `;
+    const supabase = db();
+    const { data: invoiceItems, error: invoiceItemsError } = await supabase
+      .from(table("invoice_items"))
+      .select("invoice_id")
+      .eq("ad_id", id);
+    if (invoiceItemsError) throw invoiceItemsError;
 
-    return Response.json({ invoices });
+    const invoiceIds = [...new Set((invoiceItems || []).map((row) => row.invoice_id).filter(Boolean))];
+    if (invoiceIds.length === 0) {
+      return Response.json({ invoices: [] });
+    }
+
+    const { data: invoices, error: invoicesError } = await supabase
+      .from(table("invoices"))
+      .select("id, invoice_number, advertiser_name, issue_date, status, total, amount_paid, created_at")
+      .in("id", invoiceIds)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+    if (invoicesError) throw invoicesError;
+
+    return Response.json({ invoices: invoices || [] });
   } catch (error) {
     console.error("Error fetching ad invoices:", error);
     return Response.json(
@@ -31,3 +36,4 @@ export async function GET(request, { params }) {
     );
   }
 }
+

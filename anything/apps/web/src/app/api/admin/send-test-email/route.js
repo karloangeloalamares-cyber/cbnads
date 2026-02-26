@@ -1,9 +1,13 @@
-import sql from "@/app/api/utils/sql";
+import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
 
 export async function POST(request) {
   try {
-    const { userId, email } = await request.json();
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
 
+    const { email } = await request.json();
     if (!email) {
       return Response.json(
         { error: "Email address is required" },
@@ -11,16 +15,16 @@ export async function POST(request) {
       );
     }
 
-    // Get user info for personalization
-    const [user] = await sql`
-      SELECT name, email as user_email
-      FROM auth_users
-      WHERE id = ${userId}
-    `;
+    if (!process.env.ZAPIER_WEBHOOK_URL) {
+      return Response.json(
+        { error: "Zapier webhook is not configured" },
+        { status: 500 },
+      );
+    }
 
+    const user = await getSessionUser();
     const userName = user?.name || "Admin";
 
-    // Send a test email via Zapier webhook
     const webhookResponse = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
       method: "POST",
       headers: {
@@ -30,10 +34,10 @@ export async function POST(request) {
         recipientType: "admin",
         to: email,
         from: "Ad Manager <advertise@cbnads.com>",
-        subject: "Test Email - Your Ad Reminder System is Working! 🎉",
+        subject: "Test Email - Your Ad Reminder System is Working!",
         greeting: "Hello",
         firstName: userName.split(" ")[0],
-        advertiserName: "John Smith", // Advertiser contact name for personalization
+        advertiserName: "John Smith",
         adName: "Summer Sale Promotion (Test)",
         advertiser: "Acme Corporation (Test)",
         advertiserEmail: "advertiser@acmecorp.com",
@@ -56,8 +60,6 @@ export async function POST(request) {
       );
     }
 
-    await webhookResponse.json();
-
     return Response.json({
       success: true,
       message: `Test email sent to ${email}`,
@@ -72,3 +74,4 @@ export async function POST(request) {
     );
   }
 }
+

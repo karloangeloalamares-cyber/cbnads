@@ -1,7 +1,10 @@
-import sql from "@/app/api/utils/sql";
+import { dateOnly, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
+
+const adPrimaryDate = (ad) => dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
 
 export async function GET(request) {
   try {
+    const supabase = db();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
     const placement = searchParams.get("placement");
@@ -13,83 +16,102 @@ export async function GET(request) {
     const dateTo = searchParams.get("dateTo");
     const showArchived = searchParams.get("showArchived") === "true";
 
-    // Cast post_time to TEXT to prevent timezone conversion
-    let query = "SELECT *, post_time::TEXT as post_time FROM ads WHERE 1=1";
-    const params = [];
-    let paramCount = 0;
+    const { data, error } = await supabase
+      .from(table("ads"))
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
 
-    // By default, exclude archived ads unless showArchived is true
-    if (!showArchived) {
-      query += ` AND (archived = FALSE OR archived IS NULL)`;
-    }
+    const today = dateOnly(new Date());
 
-    // Handle status filters
+    let ads = (data || []).filter((ad) => showArchived || !ad.archived);
+
+    // status view filters
     if (status === "Upcoming Ads") {
-      query += ` AND status = 'Scheduled' AND schedule >= CURRENT_DATE`;
+      ads = ads.filter(
+        (ad) =>
+          String(ad.status || "").toLowerCase() === "scheduled" &&
+          adPrimaryDate(ad) >= today,
+      );
     } else if (status === "Past Ads") {
-      query += ` AND schedule < CURRENT_DATE`;
+      ads = ads.filter((ad) => {
+        const date = adPrimaryDate(ad);
+        return date && date < today;
+      });
     } else if (status === "Needs Payment") {
-      query += ` AND payment != 'Paid'`;
+      ads = ads.filter((ad) => String(ad.payment || "").toLowerCase() !== "paid");
     } else if (status === "Ready to Publish") {
-      query += ` AND status = 'Draft' AND payment = 'Paid'`;
+      ads = ads.filter(
+        (ad) =>
+          String(ad.status || "").toLowerCase() === "draft" &&
+          String(ad.payment || "").toLowerCase() === "paid",
+      );
     } else if (status === "Today") {
-      query += ` AND schedule = CURRENT_DATE`;
+      ads = ads.filter((ad) => adPrimaryDate(ad) === today);
     } else if (status === "This Week") {
-      query += ` AND schedule >= CURRENT_DATE AND schedule <= CURRENT_DATE + INTERVAL '7 days'`;
+      const weekEnd = new Date();
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const weekEndDate = dateOnly(weekEnd);
+      ads = ads.filter((ad) => {
+        const date = adPrimaryDate(ad);
+        return date && date >= today && date <= weekEndDate;
+      });
     } else if (status && status !== "All Ads") {
-      paramCount++;
-      query += ` AND status = $${paramCount}`;
-      params.push(status);
+      ads = ads.filter((ad) => String(ad.status || "") === status);
     }
 
     if (placement && placement !== "All Placement") {
-      paramCount++;
-      query += ` AND placement = $${paramCount}`;
-      params.push(placement);
+      ads = ads.filter((ad) => String(ad.placement || "") === placement);
     }
 
     if (postType && postType !== "All post types") {
-      paramCount++;
-      query += ` AND post_type = $${paramCount}`;
-      params.push(postType);
+      const targetType = normalizePostType(postType);
+      ads = ads.filter((ad) => normalizePostType(ad.post_type) === targetType);
     }
 
     if (advertiser && advertiser !== "All Advertisers") {
-      paramCount++;
-      query += ` AND advertiser = $${paramCount}`;
-      params.push(advertiser);
+      ads = ads.filter((ad) => String(ad.advertiser || "") === advertiser);
     }
 
     if (payment && payment !== "All Payment Status") {
-      paramCount++;
-      query += ` AND payment = $${paramCount}`;
-      params.push(payment);
+      ads = ads.filter((ad) => String(ad.payment || "") === payment);
     }
 
     if (dateFrom) {
-      paramCount++;
-      query += ` AND schedule >= $${paramCount}`;
-      params.push(dateFrom);
+      const from = dateOnly(dateFrom);
+      ads = ads.filter((ad) => {
+        const date = adPrimaryDate(ad);
+        return date && date >= from;
+      });
     }
 
     if (dateTo) {
-      paramCount++;
-      query += ` AND schedule <= $${paramCount}`;
-      params.push(dateTo);
+      const to = dateOnly(dateTo);
+      ads = ads.filter((ad) => {
+        const date = adPrimaryDate(ad);
+        return date && date <= to;
+      });
     }
 
     if (search) {
-      paramCount++;
-      query += ` AND (LOWER(ad_name) LIKE LOWER($${paramCount}) OR LOWER(advertiser) LIKE LOWER($${paramCount}))`;
-      params.push(`%${search}%`);
+      const needle = String(search).toLowerCase();
+      ads = ads.filter((ad) => {
+        const adName = String(ad.ad_name || "").toLowerCase();
+        const adAdvertiser = String(ad.advertiser || "").toLowerCase();
+        return adName.includes(needle) || adAdvertiser.includes(needle);
+      });
     }
 
-    query += " ORDER BY schedule DESC, created_at DESC";
+    ads.sort((a, b) => {
+      const left = `${adPrimaryDate(a) || ""} ${a.post_time || ""}`;
+      const right = `${adPrimaryDate(b) || ""} ${b.post_time || ""}`;
+      return right.localeCompare(left);
+    });
 
-    const ads = await sql(query, params);
     return Response.json({ ads });
   } catch (error) {
     console.error("Error fetching ads:", error);
     return Response.json({ error: "Failed to fetch ads" }, { status: 500 });
   }
 }
+

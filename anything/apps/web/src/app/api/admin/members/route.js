@@ -1,30 +1,44 @@
-import sql from "@/app/api/utils/sql";
-import { auth } from "@/auth";
-import { hash } from "argon2";
+import { db, table } from "@/app/api/utils/supabase-db";
+import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
 
 // Get all admin members
 export async function GET() {
   try {
-    const session = await auth();
-    if (!session || !session.user?.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    // Check if current user is admin
-    const currentUserRows =
-      await sql`SELECT role FROM auth_users WHERE id = ${session.user.id} LIMIT 1`;
-    const currentUser = currentUserRows?.[0];
+    const supabase = db();
+    const { data: rows, error } = await supabase
+      .from(table("team_members"))
+      .select("id, name, email, role")
+      .eq("role", "admin")
+      .order("created_at", { ascending: true });
+    if (error) throw error;
 
-    if (currentUser?.role !== "admin") {
-      return Response.json(
-        { error: "Forbidden: Admin access required" },
-        { status: 403 },
+    const members = (rows || []).map((member) => ({
+      ...member,
+      image: null,
+    }));
+
+    const currentUser = await getSessionUser();
+    if (currentUser?.email) {
+      const exists = members.some(
+        (member) =>
+          String(member.email || "").trim().toLowerCase() ===
+          String(currentUser.email || "").trim().toLowerCase(),
       );
+      if (!exists && String(currentUser.role || "") === "admin") {
+        members.unshift({
+          id: currentUser.id || "session-admin",
+          name: currentUser.name || currentUser.email,
+          email: currentUser.email,
+          image: currentUser.image || null,
+          role: "admin",
+        });
+      }
     }
-
-    // Get all admin users
-    const members =
-      await sql`SELECT id, name, email, image, role FROM auth_users WHERE role = 'admin' ORDER BY id`;
 
     return Response.json({ members });
   } catch (err) {
@@ -36,62 +50,63 @@ export async function GET() {
 // Add a new admin member
 export async function POST(request) {
   try {
-    const session = await auth();
-    if (!session || !session.user?.id) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    // Check if current user is admin
-    const currentUserRows =
-      await sql`SELECT role FROM auth_users WHERE id = ${session.user.id} LIMIT 1`;
-    const currentUser = currentUserRows?.[0];
-
-    if (currentUser?.role !== "admin") {
-      return Response.json(
-        { error: "Forbidden: Admin access required" },
-        { status: 403 },
-      );
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
     }
 
     const body = await request.json();
-    const { email, password, name } = body;
+    const { email, name } = body;
 
-    if (!email || !password) {
+    if (!email) {
       return Response.json(
-        { error: "Email and password are required" },
+        { error: "Email is required" },
         { status: 400 },
       );
     }
 
-    // Check if user already exists
-    const existingUserRows =
-      await sql`SELECT id FROM auth_users WHERE email = ${email} LIMIT 1`;
+    const supabase = db();
+    const normalizedEmail = String(email).trim().toLowerCase();
 
-    if (existingUserRows && existingUserRows.length > 0) {
-      return Response.json(
-        { error: "A user with this email already exists" },
-        { status: 400 },
-      );
+    const { data: existing, error: existingError } = await supabase
+      .from(table("team_members"))
+      .select("id, role")
+      .ilike("email", normalizedEmail)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    if (existing?.id) {
+      if (String(existing.role || "").toLowerCase() === "admin") {
+        return Response.json(
+          { error: "A user with this email already exists" },
+          { status: 400 },
+        );
+      }
+
+      const { error: promoteError } = await supabase
+        .from(table("team_members"))
+        .update({
+          role: "admin",
+          name: name || normalizedEmail,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (promoteError) throw promoteError;
+    } else {
+      const nowIso = new Date().toISOString();
+      const { error: insertError } = await supabase
+        .from(table("team_members"))
+        .insert({
+          name: name || normalizedEmail,
+          email: normalizedEmail,
+          role: "admin",
+          created_at: nowIso,
+          updated_at: nowIso,
+        });
+      if (insertError) throw insertError;
     }
-
-    // Create new user
-    const newUserRows = await sql`
-      INSERT INTO auth_users (name, email, role)
-      VALUES (${name || email}, ${email}, 'admin')
-      RETURNING id
-    `;
-    const newUser = newUserRows?.[0];
-
-    if (!newUser) {
-      return Response.json({ error: "Failed to create user" }, { status: 500 });
-    }
-
-    // Hash password and create credentials account
-    const hashedPassword = await hash(password);
-    await sql`
-      INSERT INTO auth_accounts ("userId", provider, type, "providerAccountId", password)
-      VALUES (${newUser.id}, 'credentials', 'credentials', ${newUser.id}, ${hashedPassword})
-    `;
 
     return Response.json({
       success: true,
