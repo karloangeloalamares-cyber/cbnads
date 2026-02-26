@@ -25,6 +25,8 @@ export default defineConfig({
       '@hono/auth-js',
       '@auth/core',
       '@hono/auth-js',
+      '@node-rs/argon2',
+      '@node-rs/argon2-wasm32-wasi',
       'hono/context-storage',
       '@auth/core/errors',
       'fsevents',

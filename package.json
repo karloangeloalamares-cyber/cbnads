@@ -7,6 +7,12 @@
         "dev": "npm run dev:web",
         "dev:web": "cd anything/apps/web && npm run dev",
         "dev:mobile": "cd anything/apps/mobile && npx expo start -c",
-        "dev:all": "start cmd /k \"npm run dev:web\" && start cmd /k \"npm run dev:mobile\""
+        "dev:all": "start cmd /k \"npm run dev:web\" && start cmd /k \"npm run dev:mobile\"",
+        "build": "npm run build:web",
+        "build:web": "cd anything/apps/web && npm run build",
+        "typecheck:web": "cd anything/apps/web && npm run typecheck"
+    },
+    "engines": {
+        "node": ">=20"
     }
 }

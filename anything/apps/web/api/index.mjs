@@ -1,22 +1,34 @@
 import { handle } from 'hono/vercel';
 
-let cachedHandler;
+const serverEntryUrl = new URL('../build/server/index.js', import.meta.url);
 
-async function getHandler() {
-  if (cachedHandler) {
-    return cachedHandler;
-  }
+let cachedHandlerPromise;
 
+async function createHandler() {
   // The react-router-hono-server builder compiles __create/index.ts into this output.
   // On Vercel (VERCEL=1), it exports a raw Hono app instead of starting a Node.js server.
-  const serverModule = await import('../build/server/index.js');
+  const serverModule = await import(serverEntryUrl.href);
   const app = serverModule?.default;
+
   if (!app) {
-    throw new Error('Server app export not found');
+    const exportKeys = Object.keys(serverModule ?? {});
+    throw new Error(
+      `Server app export not found in ${serverEntryUrl.pathname}. Exports: ${exportKeys.join(', ')}`
+    );
   }
 
-  cachedHandler = handle(app);
-  return cachedHandler;
+  return handle(app);
+}
+
+async function getHandler() {
+  if (!cachedHandlerPromise) {
+    cachedHandlerPromise = createHandler().catch((error) => {
+      cachedHandlerPromise = undefined;
+      throw error;
+    });
+  }
+
+  return cachedHandlerPromise;
 }
 
 export default async function vercelHandler(request, context) {

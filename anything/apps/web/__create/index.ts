@@ -13,6 +13,7 @@ import { requestId } from 'hono/request-id';
 import { createRequestHandler } from 'react-router';
 import { serializeError } from 'serialize-error';
 import NeonAdapter from './adapter';
+import { assertRuntimeEnv } from './env';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
@@ -28,6 +29,10 @@ declare module 'hono' {
 if (!process.env.VERCEL) {
   const ws = (await import('ws')).default;
   neonConfig.webSocketConstructor = ws;
+}
+
+if (process.env.VERCEL) {
+  assertRuntimeEnv();
 }
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
@@ -251,6 +256,20 @@ if (authSecret) {
 app.all('/integrations/:path{.+}', async (c, next) => {
   const queryParams = c.req.query();
   const url = `${process.env.NEXT_PUBLIC_CREATE_BASE_URL ?? 'https://www.create.xyz'}/integrations/${c.req.param('path')}${Object.keys(queryParams).length > 0 ? `?${new URLSearchParams(queryParams).toString()}` : ''}`;
+  const createHost = process.env.NEXT_PUBLIC_CREATE_HOST;
+  const projectGroupId = process.env.NEXT_PUBLIC_PROJECT_GROUP_ID;
+  const headers: Record<string, string> = {
+    ...c.req.header(),
+  };
+
+  if (createHost) {
+    headers['X-Forwarded-For'] = createHost;
+    headers['x-createxyz-host'] = createHost;
+    headers.Host = createHost;
+  }
+  if (projectGroupId) {
+    headers['x-createxyz-project-group-id'] = projectGroupId;
+  }
 
   return proxy(url, {
     method: c.req.method,
@@ -259,13 +278,7 @@ app.all('/integrations/:path{.+}', async (c, next) => {
     // required for streaming integrations
     duplex: 'half',
     redirect: 'manual',
-    headers: {
-      ...c.req.header(),
-      'X-Forwarded-For': process.env.NEXT_PUBLIC_CREATE_HOST,
-      'x-createxyz-host': process.env.NEXT_PUBLIC_CREATE_HOST,
-      Host: process.env.NEXT_PUBLIC_CREATE_HOST,
-      'x-createxyz-project-group-id': process.env.NEXT_PUBLIC_PROJECT_GROUP_ID,
-    },
+    headers,
   });
 });
 

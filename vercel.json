@@ -1,10 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
-  "outputDirectory": "build/client",
+  "installCommand": "cd anything/apps/web && npm ci",
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "anything/apps/web/build/client",
   "functions": {
     "api/index.mjs": {
-      "includeFiles": "build/server/**",
+      "includeFiles": "anything/apps/web/build/server/**",
       "maxDuration": 60,
       "regions": ["iad1"]
     }
