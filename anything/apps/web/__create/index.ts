@@ -318,11 +318,14 @@ async function createServer() {
   }
 
   // Production/serverless: attach React Router handler and return raw Hono app.
+  console.log('[createServer] Loading server build...');
   const build = await import('virtual:react-router/server-build');
+  console.log('[createServer] Server build loaded. Creating request handler...');
   const handler = createRequestHandler(build, 'production');
   app.use('*', async (c) => {
     return handler(c.req.raw);
   });
+  console.log('[createServer] Done — returning Hono app');
   return app;
 }
 
