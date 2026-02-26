@@ -41,6 +41,7 @@ export default function SubmitAdPage() {
 
   return (
     <>
+      {/* Modals */}
       {modalState.type === "alert" && (
         <AlertModal {...modalState.props} isOpen={modalState.isOpen} />
       )}
@@ -94,6 +95,7 @@ export default function SubmitAdPage() {
 
             <NotesSection notes={formData.notes} onChange={handleChange} />
 
+            {/* Submit */}
             <div className="pt-6 border-t">
               <button
                 type="submit"
