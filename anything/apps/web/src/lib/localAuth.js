@@ -1,8 +1,21 @@
 import { clearSession, ensureDb, getSessionUserId, readDb, setSessionUserId, updateDb } from '@/lib/localDb';
 
+export const LOCAL_ACCOUNT_CREDENTIALS = [
+  {
+    email: 'zach@cbnads.com',
+    password: 'admin123!',
+    role: 'admin',
+  },
+  {
+    email: 'ads@cbn.com',
+    password: 'ads123!',
+    role: 'advertiser',
+  },
+];
+
 export const DEFAULT_ADMIN_CREDENTIALS = {
-  email: 'admin@cbnads.local',
-  password: 'admin123',
+  email: LOCAL_ACCOUNT_CREDENTIALS[0].email,
+  password: LOCAL_ACCOUNT_CREDENTIALS[0].password,
 };
 
 const sanitizeUser = (user) => {

@@ -6,6 +6,27 @@ const LEGACY_DB_KEY = 'cbnads.local.db.v1';
 const LEGACY_SESSION_KEY = 'cbnads.local.session.v1';
 const DB_VERSION = 1;
 
+const REQUIRED_LOCAL_USERS = [
+  {
+    id: 'user_admin',
+    name: 'Zach Schwartz',
+    email: 'zach@cbnads.com',
+    password: 'admin123!',
+    role: 'admin',
+    image: '',
+  },
+  {
+    id: 'user_advertiser',
+    name: 'CBN Advertiser',
+    email: 'ads@cbn.com',
+    password: 'ads123!',
+    role: 'advertiser',
+    image: '',
+  },
+];
+
+const LEGACY_TEST_USER_EMAILS = new Set(['admin@cbnads.local']);
+
 const nowIso = () => new Date().toISOString();
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const numberOrZero = (value) => {
@@ -40,18 +61,11 @@ const baseDb = () => {
   const now = nowIso();
   return {
     version: DB_VERSION,
-    users: [
-      {
-        id: 'user_admin',
-        name: 'Admin User',
-        email: 'admin@cbnads.local',
-        password: 'admin123',
-        role: 'admin',
-        image: '',
-        created_at: now,
-        updated_at: now,
-      },
-    ],
+    users: REQUIRED_LOCAL_USERS.map((user) => ({
+      ...user,
+      created_at: now,
+      updated_at: now,
+    })),
     advertisers: [],
     products: [],
     ads: [],
@@ -69,6 +83,59 @@ const baseDb = () => {
   };
 };
 
+const normalizeUsers = (rawUsers) => {
+  const now = nowIso();
+  const source = Array.isArray(rawUsers) ? rawUsers : [];
+  const deduped = [];
+  const seenEmails = new Set();
+
+  for (const user of source) {
+    if (!user || typeof user !== 'object') {
+      continue;
+    }
+
+    const email = String(user.email || '').trim().toLowerCase();
+    if (!email || LEGACY_TEST_USER_EMAILS.has(email)) {
+      continue;
+    }
+    if (seenEmails.has(email)) {
+      continue;
+    }
+
+    seenEmails.add(email);
+    deduped.push({
+      ...user,
+      email,
+      updated_at: user.updated_at || now,
+      created_at: user.created_at || now,
+    });
+  }
+
+  for (const requiredUser of REQUIRED_LOCAL_USERS) {
+    const requiredEmail = requiredUser.email.toLowerCase();
+    const index = deduped.findIndex(
+      (item) =>
+        String(item.email || '').toLowerCase() === requiredEmail ||
+        String(item.id || '') === requiredUser.id,
+    );
+    const existing = index >= 0 ? deduped[index] : null;
+    const next = {
+      ...(existing || {}),
+      ...requiredUser,
+      created_at: existing?.created_at || now,
+      updated_at: now,
+    };
+
+    if (index >= 0) {
+      deduped[index] = next;
+    } else {
+      deduped.push(next);
+    }
+  }
+
+  return deduped;
+};
+
 const normalizeDb = (rawValue) => {
   const seed = baseDb();
   const raw = rawValue && typeof rawValue === 'object' ? rawValue : {};
@@ -77,7 +144,7 @@ const normalizeDb = (rawValue) => {
     ...seed,
     ...raw,
     version: DB_VERSION,
-    users: Array.isArray(raw.users) && raw.users.length > 0 ? raw.users : seed.users,
+    users: normalizeUsers(raw.users),
     advertisers: Array.isArray(raw.advertisers) ? raw.advertisers : [],
     products: Array.isArray(raw.products) ? raw.products : [],
     ads: Array.isArray(raw.ads) ? raw.ads : [],

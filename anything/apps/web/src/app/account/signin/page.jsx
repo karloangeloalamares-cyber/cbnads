@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DEFAULT_ADMIN_CREDENTIALS, getSignedInUser, signIn } from "@/lib/localAuth";
+import {
+  getSignedInUser,
+  signIn,
+} from "@/lib/localAuth";
 import { ensureDb } from "@/lib/localDb";
 
 export default function SignInPage() {
-  const [email, setEmail] = useState(DEFAULT_ADMIN_CREDENTIALS.email);
-  const [password, setPassword] = useState(DEFAULT_ADMIN_CREDENTIALS.password);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -41,7 +44,7 @@ export default function SignInPage() {
             alt="Logo"
             className="mx-auto mb-4 h-16 w-auto"
           />
-          <h1 className="text-2xl font-bold text-gray-900">Admin Sign In</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Sign In</h1>
           <p className="mt-2 text-sm text-gray-600">Local mode with browser storage only.</p>
         </div>
 
@@ -88,12 +91,6 @@ export default function SignInPage() {
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
-
-        <div className="mt-6 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-          <p className="font-semibold text-gray-700">Default local credentials:</p>
-          <p>Email: {DEFAULT_ADMIN_CREDENTIALS.email}</p>
-          <p>Password: {DEFAULT_ADMIN_CREDENTIALS.password}</p>
-        </div>
       </div>
     </div>
   );
