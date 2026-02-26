@@ -48,6 +48,12 @@ export default function AdsPage() {
   // Fetch user role
   useEffect(() => {
     const fetchRole = async () => {
+      if (user?.role) {
+        setUserRole(user.role);
+        setRoleLoading(false);
+        return;
+      }
+
       try {
         const response = await fetch("/api/user/role");
         if (!response.ok) {

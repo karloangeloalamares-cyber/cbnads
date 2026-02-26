@@ -2,14 +2,24 @@
 
 import useAuth from "@/utils/useAuth";
 
+const LOCAL_USER_STORAGE_KEY = "cbn_local_user";
+
 export default function LogoutPage() {
   const { signOut } = useAuth();
 
   const handleSignOut = async () => {
-    await signOut({
-      callbackUrl: "/account/signin",
-      redirect: true,
-    });
+    window.localStorage.removeItem(LOCAL_USER_STORAGE_KEY);
+
+    try {
+      await signOut({
+        callbackUrl: "/account/signin",
+        redirect: false,
+      });
+    } catch {
+      // Ignore auth backend errors in local mode.
+    }
+
+    window.location.href = "/account/signin";
   };
 
   return (

@@ -13,7 +13,6 @@ import { requestId } from 'hono/request-id';
 import { createRequestHandler } from 'react-router';
 import { serializeError } from 'serialize-error';
 import NeonAdapter from './adapter';
-import { assertRuntimeEnv } from './env';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
@@ -29,10 +28,6 @@ declare module 'hono' {
 if (!process.env.VERCEL) {
   const ws = (await import('ws')).default;
   neonConfig.webSocketConstructor = ws;
-}
-
-if (process.env.VERCEL) {
-  assertRuntimeEnv();
 }
 
 const als = new AsyncLocalStorage<{ requestId: string }>();
@@ -58,10 +53,13 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
-const adapter = NeonAdapter(pool);
+const databaseUrl = process.env.DATABASE_URL;
+const pool = databaseUrl
+  ? new Pool({
+      connectionString: databaseUrl,
+    })
+  : null;
+const adapter = pool ? NeonAdapter(pool) : null;
 
 const app = new Hono();
 
@@ -114,7 +112,8 @@ for (const method of ['post', 'put', 'patch'] as const) {
 
 const authSecret = process.env.AUTH_SECRET;
 
-if (authSecret) {
+if (authSecret && adapter) {
+  const authAdapter = adapter;
   app.use(
     '*',
     initAuthConfig((c) => ({
@@ -179,7 +178,7 @@ if (authSecret) {
             }
 
             // logic to verify if user exists
-            const user = await adapter.getUserByEmail(email);
+            const user = await authAdapter.getUserByEmail(email);
             if (!user) {
               return null;
             }
@@ -226,16 +225,16 @@ if (authSecret) {
             }
 
             // logic to verify if user exists
-            const user = await adapter.getUserByEmail(email);
+            const user = await authAdapter.getUserByEmail(email);
             if (!user) {
-              const newUser = await adapter.createUser({
+              const newUser = await authAdapter.createUser({
                 id: crypto.randomUUID(),
                 emailVerified: null,
                 email,
                 name: typeof name === 'string' && name.length > 0 ? name : undefined,
                 image: typeof image === 'string' && image.length > 0 ? image : undefined,
               });
-              await adapter.linkAccount({
+              await authAdapter.linkAccount({
                 extraData: {
                   password: await (await getArgon2()).hash(password),
                 },
@@ -282,7 +281,7 @@ app.all('/integrations/:path{.+}', async (c, next) => {
   });
 });
 
-if (authSecret) {
+if (authSecret && adapter) {
   app.use('/api/auth/*', async (c, next) => {
     if (isAuthAction(c.req.path)) {
       return authHandler()(c, next);

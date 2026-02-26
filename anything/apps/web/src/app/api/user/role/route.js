@@ -8,6 +8,18 @@ export async function GET() {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!process.env.DATABASE_URL) {
+      return Response.json({
+        user: {
+          id: session.user.id,
+          name: session.user.name ?? "Local Admin",
+          email: session.user.email ?? null,
+          image: session.user.image ?? null,
+          role: "admin",
+        },
+      });
+    }
+
     const userId = session.user.id;
     const rows =
       await sql`SELECT id, name, email, image, role FROM auth_users WHERE id = ${userId} LIMIT 1`;

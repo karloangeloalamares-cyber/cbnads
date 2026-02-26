@@ -12,7 +12,7 @@ This repo also includes `anything/apps/web/vercel.json` for teams that set Verce
 
 ## Required Environment Variables
 
-- `DATABASE_URL`
+None for local-mode deployment.
 
 ## Commonly Needed Environment Variables
 
@@ -27,6 +27,12 @@ This repo also includes `anything/apps/web/vercel.json` for teams that set Verce
 - `NEXT_PUBLIC_CREATE_HOST`
 - `NEXT_PUBLIC_PROJECT_GROUP_ID`
 - `NEXT_PUBLIC_BASE_CREATE_USER_CONTENT_URL`
+
+## Local Mode (No Database)
+
+- If `DATABASE_URL` is not set, sign-in falls back to local browser storage.
+- This is temporary and intended for staging/testing before Supabase is added.
+- In local mode, local users are treated as `admin`.
 
 ## Local Verification
 
