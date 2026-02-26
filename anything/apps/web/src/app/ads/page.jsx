@@ -8,6 +8,15 @@ import {
   Settings,
   ArrowLeft,
   Plus,
+  Search,
+  Download,
+  Clock3,
+  AlertCircle,
+  TrendingUp,
+  Users,
+  DollarSign,
+  FileText,
+  CalendarDays,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { getSignedInUser } from "@/lib/localAuth";
@@ -111,6 +120,22 @@ const formatDate = (value) => {
   });
 };
 
+const formatTime = (value) => {
+  if (!value) {
+    return "-";
+  }
+
+  const [hourText, minuteText] = String(value).split(":");
+  const hour = Number(hourText);
+  if (Number.isNaN(hour) || minuteText == null) {
+    return value;
+  }
+
+  const period = hour >= 12 ? "PM" : "AM";
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${displayHour}:${minuteText} ${period}`;
+};
+
 function StatCard({ label, value }) {
   return (
     <div className="rounded-xl border bg-white p-4">
@@ -130,6 +155,14 @@ export default function AdsPage() {
     return sections.includes(value) ? value : "Ads";
   });
   const [view, setView] = useState("list");
+  const [adsSearch, setAdsSearch] = useState("");
+  const [adsStatusFilter, setAdsStatusFilter] = useState("All Ads");
+  const [adsPaymentFilter, setAdsPaymentFilter] = useState("All Payment Status");
+  const [calendarSearch, setCalendarSearch] = useState("");
+  const [submissionSearch, setSubmissionSearch] = useState("");
+  const [advertiserSearch, setAdvertiserSearch] = useState("");
+  const [productSearch, setProductSearch] = useState("");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
@@ -231,6 +264,134 @@ export default function AdsPage() {
         ),
       );
   }, [ads]);
+
+  const filteredAds = useMemo(() => {
+    return ads.filter((item) => {
+      const matchesSearch =
+        !adsSearch ||
+        String(item.ad_name || "")
+          .toLowerCase()
+          .includes(adsSearch.toLowerCase()) ||
+        String(item.advertiser || "")
+          .toLowerCase()
+          .includes(adsSearch.toLowerCase()) ||
+        String(item.placement || "")
+          .toLowerCase()
+          .includes(adsSearch.toLowerCase());
+
+      const matchesStatus =
+        adsStatusFilter === "All Ads" || item.status === adsStatusFilter;
+      const matchesPayment =
+        adsPaymentFilter === "All Payment Status" ||
+        item.payment === adsPaymentFilter;
+
+      return matchesSearch && matchesStatus && matchesPayment;
+    });
+  }, [ads, adsPaymentFilter, adsSearch, adsStatusFilter]);
+
+  const todayAds = useMemo(() => {
+    const todayText = new Date().toISOString().slice(0, 10);
+    return upcomingAds.filter(
+      (item) => String(item.post_date || "").slice(0, 10) === todayText,
+    );
+  }, [upcomingAds]);
+
+  const overdueInvoiceList = useMemo(
+    () => invoices.filter((item) => item.status === "Overdue"),
+    [invoices],
+  );
+
+  const topAdvertisers = useMemo(() => {
+    return [...advertisers]
+      .map((item) => ({
+        ...item,
+        total_spend:
+          Number(item.total_spend) || Number(item.ad_spend) || Number(item.spend) || 0,
+      }))
+      .sort((a, b) => b.total_spend - a.total_spend)
+      .slice(0, 5);
+  }, [advertisers]);
+
+  const recentAds = useMemo(() => {
+    return [...ads]
+      .sort((a, b) =>
+        `${b.post_date || ""} ${b.post_time || ""}`.localeCompare(
+          `${a.post_date || ""} ${a.post_time || ""}`,
+        ),
+      )
+      .slice(0, 5);
+  }, [ads]);
+
+  const filteredUpcomingAds = useMemo(() => {
+    return upcomingAds.filter((item) => {
+      if (!calendarSearch) {
+        return true;
+      }
+      const query = calendarSearch.toLowerCase();
+      return (
+        String(item.ad_name || "").toLowerCase().includes(query) ||
+        String(item.advertiser || "").toLowerCase().includes(query) ||
+        String(item.status || "").toLowerCase().includes(query)
+      );
+    });
+  }, [calendarSearch, upcomingAds]);
+
+  const filteredPendingSubmissions = useMemo(() => {
+    return pending.filter((item) => {
+      if (!submissionSearch) {
+        return true;
+      }
+      const query = submissionSearch.toLowerCase();
+      return (
+        String(item.ad_name || "").toLowerCase().includes(query) ||
+        String(item.advertiser_name || "").toLowerCase().includes(query) ||
+        String(item.status || "").toLowerCase().includes(query)
+      );
+    });
+  }, [pending, submissionSearch]);
+
+  const filteredAdvertisers = useMemo(() => {
+    return advertisers.filter((item) => {
+      if (!advertiserSearch) {
+        return true;
+      }
+      const query = advertiserSearch.toLowerCase();
+      return (
+        String(item.advertiser_name || "").toLowerCase().includes(query) ||
+        String(item.email || "").toLowerCase().includes(query)
+      );
+    });
+  }, [advertiserSearch, advertisers]);
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((item) => {
+      if (!productSearch) {
+        return true;
+      }
+      const query = productSearch.toLowerCase();
+      return (
+        String(item.product_name || "").toLowerCase().includes(query) ||
+        String(item.description || "").toLowerCase().includes(query)
+      );
+    });
+  }, [productSearch, products]);
+
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter((item) => {
+      if (!invoiceSearch) {
+        return true;
+      }
+
+      const advertiserName =
+        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name || "";
+      const query = invoiceSearch.toLowerCase();
+      return (
+        String(item.invoice_number || "").toLowerCase().includes(query) ||
+        String(item.status || "").toLowerCase().includes(query) ||
+        advertiserName.toLowerCase().includes(query)
+      );
+    });
+  }, [advertisers, invoiceSearch, invoices]);
 
   const reconciliation = useMemo(() => getReconciliationReport(), [db]);
 
@@ -361,61 +522,456 @@ export default function AdsPage() {
             </div>
           ) : null}
           {activeSection === "Dashboard" && (
-            <div className="space-y-4">
-              <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                <StatCard label="Total Ads" value={dashboardStats.totalAds} />
-                <StatCard
-                  label="Pending Submissions"
-                  value={dashboardStats.pendingSubmissions}
-                />
-                <StatCard
-                  label="Active Advertisers"
-                  value={dashboardStats.activeAdvertisers}
-                />
-                <StatCard
-                  label="Paid Revenue"
-                  value={formatCurrency(dashboardStats.paidRevenue)}
-                />
-                <StatCard
-                  label="Overdue Invoices"
-                  value={dashboardStats.overdueInvoices}
-                />
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-8">
+                <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+                <p className="text-gray-600 mt-1">Overview of your ad management</p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-6">
+                <div className="bg-white border border-gray-200 rounded-lg p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Active Ads
+                    </p>
+                    <CalendarDays className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.totalAds}
+                  </p>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Pending Submissions
+                    </p>
+                    <Clock3 className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.pendingSubmissions}
+                  </p>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Paid Revenue
+                    </p>
+                    <TrendingUp className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {formatCurrency(dashboardStats.paidRevenue)}
+                  </p>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Overdue Invoices
+                    </p>
+                    <AlertCircle className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {dashboardStats.overdueInvoices}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2 mb-6">
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Publishing Today
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {todayAds.length > 0 ? (
+                      <div className="space-y-3">
+                        {todayAds.slice(0, 6).map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {item.ad_name}
+                              </p>
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                {item.advertiser || "-"} • {item.placement || "-"}
+                              </p>
+                            </div>
+                            <div className="ml-4 text-right flex-shrink-0">
+                              <p className="text-xs font-semibold text-gray-700">
+                                {formatTime(item.post_time)}
+                              </p>
+                              <span className="inline-block mt-1 rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
+                                {item.status || "Draft"}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No ads scheduled for today.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Overdue Invoices
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {overdueInvoiceList.length > 0 ? (
+                      <div className="space-y-3">
+                        {overdueInvoiceList.slice(0, 6).map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-start justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {item.invoice_number || item.id}
+                              </p>
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                {advertisers.find((adv) => adv.id === item.advertiser_id)
+                                  ?.advertiser_name || "-"}
+                              </p>
+                            </div>
+                            <div className="ml-4 text-right flex-shrink-0">
+                              <p className="text-xs font-semibold text-gray-900">
+                                {formatCurrency(item.amount)}
+                              </p>
+                              <p className="mt-0.5 text-xs text-gray-500">
+                                Due {formatDate(item.due_date)}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No overdue invoices.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Top Advertisers
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {topAdvertisers.length > 0 ? (
+                      <div className="space-y-3">
+                        {topAdvertisers.map((item, index) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="w-4 text-xs font-bold text-gray-400">
+                                {index + 1}
+                              </span>
+                              <span className="text-sm text-gray-900 truncate">
+                                {item.advertiser_name}
+                              </span>
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900">
+                              {formatCurrency(item.total_spend)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No advertiser data yet.</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Quick Stats
+                    </h2>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm text-gray-600">Total Advertisers</span>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {dashboardStats.activeAdvertisers}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <DollarSign className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm text-gray-600">Average Ad Value</span>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {formatCurrency(
+                          ads.length > 0
+                            ? ads.reduce(
+                                (sum, item) => sum + (Number(item.price) || 0),
+                                0,
+                              ) / ads.length
+                            : 0,
+                        )}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-gray-400" />
+                        <span className="text-sm text-gray-600">Recent Ads</span>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {recentAds.length}
+                      </span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
           {activeSection === "Calendar" && (
-            <div className="space-y-4">
-              <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
-              <div className="rounded-xl border bg-white overflow-hidden">
+            <div className="max-w-[1400px] mx-auto">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
+                  <p className="text-sm text-gray-500">
+                    View upcoming ad schedule and publication timeline
+                  </p>
+                </div>
+                <div className="relative w-full max-w-sm">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    size={16}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                    placeholder="Search upcoming schedule..."
+                    value={calendarSearch}
+                    onChange={(event) => setCalendarSearch(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[2fr,1fr]">
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Ad
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Advertiser
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Date
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Time
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUpcomingAds.map((item) => (
+                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-gray-900">{item.ad_name}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {item.placement || "-"}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4 text-gray-700">
+                            {item.advertiser || "-"}
+                          </td>
+                          <td className="px-6 py-4 text-gray-700">
+                            {formatDate(item.post_date)}
+                          </td>
+                          <td className="px-6 py-4 text-gray-700">
+                            {formatTime(item.post_time)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
+                              {item.status || "Draft"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredUpcomingAds.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="px-6 py-12 text-center text-sm text-gray-500"
+                          >
+                            No upcoming ads.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white">
+                  <div className="px-5 py-4 border-b border-gray-200">
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                      Next Up
+                    </h2>
+                  </div>
+                  <div className="p-5">
+                    {filteredUpcomingAds.slice(0, 8).length > 0 ? (
+                      <div className="space-y-3">
+                        {filteredUpcomingAds.slice(0, 8).map((item) => (
+                          <div
+                            key={`next-${item.id}`}
+                            className="border-b border-gray-100 pb-3 last:border-0 last:pb-0"
+                          >
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {item.ad_name}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {formatDate(item.post_date)} at {formatTime(item.post_time)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No upcoming posts.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeSection === "Submissions" && (
+            <div className="max-w-[1400px] mx-auto">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                    Submissions
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Review and approve advertising requests from clients
+                  </p>
+                </div>
+                <div className="relative w-full max-w-sm">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    size={16}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                    placeholder="Search submissions..."
+                    value={submissionSearch}
+                    onChange={(event) => setSubmissionSearch(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="text-left px-4 py-3">Ad</th>
-                      <th className="text-left px-4 py-3">Advertiser</th>
-                      <th className="text-left px-4 py-3">Date</th>
-                      <th className="text-left px-4 py-3">Time</th>
-                      <th className="text-left px-4 py-3">Status</th>
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Ad Request
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Advertiser
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {upcomingAds.map((item) => (
-                      <tr key={item.id} className="border-b last:border-0">
-                        <td className="px-4 py-3">{item.ad_name}</td>
-                        <td className="px-4 py-3">{item.advertiser || "-"}</td>
-                        <td className="px-4 py-3">{formatDate(item.post_date)}</td>
-                        <td className="px-4 py-3">{item.post_time || "-"}</td>
-                        <td className="px-4 py-3">{item.status}</td>
+                    {filteredPendingSubmissions.map((item) => (
+                      <tr key={item.id} className="border-b border-gray-100 last:border-0">
+                        <td className="px-6 py-4">
+                          <p className="text-sm font-medium text-gray-900">
+                            {item.ad_name || "-"}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {formatDate(item.post_date)} {formatTime(item.post_time)}
+                          </p>
+                        </td>
+                        <td className="px-6 py-4 text-gray-700">
+                          {item.advertiser_name || "-"}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700">
+                            {item.status || "pending"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-2 text-xs">
+                            {item.status === "pending" ? (
+                              <>
+                                <button
+                                  className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                  type="button"
+                                  onClick={() =>
+                                    run(
+                                      () => approvePendingAd(item.id),
+                                      "Submission approved.",
+                                    )
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                  type="button"
+                                  onClick={() =>
+                                    run(
+                                      () => rejectPendingAd(item.id),
+                                      "Submission rejected.",
+                                    )
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            ) : null}
+                            <button
+                              className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
+                              type="button"
+                              onClick={() =>
+                                run(
+                                  () => deletePendingAd(item.id),
+                                  "Submission deleted.",
+                                )
+                              }
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
-                    {upcomingAds.length === 0 ? (
+                    {filteredPendingSubmissions.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={5}
-                          className="px-4 py-8 text-center text-gray-500"
+                          colSpan={4}
+                          className="px-6 py-12 text-center text-sm text-gray-500"
                         >
-                          No upcoming ads.
+                          No pending submissions.
                         </td>
                       </tr>
                     ) : null}
@@ -425,164 +981,247 @@ export default function AdsPage() {
             </div>
           )}
 
-          {activeSection === "Submissions" && (
-            <div className="rounded-xl border bg-white p-4 text-sm">
-              <h2 className="mb-3 font-semibold">
-                Pending submissions ({pending.length})
-              </h2>
-              <div className="space-y-2">
-                {pending.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"
-                  >
-                    <p>
-                      {item.status} - {item.ad_name} - {item.advertiser_name}
-                    </p>
-                    <div className="flex gap-2 text-xs">
-                      {item.status === "pending" ? (
-                        <>
-                          <button
-                            className="rounded border px-2 py-1"
-                            type="button"
-                            onClick={() =>
-                              run(
-                                () => approvePendingAd(item.id),
-                                "Submission approved.",
-                              )
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="rounded border px-2 py-1"
-                            type="button"
-                            onClick={() =>
-                              run(
-                                () => rejectPendingAd(item.id),
-                                "Submission rejected.",
-                              )
-                            }
-                          >
-                            Reject
-                          </button>
-                        </>
-                      ) : null}
-                      <button
-                        className="rounded border border-red-200 px-2 py-1 text-red-700"
-                        type="button"
-                        onClick={() =>
-                          run(
-                            () => deletePendingAd(item.id),
-                            "Submission deleted.",
-                          )
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {pending.length === 0 ? (
-                  <p className="text-gray-500">No pending submissions.</p>
-                ) : null}
-              </div>
-            </div>
-          )}
-
           {activeSection === "Ads" && view === "list" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-semibold text-gray-900">Ads</h1>
-                <button
-                  className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-                  type="button"
-                  onClick={() => {
-                    setAd(blankAd);
-                    setView("createAd");
-                  }}
-                >
-                  <Plus size={16} />
-                  Create New
-                </button>
-              </div>
+            <div>
+              <div className="max-w-[1600px] mx-auto">
+                <div className="mb-6 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                      Ads
+                    </h1>
+                    <p className="text-sm text-gray-500">
+                      Manage and publish scheduled ads
+                    </p>
+                  </div>
 
-              <div className="rounded-xl border bg-white p-4">
-                <div className="space-y-2 text-sm">
-                  {ads.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"
+                  <div className="flex items-center gap-3">
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      type="button"
+                      onClick={() =>
+                        download(
+                          `cbnads-ads-${Date.now()}.csv`,
+                          exportAdsCsv(),
+                          "text/csv;charset=utf-8",
+                        )
+                      }
                     >
-                      <div>
-                        <p className="font-semibold">{item.ad_name}</p>
-                        <p className="text-xs text-gray-600">
-                          {item.advertiser} - {item.post_date || "No date"}{" "}
-                          {item.post_time || ""}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        <button
-                          className="rounded border px-2 py-1"
-                          type="button"
-                          onClick={() => {
-                            setAd({ ...blankAd, ...item });
-                            setView("createAd");
-                          }}
+                      <Download size={16} />
+                      Export
+                    </button>
+
+                    <button
+                      className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                      type="button"
+                      onClick={() => {
+                        setAd(blankAd);
+                        setView("createAd");
+                      }}
+                    >
+                      <Plus size={16} />
+                      Create New
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                      value={adsStatusFilter}
+                      onChange={(event) => setAdsStatusFilter(event.target.value)}
+                    >
+                      {["All Ads", "Draft", "Scheduled", "Published"].map(
+                        (status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ),
+                      )}
+                    </select>
+
+                    <select
+                      className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+                      value={adsPaymentFilter}
+                      onChange={(event) => setAdsPaymentFilter(event.target.value)}
+                    >
+                      {["All Payment Status", "Paid", "Unpaid"].map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="relative w-full max-w-sm">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={16}
+                    />
+                    <input
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                      placeholder="Search by ad, advertiser, placement..."
+                      value={adsSearch}
+                      onChange={(event) => setAdsSearch(event.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-4 text-sm text-gray-600">
+                  Showing {filteredAds.length} of {ads.length} ads
+                </div>
+
+                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Ad Name
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Advertiser
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Schedule
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Payment
+                        </th>
+                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {filteredAds.map((item) => (
+                        <tr
+                          key={item.id}
+                          className="border-b border-gray-100 align-top last:border-0"
                         >
-                          Edit
-                        </button>
-                        <button
-                          className="rounded border px-2 py-1"
-                          type="button"
-                          onClick={() =>
-                            run(
-                              () => updateAdStatus(item.id, "Published"),
-                              "Ad published.",
-                            )
-                          }
-                        >
-                          Publish
-                        </button>
-                        <button
-                          className="rounded border px-2 py-1"
-                          type="button"
-                          onClick={() =>
-                            run(
-                              () =>
-                                updateAdPayment(
-                                  item.id,
-                                  item.payment === "Paid" ? "Unpaid" : "Paid",
-                                ),
-                              "Payment updated.",
-                            )
-                          }
-                        >
-                          Toggle Pay
-                        </button>
-                        <button
-                          className="rounded border border-red-200 px-2 py-1 text-red-700"
-                          type="button"
-                          onClick={() =>
-                            run(() => deleteAd(item.id), "Ad deleted.")
-                          }
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {ads.length === 0 ? (
-                    <p className="text-gray-500">No ads yet.</p>
-                  ) : null}
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-gray-900">
+                              {item.ad_name || "-"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-gray-500">
+                              {item.placement || "-"}
+                            </p>
+                          </td>
+
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {item.advertiser || "-"}
+                          </td>
+
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {formatDate(item.post_date)}{" "}
+                            {item.post_time ? `at ${item.post_time}` : ""}
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                                item.status === "Published"
+                                  ? "bg-green-50 text-green-700"
+                                  : item.status === "Scheduled"
+                                    ? "bg-blue-50 text-blue-700"
+                                    : "bg-gray-100 text-gray-700"
+                              }`}
+                            >
+                              {item.status || "Draft"}
+                            </span>
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                                item.payment === "Paid"
+                                  ? "bg-green-50 text-green-700"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {item.payment || "Unpaid"}
+                            </span>
+                          </td>
+
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2 text-xs">
+                              <button
+                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                type="button"
+                                onClick={() => {
+                                  setAd({ ...blankAd, ...item });
+                                  setView("createAd");
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                type="button"
+                                onClick={() =>
+                                  run(
+                                    () => updateAdStatus(item.id, "Published"),
+                                    "Ad published.",
+                                  )
+                                }
+                              >
+                                Publish
+                              </button>
+                              <button
+                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                type="button"
+                                onClick={() =>
+                                  run(
+                                    () =>
+                                      updateAdPayment(
+                                        item.id,
+                                        item.payment === "Paid"
+                                          ? "Unpaid"
+                                          : "Paid",
+                                      ),
+                                    "Payment updated.",
+                                  )
+                                }
+                              >
+                                Toggle Pay
+                              </button>
+                              <button
+                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
+                                type="button"
+                                onClick={() =>
+                                  run(() => deleteAd(item.id), "Ad deleted.")
+                                }
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {filteredAds.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="px-6 py-12 text-center text-sm text-gray-500"
+                          >
+                            No ads match your current filters.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>
           )}
           {activeSection === "Ads" && view === "createAd" && (
-            <div className="max-w-3xl space-y-4">
+            <div className="max-w-[900px] mx-auto">
               <button
-                className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-100"
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 type="button"
                 onClick={() => {
                   setView("list");
@@ -593,13 +1232,17 @@ export default function AdsPage() {
                 Back to Ads
               </button>
 
-              <div className="rounded-xl border bg-white p-4">
-                <h2 className="mb-3 font-semibold">
-                  {ad.id ? "Edit ad" : "Create ad"}
+              <div className="rounded-lg border border-gray-200 bg-white p-6">
+                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                  {ad.id ? "Edit Advertisement" : "Create New Advertisement"}
                 </h2>
-                <div className="space-y-2 text-sm">
+                <p className="text-sm text-gray-500 mb-6">
+                  Fill in the details below to schedule and manage this ad
+                </p>
+
+                <div className="space-y-4 text-sm">
                   <input
-                    className="w-full rounded border px-2 py-1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                     placeholder="Ad name"
                     value={ad.ad_name}
                     onChange={(event) =>
@@ -607,7 +1250,7 @@ export default function AdsPage() {
                     }
                   />
                   <select
-                    className="w-full rounded border px-2 py-1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                     value={ad.advertiser_id}
                     onChange={(event) =>
                       setAd({ ...ad, advertiser_id: event.target.value })
@@ -621,7 +1264,7 @@ export default function AdsPage() {
                     ))}
                   </select>
                   <select
-                    className="w-full rounded border px-2 py-1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                     value={ad.product_id}
                     onChange={(event) =>
                       setAd({ ...ad, product_id: event.target.value })
@@ -634,9 +1277,9 @@ export default function AdsPage() {
                       </option>
                     ))}
                   </select>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <input
-                      className="rounded border px-2 py-1"
+                      className="rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                       type="date"
                       value={ad.post_date}
                       onChange={(event) =>
@@ -644,7 +1287,7 @@ export default function AdsPage() {
                       }
                     />
                     <input
-                      className="rounded border px-2 py-1"
+                      className="rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                       type="time"
                       value={ad.post_time}
                       onChange={(event) =>
@@ -652,27 +1295,22 @@ export default function AdsPage() {
                       }
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <select
-                      className="rounded border px-2 py-1"
+                      className="rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                       value={ad.status}
                       onChange={(event) =>
                         setAd({ ...ad, status: event.target.value })
                       }
                     >
-                      {[
-                        "Draft",
-                        "Scheduled",
-                        "Published",
-                        "Archived",
-                      ].map((status) => (
+                      {["Draft", "Scheduled", "Published", "Archived"].map((status) => (
                         <option key={status} value={status}>
                           {status}
                         </option>
                       ))}
                     </select>
                     <select
-                      className="rounded border px-2 py-1"
+                      className="rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                       value={ad.payment}
                       onChange={(event) =>
                         setAd({ ...ad, payment: event.target.value })
@@ -686,7 +1324,7 @@ export default function AdsPage() {
                     </select>
                   </div>
                   <input
-                    className="w-full rounded border px-2 py-1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                     type="number"
                     placeholder="Price"
                     value={ad.price}
@@ -695,7 +1333,7 @@ export default function AdsPage() {
                     }
                   />
                   <textarea
-                    className="w-full rounded border px-2 py-1"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
                     placeholder="Notes"
                     value={ad.notes}
                     onChange={(event) =>
@@ -704,7 +1342,7 @@ export default function AdsPage() {
                   />
                   <div className="flex gap-2">
                     <button
-                      className="rounded bg-black px-3 py-2 text-white"
+                      className="rounded-lg bg-black px-4 py-2 text-white hover:bg-gray-800"
                       type="button"
                       onClick={() =>
                         run(() => {
@@ -723,7 +1361,7 @@ export default function AdsPage() {
                       Save
                     </button>
                     <button
-                      className="rounded border px-3 py-2"
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
                       type="button"
                       onClick={() => setAd(blankAd)}
                     >
@@ -736,255 +1374,451 @@ export default function AdsPage() {
           )}
 
           {activeSection === "Advertisers" && (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                <h2 className="font-semibold">
-                  {advertiser.id ? "Edit advertiser" : "Create advertiser"}
-                </h2>
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Name"
-                  value={advertiser.advertiser_name}
-                  onChange={(event) =>
-                    setAdvertiser({
-                      ...advertiser,
-                      advertiser_name: event.target.value,
-                    })
-                  }
-                />
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Email"
-                  value={advertiser.email}
-                  onChange={(event) =>
-                    setAdvertiser({ ...advertiser, email: event.target.value })
-                  }
-                />
-                <div className="flex gap-2">
-                  <button
-                    className="rounded bg-black px-3 py-2 text-white"
-                    type="button"
-                    onClick={() =>
-                      run(() => {
-                        if (!advertiser.advertiser_name) {
-                          throw new Error("Advertiser name required");
-                        }
-                        upsertAdvertiser(advertiser);
-                        setAdvertiser(blankAdvertiser);
-                      }, "Advertiser saved.")
-                    }
-                  >
-                    Save
-                  </button>
-                  <button
-                    className="rounded border px-3 py-2"
-                    type="button"
-                    onClick={() => setAdvertiser(blankAdvertiser)}
-                  >
-                    Reset
-                  </button>
+            <div className="max-w-[1400px] mx-auto">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                    Advertisers
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Manage all advertiser accounts and spending
+                  </p>
+                </div>
+                <div className="relative w-full max-w-sm">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    size={16}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                    placeholder="Search advertisers..."
+                    value={advertiserSearch}
+                    onChange={(event) => setAdvertiserSearch(event.target.value)}
+                  />
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                <h2 className="font-semibold">Advertisers ({advertisers.length})</h2>
-                {advertisers.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded border p-2"
-                  >
-                    <p>
-                      {item.advertiser_name} -{" "}
-                      {formatCurrency(item.ad_spend || 0)}
-                    </p>
-                    <div className="flex gap-2 text-xs">
+              <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
+                    {advertiser.id ? "Edit advertiser" : "Create advertiser"}
+                  </h2>
+                  <div className="space-y-3">
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
+                      placeholder="Advertiser name"
+                      value={advertiser.advertiser_name}
+                      onChange={(event) =>
+                        setAdvertiser({
+                          ...advertiser,
+                          advertiser_name: event.target.value,
+                        })
+                      }
+                    />
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
+                      placeholder="Email"
+                      value={advertiser.email}
+                      onChange={(event) =>
+                        setAdvertiser({ ...advertiser, email: event.target.value })
+                      }
+                    />
+                    <div className="grid grid-cols-2 gap-2">
                       <button
-                        className="rounded border px-2 py-1"
+                        className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
                         type="button"
                         onClick={() =>
-                          setAdvertiser({
-                            id: item.id,
-                            advertiser_name: item.advertiser_name || "",
-                            email: item.email || "",
-                            phone: item.phone || "",
-                            business_name: item.business_name || "",
-                          })
+                          run(() => {
+                            if (!advertiser.advertiser_name) {
+                              throw new Error("Advertiser name required");
+                            }
+                            upsertAdvertiser(advertiser);
+                            setAdvertiser(blankAdvertiser);
+                          }, "Advertiser saved.")
                         }
                       >
-                        Edit
+                        Save
                       </button>
                       <button
-                        className="rounded border border-red-200 px-2 py-1 text-red-700"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         type="button"
-                        onClick={() =>
-                          run(
-                            () => deleteAdvertiser(item.id),
-                            "Advertiser deleted.",
-                          )
-                        }
+                        onClick={() => setAdvertiser(blankAdvertiser)}
                       >
-                        Delete
+                        Reset
                       </button>
                     </div>
                   </div>
-                ))}
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Advertiser
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Email
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Spend
+                        </th>
+                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAdvertisers.map((item) => (
+                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
+                          <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                            {item.advertiser_name}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {item.email || "-"}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {formatCurrency(item.ad_spend || item.total_spend || 0)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2 text-xs">
+                              <button
+                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                type="button"
+                                onClick={() =>
+                                  setAdvertiser({
+                                    id: item.id,
+                                    advertiser_name: item.advertiser_name || "",
+                                    email: item.email || "",
+                                    phone: item.phone || "",
+                                    business_name: item.business_name || "",
+                                  })
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
+                                type="button"
+                                onClick={() =>
+                                  run(
+                                    () => deleteAdvertiser(item.id),
+                                    "Advertiser deleted.",
+                                  )
+                                }
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredAdvertisers.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={4}
+                            className="px-6 py-12 text-center text-sm text-gray-500"
+                          >
+                            No advertisers match your search.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
 
           {activeSection === "Products" && (
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                <h2 className="font-semibold">
-                  {product.id ? "Edit product" : "Create product"}
-                </h2>
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Product name"
-                  value={product.product_name}
-                  onChange={(event) =>
-                    setProduct({ ...product, product_name: event.target.value })
-                  }
-                />
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Price"
-                  type="number"
-                  value={product.price}
-                  onChange={(event) =>
-                    setProduct({ ...product, price: event.target.value })
-                  }
-                />
-                <div className="flex gap-2">
-                  <button
-                    className="rounded bg-black px-3 py-2 text-white"
-                    type="button"
-                    onClick={() =>
-                      run(() => {
-                        if (!product.product_name) {
-                          throw new Error("Product name required");
-                        }
-                        upsertProduct(product);
-                        setProduct(blankProduct);
-                      }, "Product saved.")
-                    }
-                  >
-                    Save
-                  </button>
-                  <button
-                    className="rounded border px-3 py-2"
-                    type="button"
-                    onClick={() => setProduct(blankProduct)}
-                  >
-                    Reset
-                  </button>
+            <div className="max-w-[1400px] mx-auto">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                    Products
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Manage your ad packages and product pricing
+                  </p>
+                </div>
+                <div className="relative w-full max-w-sm">
+                  <Search
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    size={16}
+                  />
+                  <input
+                    className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                    placeholder="Search products..."
+                    value={productSearch}
+                    onChange={(event) => setProductSearch(event.target.value)}
+                  />
                 </div>
               </div>
 
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                <h2 className="font-semibold">Products ({products.length})</h2>
-                {products.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded border p-2"
-                  >
-                    <p>
-                      {item.product_name} - {formatCurrency(item.price)}
-                    </p>
-                    <div className="flex gap-2 text-xs">
+              <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
+                <div className="rounded-lg border border-gray-200 bg-white p-5">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
+                    {product.id ? "Edit product" : "Create product"}
+                  </h2>
+                  <div className="space-y-3">
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
+                      placeholder="Product name"
+                      value={product.product_name}
+                      onChange={(event) =>
+                        setProduct({ ...product, product_name: event.target.value })
+                      }
+                    />
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-gray-400 focus:outline-none"
+                      placeholder="Price"
+                      type="number"
+                      value={product.price}
+                      onChange={(event) =>
+                        setProduct({ ...product, price: event.target.value })
+                      }
+                    />
+                    <div className="grid grid-cols-2 gap-2">
                       <button
-                        className="rounded border px-2 py-1"
+                        className="rounded-lg bg-black px-3 py-2 text-sm font-medium text-white hover:bg-gray-800"
                         type="button"
                         onClick={() =>
-                          setProduct({
-                            id: item.id,
-                            product_name: item.product_name || "",
-                            price: item.price || "",
-                            description: item.description || "",
-                          })
+                          run(() => {
+                            if (!product.product_name) {
+                              throw new Error("Product name required");
+                            }
+                            upsertProduct(product);
+                            setProduct(blankProduct);
+                          }, "Product saved.")
                         }
                       >
-                        Edit
+                        Save
                       </button>
                       <button
-                        className="rounded border border-red-200 px-2 py-1 text-red-700"
+                        className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         type="button"
-                        onClick={() =>
-                          run(() => deleteProduct(item.id), "Product deleted.")
-                        }
+                        onClick={() => setProduct(blankProduct)}
                       >
-                        Delete
+                        Reset
                       </button>
                     </div>
                   </div>
-                ))}
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-gray-50">
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Product
+                        </th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Price
+                        </th>
+                        <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredProducts.map((item) => (
+                        <tr key={item.id} className="border-b border-gray-100 last:border-0">
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium text-gray-900">
+                              {item.product_name}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              {item.description || "-"}
+                            </p>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-700">
+                            {formatCurrency(item.price)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2 text-xs">
+                              <button
+                                className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                                type="button"
+                                onClick={() =>
+                                  setProduct({
+                                    id: item.id,
+                                    product_name: item.product_name || "",
+                                    price: item.price || "",
+                                    description: item.description || "",
+                                  })
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
+                                type="button"
+                                onClick={() =>
+                                  run(() => deleteProduct(item.id), "Product deleted.")
+                                }
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredProducts.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={3}
+                            className="px-6 py-12 text-center text-sm text-gray-500"
+                          >
+                            No products match your search.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
           {activeSection === "Billing" && view === "list" && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-semibold text-gray-900">Invoices</h1>
-                <button
-                  className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-                  type="button"
-                  onClick={() => {
-                    setInvoice(blankInvoice);
-                    setView("newInvoice");
-                  }}
-                >
-                  <Plus size={16} />
-                  New Invoice
-                </button>
+            <div className="max-w-[1400px] mx-auto">
+              <div className="mb-6 flex items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+                    Invoices
+                  </h1>
+                  <p className="text-sm text-gray-500">
+                    Track billing status and advertiser payments
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 w-full max-w-[560px]">
+                  <div className="relative flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={16}
+                    />
+                    <input
+                      className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm text-gray-700 focus:border-gray-400 focus:outline-none"
+                      placeholder="Search invoices..."
+                      value={invoiceSearch}
+                      onChange={(event) => setInvoiceSearch(event.target.value)}
+                    />
+                  </div>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+                    type="button"
+                    onClick={() => {
+                      setInvoice(blankInvoice);
+                      setView("newInvoice");
+                    }}
+                  >
+                    <Plus size={16} />
+                    New Invoice
+                  </button>
+                </div>
               </div>
 
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                {invoices.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between rounded border p-2"
-                  >
-                    <p>
-                      {item.invoice_number} - {formatCurrency(item.amount)} -{" "}
-                      {item.status}
-                    </p>
-                    <div className="flex gap-2 text-xs">
-                      <button
-                        className="rounded border px-2 py-1"
-                        type="button"
-                        onClick={() =>
-                          setInvoice({
-                            ...blankInvoice,
-                            ...item,
-                            ad_ids: item.ad_ids || [],
-                          })
-                        }
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="rounded border border-red-200 px-2 py-1 text-red-700"
-                        type="button"
-                        onClick={() =>
-                          run(() => deleteInvoice(item.id), "Invoice deleted.")
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {invoices.length === 0 ? (
-                  <p className="text-gray-500">No invoices yet.</p>
-                ) : null}
+              <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Invoice
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Advertiser
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Amount
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Due
+                      </th>
+                      <th className="px-6 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredInvoices.map((item) => (
+                      <tr key={item.id} className="border-b border-gray-100 last:border-0">
+                        <td className="px-6 py-4 text-sm font-medium text-gray-900">
+                          {item.invoice_number || item.id}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {advertisers.find((adv) => adv.id === item.advertiser_id)
+                            ?.advertiser_name || "-"}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {formatCurrency(item.amount)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {formatDate(item.due_date)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                              item.status === "Paid"
+                                ? "bg-green-50 text-green-700"
+                                : item.status === "Overdue"
+                                  ? "bg-red-50 text-red-700"
+                                  : "bg-amber-50 text-amber-700"
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex justify-end gap-2 text-xs">
+                            <button
+                              className="rounded-md border border-gray-300 px-2.5 py-1 text-gray-700 hover:bg-gray-50"
+                              type="button"
+                              onClick={() => {
+                                setInvoice({
+                                  ...blankInvoice,
+                                  ...item,
+                                  ad_ids: item.ad_ids || [],
+                                });
+                                setView("newInvoice");
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="rounded-md border border-red-200 px-2.5 py-1 text-red-700 hover:bg-red-50"
+                              type="button"
+                              onClick={() =>
+                                run(() => deleteInvoice(item.id), "Invoice deleted.")
+                              }
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredInvoices.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          className="px-6 py-12 text-center text-sm text-gray-500"
+                        >
+                          No invoices match your search.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
           {activeSection === "Billing" && view === "newInvoice" && (
-            <div className="max-w-3xl space-y-4">
+            <div className="max-w-[900px] mx-auto">
               <button
-                className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-gray-100"
+                className="mb-4 inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 type="button"
                 onClick={() => {
                   setView("list");
@@ -995,123 +1829,137 @@ export default function AdsPage() {
                 Back to Billing
               </button>
 
-              <div className="rounded-xl border bg-white p-4 text-sm space-y-2">
-                <h2 className="font-semibold">
-                  {invoice.id ? "Edit invoice" : "Create invoice"}
+              <div className="rounded-lg border border-gray-200 bg-white p-6 text-sm">
+                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                  {invoice.id ? "Edit Invoice" : "Create Invoice"}
                 </h2>
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Invoice number"
-                  value={invoice.invoice_number}
-                  onChange={(event) =>
-                    setInvoice({ ...invoice, invoice_number: event.target.value })
-                  }
-                />
-                <select
-                  className="w-full rounded border px-2 py-1"
-                  value={invoice.advertiser_id}
-                  onChange={(event) =>
-                    setInvoice({
-                      ...invoice,
-                      advertiser_id: event.target.value,
-                      ad_ids: [],
-                    })
-                  }
-                >
-                  <option value="">Select advertiser</option>
-                  {advertisers.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.advertiser_name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  placeholder="Amount"
-                  type="number"
-                  value={invoice.amount}
-                  onChange={(event) =>
-                    setInvoice({ ...invoice, amount: event.target.value })
-                  }
-                />
-                <input
-                  className="w-full rounded border px-2 py-1"
-                  type="date"
-                  value={invoice.due_date}
-                  onChange={(event) =>
-                    setInvoice({ ...invoice, due_date: event.target.value })
-                  }
-                />
-                <select
-                  className="w-full rounded border px-2 py-1"
-                  value={invoice.status}
-                  onChange={(event) =>
-                    setInvoice({ ...invoice, status: event.target.value })
-                  }
-                >
-                  {["Unpaid", "Paid", "Pending", "Overdue"].map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-                <div className="max-h-32 overflow-auto rounded border p-2">
-                  {visibleAdsForInvoice.map((item) => (
-                    <label key={item.id} className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={invoice.ad_ids.includes(item.id)}
-                        onChange={() =>
-                          setInvoice((current) => ({
-                            ...current,
-                            ad_ids: current.ad_ids.includes(item.id)
-                              ? current.ad_ids.filter((id) => id !== item.id)
-                              : [...current.ad_ids, item.id],
-                          }))
-                        }
-                      />
-                      {item.ad_name}
-                    </label>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    className="rounded bg-black px-3 py-2 text-white"
-                    type="button"
-                    onClick={() =>
-                      run(() => {
-                        if (!invoice.advertiser_id) {
-                          throw new Error("Advertiser required");
-                        }
-                        if (!invoice.amount) {
-                          throw new Error("Amount required");
-                        }
-                        upsertInvoice(invoice);
-                        setInvoice(blankInvoice);
-                        setView("list");
-                      }, "Invoice saved.")
+                <p className="text-sm text-gray-500 mb-6">
+                  Select an advertiser and include linked ads for billing
+                </p>
+
+                <div className="space-y-4">
+                  <input
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
+                    placeholder="Invoice number"
+                    value={invoice.invoice_number}
+                    onChange={(event) =>
+                      setInvoice({ ...invoice, invoice_number: event.target.value })
+                    }
+                  />
+                  <select
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
+                    value={invoice.advertiser_id}
+                    onChange={(event) =>
+                      setInvoice({
+                        ...invoice,
+                        advertiser_id: event.target.value,
+                        ad_ids: [],
+                      })
                     }
                   >
-                    Save
-                  </button>
-                  <button
-                    className="rounded border px-3 py-2"
-                    type="button"
-                    onClick={() => setInvoice(blankInvoice)}
+                    <option value="">Select advertiser</option>
+                    {advertisers.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.advertiser_name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
+                      placeholder="Amount"
+                      type="number"
+                      value={invoice.amount}
+                      onChange={(event) =>
+                        setInvoice({ ...invoice, amount: event.target.value })
+                      }
+                    />
+                    <input
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
+                      type="date"
+                      value={invoice.due_date}
+                      onChange={(event) =>
+                        setInvoice({ ...invoice, due_date: event.target.value })
+                      }
+                    />
+                  </div>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-gray-400 focus:outline-none"
+                    value={invoice.status}
+                    onChange={(event) =>
+                      setInvoice({ ...invoice, status: event.target.value })
+                    }
                   >
-                    Reset
-                  </button>
+                    {["Unpaid", "Paid", "Pending", "Overdue"].map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="rounded-lg border border-gray-200 p-3 max-h-40 overflow-auto">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                      Link Ads
+                    </p>
+                    <div className="space-y-1">
+                      {visibleAdsForInvoice.map((item) => (
+                        <label key={item.id} className="flex items-center gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            checked={invoice.ad_ids.includes(item.id)}
+                            onChange={() =>
+                              setInvoice((current) => ({
+                                ...current,
+                                ad_ids: current.ad_ids.includes(item.id)
+                                  ? current.ad_ids.filter((id) => id !== item.id)
+                                  : [...current.ad_ids, item.id],
+                              }))
+                            }
+                          />
+                          {item.ad_name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      className="rounded-lg bg-black px-4 py-2 text-white hover:bg-gray-800"
+                      type="button"
+                      onClick={() =>
+                        run(() => {
+                          if (!invoice.advertiser_id) {
+                            throw new Error("Advertiser required");
+                          }
+                          if (!invoice.amount) {
+                            throw new Error("Amount required");
+                          }
+                          upsertInvoice(invoice);
+                          setInvoice(blankInvoice);
+                          setView("list");
+                        }, "Invoice saved.")
+                      }
+                    >
+                      Save
+                    </button>
+                    <button
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-gray-700 hover:bg-gray-50"
+                      type="button"
+                      onClick={() => setInvoice(blankInvoice)}
+                    >
+                      Reset
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
 
           {activeSection === "Reconciliation" && (
-            <div className="space-y-4">
-              <h1 className="text-2xl font-semibold text-gray-900">
+            <div className="max-w-[1200px] mx-auto">
+              <h1 className="text-2xl font-semibold text-gray-900 mb-6">
                 Reconciliation
               </h1>
-              <div className="grid gap-4 sm:grid-cols-3">
+
+              <div className="grid gap-4 sm:grid-cols-3 mb-6">
                 <StatCard
                   label="Invoice Discrepancies"
                   value={reconciliation.summary.totalDiscrepancies}
@@ -1126,16 +1974,25 @@ export default function AdsPage() {
                 />
               </div>
 
-              <div className="rounded-xl border bg-white p-4 text-sm">
-                <h2 className="font-semibold mb-2">Discrepancies</h2>
+              <div className="rounded-lg border border-gray-200 bg-white p-5 text-sm">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
+                  Discrepancies
+                </h2>
                 {reconciliation.discrepancies.length === 0 ? (
                   <p className="text-gray-500">No discrepancies found.</p>
                 ) : (
                   <div className="space-y-2">
                     {reconciliation.discrepancies.map((item) => (
-                      <div key={item.invoice_id} className="rounded border p-2">
-                        {item.invoice_number} ({item.advertiser_name}) - Difference:{" "}
-                        {formatCurrency(item.difference)}
+                      <div
+                        key={item.invoice_id}
+                        className="rounded-lg border border-gray-200 p-3"
+                      >
+                        <p className="text-sm font-medium text-gray-900">
+                          {item.invoice_number} ({item.advertiser_name})
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Difference: {formatCurrency(item.difference)}
+                        </p>
                       </div>
                     ))}
                   </div>
@@ -1145,51 +2002,72 @@ export default function AdsPage() {
           )}
 
           {activeSection === "Settings" && (
-            <div className="rounded-xl border bg-white p-4 space-y-3 text-sm max-w-xl">
-              <h1 className="text-2xl font-semibold text-gray-900 mb-2">
-                Settings
-              </h1>
-              <button
-                className="rounded border px-3 py-2 hover:bg-gray-100"
-                type="button"
-                onClick={() =>
-                  download(
-                    `cbnads-backup-${Date.now()}.json`,
-                    exportDbJson(),
-                    "application/json",
-                  )
-                }
-              >
-                Export local backup
-              </button>
-              <button
-                className="rounded border px-3 py-2 hover:bg-gray-100"
-                type="button"
-                onClick={() =>
-                  download(
-                    `cbnads-ads-${Date.now()}.csv`,
-                    exportAdsCsv(),
-                    "text/csv;charset=utf-8",
-                  )
-                }
-              >
-                Export ads CSV
-              </button>
-              <button
-                className="rounded border border-red-200 px-3 py-2 text-red-700 hover:bg-red-50"
-                type="button"
-                onClick={() => {
-                  if (!window.confirm("Reset all local data?")) {
-                    return;
-                  }
-                  run(() => {
-                    resetDb();
-                    window.location.href = "/account/signin";
-                  }, "Data reset.");
-                }}
-              >
-                Reset all local data
-              </button>
+            <div className="max-w-[1200px] mx-auto">
+              <div className="mb-8">
+                <h1 className="text-2xl font-semibold text-gray-900 mb-2">
+                  Settings
+                </h1>
+                <p className="text-sm text-gray-500">
+                  Manage local backups and environment maintenance
+                </p>
+              </div>
+
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
+                    Data Export
+                  </h2>
+                  <div className="space-y-3">
+                    <button
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 text-left"
+                      type="button"
+                      onClick={() =>
+                        download(
+                          `cbnads-backup-${Date.now()}.json`,
+                          exportDbJson(),
+                          "application/json",
+                        )
+                      }
+                    >
+                      Export local backup (.json)
+                    </button>
+                    <button
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 text-left"
+                      type="button"
+                      onClick={() =>
+                        download(
+                          `cbnads-ads-${Date.now()}.csv`,
+                          exportAdsCsv(),
+                          "text/csv;charset=utf-8",
+                        )
+                      }
+                    >
+                      Export ads report (.csv)
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900 mb-4">
+                    Dangerous Actions
+                  </h2>
+                  <button
+                    className="w-full rounded-lg border border-red-200 px-4 py-2.5 text-sm text-red-700 hover:bg-red-50 text-left"
+                    type="button"
+                    onClick={() => {
+                      if (!window.confirm("Reset all local data?")) {
+                        return;
+                      }
+                      run(() => {
+                        resetDb();
+                        window.location.href = "/account/signin";
+                      }, "Data reset.");
+                    }}
+                  >
+                    Reset all local data
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </main>
