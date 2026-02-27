@@ -6,9 +6,11 @@
 		"dev": "react-router dev",
 		"build": "react-router build",
 		"preview": "vite preview",
-		"typecheck": "react-router typegen && tsc --noEmit"
+		"typecheck": "react-router typegen && tsc --noEmit",
+		"smoke:launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-smoke.ps1"
 	},
 	"dependencies": {
+		"@auth/core": "^0.34.3",
 		"@babel/generator": "^7.27.1",
 		"@chakra-ui/react": "2.8.2",
 		"@dnd-kit/core": "^6.3.1",

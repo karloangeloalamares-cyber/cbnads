@@ -1,5 +1,5 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
+import { db, table } from "../../utils/supabase-db.js";
+import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

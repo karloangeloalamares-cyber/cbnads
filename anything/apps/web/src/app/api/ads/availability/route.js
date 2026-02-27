@@ -1,5 +1,5 @@
-import { adDatesForDayCheck, dateOnly, db, normalizePostType, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { adDatesForDayCheck, dateOnly, db, normalizePostType, table, toNumber } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 const normalizeTime = (value) => {
   if (!value) return "";

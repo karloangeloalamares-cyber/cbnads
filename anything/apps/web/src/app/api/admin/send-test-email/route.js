@@ -1,4 +1,4 @@
-import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
+import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
 
 export async function POST(request) {
   try {

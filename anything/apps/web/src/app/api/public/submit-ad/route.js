@@ -1,5 +1,5 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { sendEmail } from "@/app/api/utils/send-email";
+import { db, table } from "../../utils/supabase-db.js";
+import { sendEmail } from "../../utils/send-email.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;

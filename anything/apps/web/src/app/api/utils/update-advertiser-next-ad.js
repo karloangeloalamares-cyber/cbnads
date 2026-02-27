@@ -1,4 +1,4 @@
-import { adDatesForDayCheck, dateOnly, db, table } from "@/app/api/utils/supabase-db";
+import { adDatesForDayCheck, dateOnly, db, table } from "./supabase-db.js";
 
 /**
  * Updates an advertiser's `next_ad_date` from their upcoming non-published ads.

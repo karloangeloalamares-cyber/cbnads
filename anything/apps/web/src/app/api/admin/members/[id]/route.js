@@ -1,5 +1,5 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { getSessionUser, requireAdmin } from "@/app/api/utils/auth-check";
+import { db, table } from "../../../utils/supabase-db.js";
+import { getSessionUser, requireAdmin } from "../../../utils/auth-check.js";
 
 // Remove admin role from a member
 export async function DELETE(request, { params }) {

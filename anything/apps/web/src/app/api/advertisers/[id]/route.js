@@ -1,5 +1,5 @@
-import { advertiserResponse, dateOnly, db, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { advertiserResponse, dateOnly, db, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 const isInactive = (value) => String(value || "").toLowerCase() === "inactive";
 

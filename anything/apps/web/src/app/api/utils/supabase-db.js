@@ -1,4 +1,4 @@
-import { adminTableName, getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { adminTableName, getSupabaseAdmin } from "../../../lib/supabaseAdmin.js";
 
 export const db = () => getSupabaseAdmin();
 

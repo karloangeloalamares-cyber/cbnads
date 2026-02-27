@@ -1,6 +1,6 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
+import { db, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
+import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 
 export async function POST() {
   try {

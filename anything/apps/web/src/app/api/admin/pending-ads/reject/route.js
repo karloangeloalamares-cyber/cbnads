@@ -1,5 +1,5 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { db, table } from "../../../utils/supabase-db.js";
+import { requireAdmin } from "../../../utils/auth-check.js";
 
 export async function POST(request) {
   try {

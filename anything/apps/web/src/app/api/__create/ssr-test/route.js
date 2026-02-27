@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import routes from '../../../routes';
 import { serializeError } from 'serialize-error';
 import cleanStack from 'clean-stack';
-import { requireAdmin } from '@/app/api/utils/auth-check';
+import { requireAdmin } from '../../utils/auth-check.js';
 
 function serializeClean(err) {
 	// if we want to clean this more, maybe we should look at the file where it

@@ -1,6 +1,6 @@
-import { db, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
+import { db, table, toNumber } from "../utils/supabase-db.js";
+import { requireAdmin } from "../utils/auth-check.js";
+import { recalculateAdvertiserSpend } from "../utils/recalculate-advertiser-spend.js";
 
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
   if (String(currentStatus || "").toLowerCase() === "paid") return "Paid";

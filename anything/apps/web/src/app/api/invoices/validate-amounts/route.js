@@ -1,6 +1,6 @@
-import { db, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { parsePaymentAmount } from "@/app/api/utils/invoice-helpers";
+import { db, table, toNumber } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
+import { parsePaymentAmount } from "../../utils/invoice-helpers.js";
 
 export async function GET() {
   try {

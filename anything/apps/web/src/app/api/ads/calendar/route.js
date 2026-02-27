@@ -1,5 +1,5 @@
-import { adDatesForDayCheck, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { adDatesForDayCheck, db, normalizePostType, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 const toLegacyPostType = (value) => {
   const normalized = normalizePostType(value);

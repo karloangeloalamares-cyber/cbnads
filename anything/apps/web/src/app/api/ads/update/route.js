@@ -1,6 +1,6 @@
-import { db, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
+import { db, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
+import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 
 const recalcInvoiceStatus = async (supabase, invoiceId) => {
   if (!invoiceId) return;

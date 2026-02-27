@@ -1,4 +1,4 @@
-import { toNumber } from "@/app/api/utils/supabase-db";
+import { toNumber } from "./supabase-db.js";
 
 export function parsePaymentAmount(value) {
   const text = String(value || "").trim();

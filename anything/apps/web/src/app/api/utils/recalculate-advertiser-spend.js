@@ -1,4 +1,4 @@
-import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { db, table, toNumber } from "./supabase-db.js";
 
 /**
  * Recalculates an advertiser's spend based on all paid invoices.

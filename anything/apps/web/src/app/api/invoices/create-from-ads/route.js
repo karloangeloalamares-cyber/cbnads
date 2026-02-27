@@ -1,7 +1,7 @@
-import { db, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { adAmount, nextSequentialInvoiceNumber } from "@/app/api/utils/invoice-helpers";
-import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
+import { db, table, toNumber } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
+import { adAmount, nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
+import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 
 export async function POST(request) {
   try {

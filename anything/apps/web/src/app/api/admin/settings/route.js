@@ -1,5 +1,5 @@
-import { db, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { db, table, toNumber } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 async function getOrCreateSettings(supabase) {
   const { data: existing, error: existingError } = await supabase

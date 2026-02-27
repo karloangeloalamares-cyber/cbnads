@@ -1,5 +1,5 @@
-import { auth } from "@/auth";
-import { db, table } from "@/app/api/utils/supabase-db";
+import { getSessionFromRequestContext } from "./session-auth.js";
+import { db, table } from "./supabase-db.js";
 
 async function resolveUserRole(sessionUser) {
   const rawRole = String(sessionUser?.role || "").trim().toLowerCase();
@@ -27,7 +27,7 @@ async function resolveUserRole(sessionUser) {
  * @returns {Promise<{authorized: boolean, user?: object, error?: string}>}
  */
 export async function requireAdmin() {
-  const session = await auth();
+  const session = await getSessionFromRequestContext();
 
   if (!session || !session.user?.id) {
     return {
@@ -55,7 +55,7 @@ export async function requireAdmin() {
  * @returns {Promise<{authorized: boolean, user?: object, error?: string}>}
  */
 export async function requireAuth() {
-  const session = await auth();
+  const session = await getSessionFromRequestContext();
 
   if (!session || !session.user?.id) {
     return {
@@ -71,7 +71,7 @@ export async function requireAuth() {
 }
 
 export async function getSessionUser() {
-  const session = await auth();
+  const session = await getSessionFromRequestContext();
   if (!session || !session.user?.id) return null;
 
   const role = await resolveUserRole(session.user);

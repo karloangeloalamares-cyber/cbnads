@@ -1,6 +1,6 @@
-import { dateOnly, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
-import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
+import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
+import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 

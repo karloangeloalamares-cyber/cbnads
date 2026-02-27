@@ -1,5 +1,5 @@
-import { dateOnly, db, normalizePostType, table, toNumber } from "@/app/api/utils/supabase-db";
-import { requireAdmin } from "@/app/api/utils/auth-check";
+import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 function getNowInET() {
   const now = new Date();
