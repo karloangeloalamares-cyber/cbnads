@@ -1,4 +1,5 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
@@ -10,6 +11,11 @@ const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
 
 export async function GET(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
@@ -101,6 +107,11 @@ export async function GET(request) {
 
 export async function PUT(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const { id } = body;
@@ -174,7 +185,12 @@ export async function PUT(request) {
     if (invoiceUpdateError) throw invoiceUpdateError;
 
     if (Array.isArray(items)) {
-      await supabase.from(table("invoice_items")).delete().eq("invoice_id", id);
+      const { error: deleteItemsError } = await supabase
+        .from(table("invoice_items"))
+        .delete()
+        .eq("invoice_id", id);
+      if (deleteItemsError) throw deleteItemsError;
+
       for (const item of items) {
         const quantity = toNumber(item.quantity, 1) || 1;
         const unitPrice = toNumber(item.unit_price, 0);
@@ -230,6 +246,11 @@ export async function PUT(request) {
 
 export async function DELETE(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
@@ -251,10 +272,11 @@ export async function DELETE(request) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    await supabase
+    const { error: softDeleteError } = await supabase
       .from(table("invoices"))
       .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq("id", id);
+    if (softDeleteError) throw softDeleteError;
 
     // Clear invoice links from ads tied to this invoice
     const { data: linkedItems, error: linkedItemsError } = await supabase
@@ -266,10 +288,11 @@ export async function DELETE(request) {
 
     const adIds = (linkedItems || []).map((row) => row.ad_id).filter(Boolean);
     if (adIds.length > 0) {
-      await supabase
+      const { error: unlinkError } = await supabase
         .from(table("ads"))
         .update({ paid_via_invoice_id: null })
         .in("id", adIds);
+      if (unlinkError) throw unlinkError;
     }
 
     if (invoice.advertiser_id) {
@@ -285,4 +308,3 @@ export async function DELETE(request) {
     );
   }
 }
-

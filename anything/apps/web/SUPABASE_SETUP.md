@@ -14,6 +14,16 @@ Create `.env` from `.env.example` and set:
 - `VITE_SUPABASE_ANON_KEY`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+- `AUTH_SECRET`
+- `AUTH_URL`
+- `DATABASE_URL`
+- `APP_URL`
+
+Optional but required for reminder/email features:
+
+- `RESEND_API_KEY` (public submit confirmation + admin notifications)
+- `ZAPIER_WEBHOOK_URL` (admin/advertiser reminder automation)
+- `CRON_SECRET` (protect cron-triggered reminder endpoint)
 
 ## 2) Create namespaced tables
 

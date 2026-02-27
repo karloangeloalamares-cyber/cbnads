@@ -1,8 +1,14 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function DELETE(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
@@ -33,4 +39,3 @@ export async function DELETE(request) {
     return Response.json({ error: "Failed to delete ad" }, { status: 500 });
   }
 }
-

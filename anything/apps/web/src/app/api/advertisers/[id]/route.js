@@ -1,4 +1,5 @@
 import { advertiserResponse, dateOnly, db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 const isInactive = (value) => String(value || "").toLowerCase() === "inactive";
 
@@ -21,6 +22,11 @@ const hasFutureSchedule = (ad) => {
 // GET advertiser details with all ads
 export async function GET(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
 
@@ -70,6 +76,11 @@ export async function GET(request, { params }) {
 // PUT - Update advertiser
 export async function PUT(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
     const body = await request.json();
@@ -130,20 +141,23 @@ export async function PUT(request, { params }) {
 
     // Cascade rename to related records
     if (oldName !== advertiser_name) {
-      await supabase
+      const { error: adsRenameError } = await supabase
         .from(table("ads"))
         .update({ advertiser: advertiser_name, advertiser_id: id })
         .eq("advertiser", oldName);
+      if (adsRenameError) throw adsRenameError;
 
-      await supabase
+      const { error: pendingRenameError } = await supabase
         .from(table("pending_ads"))
         .update({ advertiser_name })
         .eq("advertiser_name", oldName);
+      if (pendingRenameError) throw pendingRenameError;
 
-      await supabase
+      const { error: invoicesRenameError } = await supabase
         .from(table("invoices"))
         .update({ advertiser_name })
         .eq("advertiser_name", oldName);
+      if (invoicesRenameError) throw invoicesRenameError;
     }
 
     // If advertiser became inactive, move future non-published ads to Draft
@@ -161,10 +175,11 @@ export async function PUT(request, { params }) {
         .map((ad) => ad.id);
 
       if (adIdsToDraft.length > 0) {
-        await supabase
+        const { error: draftUpdateError } = await supabase
           .from(table("ads"))
           .update({ status: "Draft" })
           .in("id", adIdsToDraft);
+        if (draftUpdateError) throw draftUpdateError;
       }
     }
 
@@ -181,6 +196,11 @@ export async function PUT(request, { params }) {
 // DELETE - Delete advertiser and all associated data
 export async function DELETE(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
 
@@ -205,11 +225,24 @@ export async function DELETE(request, { params }) {
 
     const adIds = (adRows || []).map((row) => row.id);
     if (adIds.length > 0) {
-      await supabase.from(table("sent_reminders")).delete().in("ad_id", adIds);
-      await supabase.from(table("ads")).delete().in("id", adIds);
+      const { error: reminderDeleteError } = await supabase
+        .from(table("sent_reminders"))
+        .delete()
+        .in("ad_id", adIds);
+      if (reminderDeleteError) throw reminderDeleteError;
+
+      const { error: adsDeleteError } = await supabase
+        .from(table("ads"))
+        .delete()
+        .in("id", adIds);
+      if (adsDeleteError) throw adsDeleteError;
     }
 
-    await supabase.from(table("advertisers")).delete().eq("id", id);
+    const { error: advertiserDeleteError } = await supabase
+      .from(table("advertisers"))
+      .delete()
+      .eq("id", id);
+    if (advertiserDeleteError) throw advertiserDeleteError;
 
     return Response.json({
       success: true,

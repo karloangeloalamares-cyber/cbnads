@@ -1,8 +1,14 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const { id } = body;
@@ -44,10 +50,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error marking ad as published:", error);
-    return Response.json(
-      { error: `Failed to mark ad as published: ${error.message}` },
-      { status: 500 },
-    );
+    return Response.json({ error: "Failed to mark ad as published" }, { status: 500 });
   }
 }
-

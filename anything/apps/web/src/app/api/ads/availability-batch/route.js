@@ -1,9 +1,15 @@
 import { adDatesForDayCheck, dateOnly, db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 const includesDate = (ad, date) => adDatesForDayCheck(ad).includes(date);
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const { dates, exclude_ad_id } = body;

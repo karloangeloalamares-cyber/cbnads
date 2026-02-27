@@ -1,4 +1,5 @@
 import { adDatesForDayCheck, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 const toLegacyPostType = (value) => {
   const normalized = normalizePostType(value);
@@ -10,6 +11,11 @@ const toLegacyPostType = (value) => {
 
 export async function GET(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const year = searchParams.get("year");
     const month = searchParams.get("month");
@@ -57,4 +63,3 @@ export async function GET(request) {
     );
   }
 }
-

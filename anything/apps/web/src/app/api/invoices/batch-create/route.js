@@ -1,4 +1,5 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { adAmount, nextSequentialInvoiceNumber } from "@/app/api/utils/invoice-helpers";
 import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
@@ -9,6 +10,11 @@ const inRange = (value, from, to) => {
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const { advertiserId, dateFrom, dateTo, status } = await request.json();
 
     if (!advertiserId || !dateFrom || !dateTo) {

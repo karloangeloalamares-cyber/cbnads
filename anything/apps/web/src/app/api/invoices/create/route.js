@@ -1,4 +1,5 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { recalculateAdvertiserSpend } from "@/app/api/utils/recalculate-advertiser-spend";
 
 function generateInvoiceNumber() {
@@ -17,6 +18,11 @@ function generateInvoiceNumber() {
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const {
@@ -116,4 +122,3 @@ export async function POST(request) {
     );
   }
 }
-

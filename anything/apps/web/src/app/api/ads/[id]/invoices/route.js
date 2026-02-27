@@ -1,7 +1,13 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 export async function GET(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const { id } = params;
     if (!id) {
       return Response.json({ error: "Ad ID is required" }, { status: 400 });
@@ -36,4 +42,3 @@ export async function GET(request, { params }) {
     );
   }
 }
-

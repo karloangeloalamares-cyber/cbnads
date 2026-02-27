@@ -1,8 +1,14 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const body = await request.json();
     const { action, adIds, newStatus } = body;
 
@@ -27,7 +33,12 @@ export async function POST(request) {
     ];
 
     if (action === "delete") {
-      await supabase.from(table("sent_reminders")).delete().in("ad_id", uniqueAdIds);
+      const { error: reminderDeleteError } = await supabase
+        .from(table("sent_reminders"))
+        .delete()
+        .in("ad_id", uniqueAdIds);
+      if (reminderDeleteError) throw reminderDeleteError;
+
       const { error } = await supabase.from(table("ads")).delete().in("id", uniqueAdIds);
       if (error) throw error;
 
@@ -121,4 +132,3 @@ export async function POST(request) {
     );
   }
 }
-

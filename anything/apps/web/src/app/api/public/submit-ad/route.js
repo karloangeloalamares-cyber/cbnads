@@ -1,8 +1,78 @@
 import { db, table } from "@/app/api/utils/supabase-db";
 import { sendEmail } from "@/app/api/utils/send-email";
 
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX_ATTEMPTS = 20;
+
+const getRateLimitStore = () => {
+  const globalKey = "__cbnadsSubmitAdRateLimit";
+  if (!globalThis[globalKey]) {
+    globalThis[globalKey] = new Map();
+  }
+  return globalThis[globalKey];
+};
+
+const clientIpFromHeaders = (headers) => {
+  const forwarded = String(headers.get("x-forwarded-for") || "").trim();
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+  return String(headers.get("x-real-ip") || "").trim();
+};
+
+const isRateLimited = (key) => {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  const store = getRateLimitStore();
+
+  for (const [entryKey, timestamps] of store.entries()) {
+    const filtered = timestamps.filter((value) => value >= cutoff);
+    if (filtered.length === 0) {
+      store.delete(entryKey);
+      continue;
+    }
+    store.set(entryKey, filtered);
+  }
+
+  const attempts = store.get(key) || [];
+  if (attempts.length >= RATE_LIMIT_MAX_ATTEMPTS) {
+    return true;
+  }
+  store.set(key, [...attempts, now]);
+  return false;
+};
+
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const toSafeHttpUrl = (value) => {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
 export async function POST(request) {
   try {
+    const requesterIp = clientIpFromHeaders(request.headers) || "unknown";
+    const rateLimitKey = `${requesterIp}:${new Date().toISOString().slice(0, 10)}`;
+    if (isRateLimited(rateLimitKey)) {
+      return Response.json(
+        { error: "Too many submissions. Please try again later." },
+        { status: 429 },
+      );
+    }
+
     const supabase = db();
     const body = await request.json();
     const {
@@ -21,7 +91,13 @@ export async function POST(request) {
       media,
       placement,
       notes,
+      website,
     } = body;
+
+    // Honeypot for basic bot filtering.
+    if (String(website || "").trim()) {
+      return Response.json({ success: true });
+    }
 
     // Validation
     if (!advertiser_name || !contact_name || !email || !ad_name || !post_type) {
@@ -30,6 +106,62 @@ export async function POST(request) {
         { status: 400 },
       );
     }
+
+    const normalizedEmail = String(email || "").trim();
+    const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!isEmailValid) {
+      return Response.json({ error: "Invalid email address" }, { status: 400 });
+    }
+
+    const escaped = {
+      advertiser_name: escapeHtml(advertiser_name),
+      contact_name: escapeHtml(contact_name),
+      email: escapeHtml(normalizedEmail),
+      phone_number: escapeHtml(phone_number),
+      ad_name: escapeHtml(ad_name),
+      post_type: escapeHtml(post_type),
+      placement: escapeHtml(placement),
+      post_date_from: escapeHtml(post_date_from),
+      post_date_to: escapeHtml(post_date_to),
+      post_time: escapeHtml(post_time),
+      reminder_minutes: escapeHtml(reminder_minutes),
+      ad_text: escapeHtml(ad_text),
+      notes: escapeHtml(notes),
+    };
+    const safeSubjectAdName = String(ad_name || "").replace(/[\r\n]+/g, " ").trim();
+    const safeSubjectAdvertiserName = String(advertiser_name || "")
+      .replace(/[\r\n]+/g, " ")
+      .trim();
+    const safeCustomDates = Array.isArray(custom_dates)
+      ? custom_dates.map((date) => escapeHtml(date))
+      : [];
+    const sanitizedMedia = Array.isArray(media)
+      ? media
+          .map((item) => {
+            if (item && typeof item === "object") {
+              const safeUrl = toSafeHttpUrl(item.url || item.cdnUrl || "");
+              if (!safeUrl) return null;
+              return {
+                ...item,
+                url: safeUrl,
+                cdnUrl: toSafeHttpUrl(item.cdnUrl || safeUrl) || safeUrl,
+              };
+            }
+
+            const safeUrl = toSafeHttpUrl(item);
+            if (!safeUrl) return null;
+            return { type: "link", url: safeUrl, cdnUrl: safeUrl };
+          })
+          .filter(Boolean)
+      : [];
+    const safeMediaUrls = sanitizedMedia
+      .map((item) => toSafeHttpUrl(item.url || item.cdnUrl || ""))
+      .filter(Boolean);
+
+    const safeAppUrl = toSafeHttpUrl(process.env.APP_URL);
+    const reviewSubmissionUrl = safeAppUrl
+      ? new URL("/pending-submissions", safeAppUrl).toString()
+      : null;
 
     // Additional validation for One-Time Post
     if (post_type === "One-Time Post" && post_date_from && post_time) {
@@ -79,7 +211,7 @@ export async function POST(request) {
       .insert({
         advertiser_name,
         contact_name,
-        email,
+        email: normalizedEmail,
         phone_number: phone_number || null,
         phone: phone_number || null,
         ad_name,
@@ -91,7 +223,7 @@ export async function POST(request) {
         post_time: post_time || null,
         reminder_minutes: reminder_minutes || 15,
         ad_text: ad_text || null,
-        media: Array.isArray(media) ? media : [],
+        media: sanitizedMedia,
         placement: placement || null,
         notes: notes || null,
         status: "pending",
@@ -155,20 +287,20 @@ export async function POST(request) {
     
     <div class="content">
       <h2>Thank You for Your Ad Submission</h2>
-      <p>Dear ${contact_name},</p>
+      <p>Dear ${escaped.contact_name},</p>
       <p>We have successfully received your advertising submission. Here's a summary of what you submitted:</p>
       
       <div class="info-block">
-        <div class="info-row"><span class="label">Advertiser Name:</span> ${advertiser_name}</div>
-        <div class="info-row"><span class="label">Contact Name:</span> ${contact_name}</div>
-        <div class="info-row"><span class="label">Email:</span> ${email}</div>
-        ${phone_number ? `<div class="info-row"><span class="label">Phone:</span> ${phone_number}</div>` : ""}
-        <div class="info-row"><span class="label">Ad Name:</span> ${ad_name}</div>
-        <div class="info-row"><span class="label">Post Type:</span> ${post_type}</div>
-        ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${placement}</div>` : ""}
-        ${post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${post_date_from}</div>` : ""}
-        ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${post_date_to}</div>` : ""}
-        ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${post_time}</div>` : ""}
+        <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiser_name}</div>
+        <div class="info-row"><span class="label">Contact Name:</span> ${escaped.contact_name}</div>
+        <div class="info-row"><span class="label">Email:</span> ${escaped.email}</div>
+        ${phone_number ? `<div class="info-row"><span class="label">Phone:</span> ${escaped.phone_number}</div>` : ""}
+        <div class="info-row"><span class="label">Ad Name:</span> ${escaped.ad_name}</div>
+        <div class="info-row"><span class="label">Post Type:</span> ${escaped.post_type}</div>
+        ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+        ${post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${escaped.post_date_from}</div>` : ""}
+        ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${escaped.post_date_to}</div>` : ""}
+        ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${escaped.post_time}</div>` : ""}
       </div>
       
       <p><strong>Next Steps:</strong></p>
@@ -223,36 +355,36 @@ export async function POST(request) {
       <div class="info-section">
         <div class="section-title">Advertiser Information</div>
         <div class="info-block">
-          <div class="info-row"><span class="label">Advertiser Name:</span> ${advertiser_name}</div>
-          <div class="info-row"><span class="label">Contact Name:</span> ${contact_name}</div>
-          <div class="info-row"><span class="label">Email:</span> <a href="mailto:${email}">${email}</a></div>
-          ${phone_number ? `<div class="info-row"><span class="label">Phone Number:</span> ${phone_number}</div>` : ""}
+          <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiser_name}</div>
+          <div class="info-row"><span class="label">Contact Name:</span> ${escaped.contact_name}</div>
+          <div class="info-row"><span class="label">Email:</span> <a href="mailto:${escaped.email}">${escaped.email}</a></div>
+          ${phone_number ? `<div class="info-row"><span class="label">Phone Number:</span> ${escaped.phone_number}</div>` : ""}
         </div>
       </div>
       
       <div class="info-section">
         <div class="section-title">Ad Details</div>
         <div class="info-block">
-          <div class="info-row"><span class="label">Ad Name:</span> ${ad_name}</div>
-          <div class="info-row"><span class="label">Post Type:</span> ${post_type}</div>
-          ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${placement}</div>` : ""}
+          <div class="info-row"><span class="label">Ad Name:</span> ${escaped.ad_name}</div>
+          <div class="info-row"><span class="label">Post Type:</span> ${escaped.post_type}</div>
+          ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
         </div>
       </div>
       
       <div class="info-section">
         <div class="section-title">Scheduling</div>
         <div class="info-block">
-          ${post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${post_date_from}</div>` : ""}
-          ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${post_date_to}</div>` : ""}
-          ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${post_time}</div>` : ""}
-          ${reminder_minutes ? `<div class="info-row"><span class="label">Reminder:</span> ${reminder_minutes} minutes before</div>` : ""}
+          ${post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${escaped.post_date_from}</div>` : ""}
+          ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${escaped.post_date_to}</div>` : ""}
+          ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${escaped.post_time}</div>` : ""}
+          ${reminder_minutes ? `<div class="info-row"><span class="label">Reminder:</span> ${escaped.reminder_minutes} minutes before</div>` : ""}
           ${
-            custom_dates && custom_dates.length > 0
+            safeCustomDates.length > 0
               ? `
             <div class="info-row">
               <span class="label">Custom Dates:</span>
               <ul style="margin: 5px 0;">
-                ${custom_dates.map((date) => `<li>${date}</li>`).join("")}
+                ${safeCustomDates.map((date) => `<li>${date}</li>`).join("")}
               </ul>
             </div>
           `
@@ -267,7 +399,7 @@ export async function POST(request) {
         <div class="info-section">
           <div class="section-title">Ad Content</div>
           <div class="info-block">
-            <p style="margin: 0; white-space: pre-wrap;">${ad_text}</p>
+            <p style="margin: 0; white-space: pre-wrap;">${escaped.ad_text}</p>
           </div>
         </div>
       `
@@ -275,16 +407,16 @@ export async function POST(request) {
       }
       
       ${
-        media && media.length > 0
+        safeMediaUrls.length > 0
           ? `
         <div class="info-section">
-          <div class="section-title">Media Files (${media.length})</div>
-          ${media
+          <div class="section-title">Media Files (${safeMediaUrls.length})</div>
+          ${safeMediaUrls
             .map(
               (url, index) => `
             <div class="media-item">
               <div><strong>File ${index + 1}:</strong></div>
-              <div><a href="${url}" target="_blank">${url}</a></div>
+              <div><a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a></div>
             </div>
           `,
             )
@@ -300,16 +432,22 @@ export async function POST(request) {
         <div class="info-section">
           <div class="section-title">Additional Notes</div>
           <div class="info-block">
-            <p style="margin: 0; white-space: pre-wrap;">${notes}</p>
+            <p style="margin: 0; white-space: pre-wrap;">${escaped.notes}</p>
           </div>
         </div>
       `
           : ""
       }
       
-      <div style="text-align: center; margin-top: 30px;">
-        <a href="${process.env.APP_URL}/pending-submissions" class="button">Review Submission</a>
-      </div>
+      ${
+        reviewSubmissionUrl
+          ? `
+        <div style="text-align: center; margin-top: 30px;">
+          <a href="${escapeHtml(reviewSubmissionUrl)}" class="button">Review Submission</a>
+        </div>
+      `
+          : ""
+      }
     </div>
     
     <div class="footer">
@@ -323,8 +461,8 @@ export async function POST(request) {
     // Send confirmation to advertiser
     try {
       await sendEmail({
-        to: email,
-        subject: `Ad Submission Received - ${ad_name}`,
+        to: normalizedEmail,
+        subject: `Ad Submission Received - ${safeSubjectAdName}`,
         html: advertiserEmailHTML,
       });
       console.log("[submit-ad] Confirmation email sent to advertiser");
@@ -338,7 +476,7 @@ export async function POST(request) {
       try {
         await sendEmail({
           to: adminEmails,
-          subject: `New Ad Submission - ${ad_name} from ${advertiser_name}`,
+          subject: `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
           html: adminEmailHTML,
         });
         console.log("[submit-ad] Notification sent to admins:", adminEmails);

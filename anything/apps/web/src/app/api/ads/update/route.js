@@ -1,4 +1,5 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 const recalcInvoiceStatus = async (supabase, invoiceId) => {
@@ -20,10 +21,11 @@ const recalcInvoiceStatus = async (supabase, invoiceId) => {
   if (itemsError) throw itemsError;
 
   if (!items || items.length === 0) {
-    await supabase
+    const { error: resetInvoiceError } = await supabase
       .from(table("invoices"))
       .update({ amount_paid: 0, status: "Pending", updated_at: new Date().toISOString() })
       .eq("id", invoiceId);
+    if (resetInvoiceError) throw resetInvoiceError;
     return;
   }
 
@@ -56,7 +58,7 @@ const recalcInvoiceStatus = async (supabase, invoiceId) => {
     nextStatus = "Partial";
   }
 
-  await supabase
+  const { error: statusUpdateError } = await supabase
     .from(table("invoices"))
     .update({
       amount_paid: paidAmount,
@@ -64,10 +66,16 @@ const recalcInvoiceStatus = async (supabase, invoiceId) => {
       updated_at: new Date().toISOString(),
     })
     .eq("id", invoiceId);
+  if (statusUpdateError) throw statusUpdateError;
 };
 
 export async function PUT(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
 
@@ -112,7 +120,11 @@ export async function PUT(request) {
       custom_dates !== undefined;
 
     if (timeFieldsUpdated) {
-      await supabase.from(table("sent_reminders")).delete().eq("ad_id", id);
+      const { error: reminderDeleteError } = await supabase
+        .from(table("sent_reminders"))
+        .delete()
+        .eq("ad_id", id);
+      if (reminderDeleteError) throw reminderDeleteError;
     }
 
     const patch = {
@@ -168,15 +180,17 @@ export async function PUT(request) {
 
     if (payment !== undefined) {
       if (String(payment).toLowerCase() === "paid") {
-        await supabase
+        const { error: markPaidError } = await supabase
           .from(table("ads"))
           .update({ paid_via_invoice_id: linkedInvoiceId || null })
           .eq("id", id);
+        if (markPaidError) throw markPaidError;
       } else if (oldAd.payment && String(oldAd.payment).toLowerCase() === "paid") {
-        await supabase
+        const { error: clearPaidError } = await supabase
           .from(table("ads"))
           .update({ paid_via_invoice_id: null })
           .eq("id", id);
+        if (clearPaidError) throw clearPaidError;
       }
 
       if (linkedInvoiceId) {
@@ -197,10 +211,8 @@ export async function PUT(request) {
     return Response.json(
       {
         error: "Failed to update ad",
-        details: error.message,
       },
       { status: 500 },
     );
   }
 }
-

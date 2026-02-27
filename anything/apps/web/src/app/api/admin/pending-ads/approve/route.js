@@ -1,8 +1,14 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const {
@@ -140,7 +146,11 @@ export async function POST(request) {
     if (createAdError) throw createAdError;
 
     await updateAdvertiserNextAdDate(advertiserName);
-    await supabase.from(table("pending_ads")).delete().eq("id", pending_ad_id);
+    const { error: cleanupError } = await supabase
+      .from(table("pending_ads"))
+      .delete()
+      .eq("id", pending_ad_id);
+    if (cleanupError) throw cleanupError;
 
     return Response.json({
       success: true,
@@ -149,9 +159,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error approving ad:", error);
-    return Response.json(
-      { error: `Failed to approve ad: ${error.message}` },
-      { status: 500 },
-    );
+    return Response.json({ error: "Failed to approve ad" }, { status: 500 });
   }
 }

@@ -1,8 +1,14 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { parsePaymentAmount } from "@/app/api/utils/invoice-helpers";
 
 export async function GET() {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
 
     const { data: invoices, error: invoicesError } = await supabase
@@ -118,4 +124,3 @@ export async function GET() {
     );
   }
 }
-

@@ -1,8 +1,14 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 // PUT - Update product
 export async function PUT(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
     const body = await request.json();
@@ -74,13 +80,14 @@ export async function PUT(request, { params }) {
 
         for (const item of itemsToUpdate || []) {
           const quantity = Number(item.quantity) || 1;
-          await supabase
+          const { error: itemUpdateError } = await supabase
             .from(table("invoice_items"))
             .update({
               unit_price: newPrice,
               amount: quantity * newPrice,
             })
             .eq("id", item.id);
+          if (itemUpdateError) throw itemUpdateError;
         }
       }
     }
@@ -129,6 +136,11 @@ export async function PUT(request, { params }) {
 // DELETE - Delete product
 export async function DELETE(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
     const { searchParams } = new URL(request.url);

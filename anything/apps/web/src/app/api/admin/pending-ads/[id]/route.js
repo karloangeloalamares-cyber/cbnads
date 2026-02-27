@@ -1,7 +1,13 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 export async function PUT(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
     const body = await request.json();
@@ -68,6 +74,11 @@ export async function PUT(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { id } = params;
 
@@ -98,4 +109,3 @@ export async function DELETE(request, { params }) {
     return Response.json({ error: "Failed to delete ad" }, { status: 500 });
   }
 }
-

@@ -1,4 +1,5 @@
 import { db, table, toNumber } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { adAmount, nextSequentialInvoiceNumber } from "@/app/api/utils/invoice-helpers";
 
 const inRange = (value, from, to) => {
@@ -8,6 +9,11 @@ const inRange = (value, from, to) => {
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const { advertiserId, period, startDate, endDate } = await request.json();
 
     if (!["weekly", "monthly", "quarterly"].includes(period)) {
@@ -152,4 +158,3 @@ export async function POST(request) {
     );
   }
 }
-

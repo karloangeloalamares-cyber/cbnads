@@ -1,7 +1,13 @@
 import { db, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const { pending_ad_id } = body;
@@ -26,4 +32,3 @@ export async function POST(request) {
     return Response.json({ error: "Failed to reject ad" }, { status: 500 });
   }
 }
-

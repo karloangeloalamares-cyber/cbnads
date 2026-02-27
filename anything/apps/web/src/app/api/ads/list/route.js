@@ -1,9 +1,15 @@
 import { dateOnly, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 
 const adPrimaryDate = (ad) => dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
 
 export async function GET(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
@@ -114,4 +120,3 @@ export async function GET(request) {
     return Response.json({ error: "Failed to fetch ads" }, { status: 500 });
   }
 }
-

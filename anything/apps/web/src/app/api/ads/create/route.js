@@ -1,10 +1,16 @@
 import { dateOnly, db, normalizePostType, table } from "@/app/api/utils/supabase-db";
+import { requireAdmin } from "@/app/api/utils/auth-check";
 import { updateAdvertiserNextAdDate } from "@/app/api/utils/update-advertiser-next-ad";
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 
 export async function POST(request) {
   try {
+    const admin = await requireAdmin();
+    if (!admin.authorized) {
+      return Response.json({ error: admin.error }, { status: 401 });
+    }
+
     const supabase = db();
     const body = await request.json();
     const {
@@ -131,4 +137,3 @@ export async function POST(request) {
     return Response.json({ error: "Failed to create ad" }, { status: 500 });
   }
 }
-

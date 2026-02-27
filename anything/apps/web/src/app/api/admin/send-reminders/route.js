@@ -471,7 +471,7 @@ export async function POST(request) {
   } catch (err) {
     console.error("POST /api/admin/send-reminders error", err);
     return Response.json(
-      { error: "Internal Server Error", details: err.message },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }
