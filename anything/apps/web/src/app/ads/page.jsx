@@ -1706,14 +1706,27 @@ export default function AdsPage() {
   const [settingsSyncError, setSettingsSyncError] = useState("");
 
   useEffect(() => {
-    ensureDb();
+    let cancelled = false;
     const sync = () => {
+      if (cancelled) {
+        return;
+      }
       setDb(readDb());
       setUser(getSignedInUser());
       setReady(true);
     };
-    sync();
-    return subscribeDb(sync);
+
+    const initialize = async () => {
+      await ensureDb();
+      sync();
+    };
+
+    void initialize();
+    const unsubscribe = subscribeDb(sync);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -2658,9 +2671,9 @@ export default function AdsPage() {
 
   const reconciliation = useMemo(() => getReconciliationReport(), [db]);
 
-  const run = (fn, successText) => {
+  const run = async (fn, successText) => {
     try {
-      fn();
+      await fn();
       setDb(readDb());
       setMessage(successText);
       window.setTimeout(() => setMessage(""), 1800);
@@ -2717,7 +2730,7 @@ export default function AdsPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleSettingsProfileSave = (event) => {
+  const handleSettingsProfileSave = async (event) => {
     event.preventDefault();
     if (!user) {
       return;
@@ -2726,7 +2739,7 @@ export default function AdsPage() {
     setSettingsProfileSaving(true);
     setSettingsProfileMessage(null);
     try {
-      const updated = updateCurrentUser({
+      const updated = await updateCurrentUser({
         name: settingsProfileName.trim() || user.name || "User",
         image: settingsProfileImage || "",
       });
@@ -2749,7 +2762,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsAddMember = (event) => {
+  const handleSettingsAddMember = async (event) => {
     event.preventDefault();
     const name = settingsTeamName.trim();
     const email = settingsTeamEmail.trim().toLowerCase();
@@ -2768,7 +2781,7 @@ export default function AdsPage() {
     setSettingsTeamError("");
 
     try {
-      updateDb((currentDb) => {
+      await updateDb((currentDb) => {
         if (
           (currentDb.users || []).some(
             (item) => String(item.email || "").toLowerCase() === email,
@@ -2827,7 +2840,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsRemoveMember = (member) => {
+  const handleSettingsRemoveMember = async (member) => {
     const memberEmail = String(member.email || "").toLowerCase();
     if (memberEmail && memberEmail === String(user?.email || "").toLowerCase()) {
       setSettingsTeamError("You cannot remove the currently signed-in account.");
@@ -2839,7 +2852,7 @@ export default function AdsPage() {
     }
 
     try {
-      updateDb((currentDb) => {
+      await updateDb((currentDb) => {
         currentDb.team_members = (currentDb.team_members || []).filter(
           (item) => item.id !== member.id,
         );
@@ -2857,11 +2870,11 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsSaveNotifications = () => {
+  const handleSettingsSaveNotifications = async () => {
     setSettingsNotificationSaving(true);
     setSettingsNotificationMessage(null);
     try {
-      saveNotificationPreferences({
+      await saveNotificationPreferences({
         ...settingsNotification,
         reminder_email: settingsNotification.email_address,
       });
@@ -2991,7 +3004,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsSaveScheduling = () => {
+  const handleSettingsSaveScheduling = async () => {
     const parsed = Number(settingsMaxAdsPerDay);
     if (!Number.isFinite(parsed) || parsed < 1) {
       setSettingsSchedulingError("Maximum ads per day must be at least 1");
@@ -3003,7 +3016,7 @@ export default function AdsPage() {
     setSettingsSchedulingSuccess(false);
 
     try {
-      saveAdminSettings({
+      await saveAdminSettings({
         max_ads_per_day: Math.floor(parsed),
         max_ads_per_slot: Math.floor(parsed),
       });
@@ -3019,7 +3032,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsSyncAdvertiserSpending = () => {
+  const handleSettingsSyncAdvertiserSpending = async () => {
     setSettingsSyncing(true);
     setSettingsSyncError("");
     setSettingsSyncResult(null);
@@ -3040,7 +3053,7 @@ export default function AdsPage() {
         totalsByAdvertiser.set(advertiserId, total);
       }
 
-      updateDb((currentDb) => {
+      await updateDb((currentDb) => {
         const now = new Date().toISOString();
         currentDb.advertisers = (currentDb.advertisers || []).map((advertiser) => {
           const total = Number(totalsByAdvertiser.get(advertiser.id) || 0).toFixed(2);
@@ -3132,8 +3145,8 @@ export default function AdsPage() {
   };
 
   const markInvoiceAsPaid = (item) =>
-    run(() => {
-      upsertInvoice({
+    run(async () => {
+      await upsertInvoice({
         ...item,
         status: "Paid",
         ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
@@ -3147,8 +3160,8 @@ export default function AdsPage() {
     }, "Invoice marked as paid.");
 
   const deleteInvoiceRecord = (invoiceId) =>
-    run(() => {
-      deleteInvoice(invoiceId);
+    run(async () => {
+      await deleteInvoice(invoiceId);
       setOpenInvoiceMenuId(null);
       if (invoicePreviewModal?.id === invoiceId) {
         setInvoicePreviewModal(null);
@@ -3156,14 +3169,14 @@ export default function AdsPage() {
     }, "Invoice deleted.");
 
   const saveInvoiceForm = () =>
-    run(() => {
+    run(async () => {
       if (!invoice.advertiser_id) {
         throw new Error("Advertiser required");
       }
       if (!String(invoice.amount || "").trim()) {
         throw new Error("Amount required");
       }
-      upsertInvoice({
+      await upsertInvoice({
         ...invoice,
         status: normalizeInvoiceStatus(invoice.status),
       });
@@ -3241,7 +3254,7 @@ export default function AdsPage() {
   };
 
   const saveCreateAd = (mode = "save") =>
-    run(() => {
+    run(async () => {
       if (!String(ad.ad_name || "").trim()) {
         throw new Error("Ad title is required");
       }
@@ -3278,7 +3291,7 @@ export default function AdsPage() {
         payload.post_date = payload.post_date || "";
       }
 
-      upsertAd(payload);
+      await upsertAd(payload);
 
       if (mode === "continue") {
         setInvoice({
@@ -3439,7 +3452,7 @@ export default function AdsPage() {
     setOpenAdvertiserMenuId(null);
   };
 
-  const saveAdvertiserModal = () => {
+  const saveAdvertiserModal = async () => {
     if (!advertiserEditModal) {
       return;
     }
@@ -3450,7 +3463,7 @@ export default function AdsPage() {
         throw new Error("Advertiser name required");
       }
 
-      upsertAdvertiser({
+      await upsertAdvertiser({
         ...advertiserEditModal,
         phone:
           String(advertiserEditModal.phone_number || advertiserEditModal.phone || "").trim(),
@@ -3467,13 +3480,13 @@ export default function AdsPage() {
     }
   };
 
-  const confirmAdvertiserDelete = () => {
+  const confirmAdvertiserDelete = async () => {
     if (!advertiserDeleteModal) {
       return;
     }
     setAdvertiserActionLoading(true);
     try {
-      deleteAdvertiser(advertiserDeleteModal.id);
+      await deleteAdvertiser(advertiserDeleteModal.id);
       setDb(readDb());
       setMessage("Advertiser deleted.");
       window.setTimeout(() => setMessage(""), 1800);
@@ -3486,7 +3499,7 @@ export default function AdsPage() {
     }
   };
 
-  const saveNewAdvertiser = (type) => {
+  const saveNewAdvertiser = async (type) => {
     if (type === "cancel") {
       setAdvertiserCreateOpen(false);
       return;
@@ -3501,7 +3514,7 @@ export default function AdsPage() {
         throw new Error("Contact name required");
       }
 
-      upsertAdvertiser({
+      await upsertAdvertiser({
         ...advertiserCreateForm,
         phone: String(advertiserCreateForm.phone_number || "").trim(),
         phone_number: String(advertiserCreateForm.phone_number || "").trim(),
@@ -3537,7 +3550,7 @@ export default function AdsPage() {
     setProductCreateOpen(true);
   };
 
-  const saveNewProduct = (type) => {
+  const saveNewProduct = async (type) => {
     if (type === "cancel") {
       setProductCreateOpen(false);
       setProduct(blankProduct);
@@ -3553,7 +3566,7 @@ export default function AdsPage() {
         throw new Error("Price required");
       }
 
-      upsertProduct({
+      await upsertProduct({
         ...product,
         placement: String(product.placement || "WhatsApp").trim() || "WhatsApp",
       });
@@ -3579,7 +3592,7 @@ export default function AdsPage() {
     setOpenProductMenuId(null);
   };
 
-  const saveProductModal = () => {
+  const saveProductModal = async () => {
     if (!productEditModal) {
       return;
     }
@@ -3593,7 +3606,7 @@ export default function AdsPage() {
         throw new Error("Price required");
       }
 
-      upsertProduct({
+      await upsertProduct({
         ...productEditModal,
         placement:
           String(productEditModal.placement || "WhatsApp").trim() || "WhatsApp",
@@ -3615,14 +3628,14 @@ export default function AdsPage() {
     setOpenProductMenuId(null);
   };
 
-  const confirmProductDelete = () => {
+  const confirmProductDelete = async () => {
     if (!productDeleteModal) {
       return;
     }
 
     setProductActionLoading(true);
     try {
-      deleteProduct(productDeleteModal.id);
+      await deleteProduct(productDeleteModal.id);
       setDb(readDb());
       setMessage("Product deleted.");
       window.setTimeout(() => setMessage(""), 1800);

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Debugger Workflow"
+  short_description: "Run structured root-cause debugging workflows"
+  default_prompt: "Debug this issue end-to-end. Give reproduction steps, root cause, minimal fix, verification, and residual risk."

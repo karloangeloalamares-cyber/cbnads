@@ -1,0 +1,4 @@
+interface:
+  display_name: "UX/UI Audit"
+  short_description: "Run detailed UX and visual parity audits"
+  default_prompt: "Audit this page for design parity and UX quality. Return severity-ranked findings with exact fixes and validation notes."

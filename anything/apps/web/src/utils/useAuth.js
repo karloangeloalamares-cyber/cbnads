@@ -3,7 +3,7 @@ import { signIn, signOut } from '@/lib/localAuth';
 
 function useAuth() {
   const signInWithCredentials = useCallback(async (options) => {
-    const result = signIn({
+    const result = await signIn({
       email: options?.email,
       password: options?.password,
     });

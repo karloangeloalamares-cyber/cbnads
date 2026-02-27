@@ -6,14 +6,14 @@ const useUser = () => {
   const [loading, setLoading] = React.useState(true);
   const [user, setUser] = React.useState(null);
 
-  const refetch = React.useCallback(() => {
-    ensureDb();
+  const refetch = React.useCallback(async () => {
+    await ensureDb();
     setUser(getSignedInUser());
     setLoading(false);
   }, []);
 
   React.useEffect(() => {
-    refetch();
+    void refetch();
     const unsubscribe = subscribeDb(() => {
       setUser(getSignedInUser());
     });

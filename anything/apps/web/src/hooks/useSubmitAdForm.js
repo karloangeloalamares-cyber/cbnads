@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { readDb, submitPendingAd } from "@/lib/localDb";
+import { useEffect, useState } from "react";
+import { ensureDb, readDb, submitPendingAd } from "@/lib/localDb";
 
 const initialFormData = {
   advertiser_name: "",
@@ -289,6 +289,10 @@ export function useSubmitAdForm() {
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
 
+  useEffect(() => {
+    void ensureDb();
+  }, []);
+
   const validatePastDateTime = (nextData) => {
     const type = normalizePostType(nextData.post_type);
 
@@ -397,6 +401,7 @@ export function useSubmitAdForm() {
     setFullyBookedDates([]);
 
     try {
+      await ensureDb();
       const result = getAvailabilityResult(formData);
       setAvailabilityError(result.availabilityError);
       setFullyBookedDates(result.fullyBookedDates);
@@ -472,6 +477,7 @@ export function useSubmitAdForm() {
     setLoading(true);
 
     try {
+      await ensureDb();
       if (!validateForm()) {
         return;
       }
@@ -491,7 +497,7 @@ export function useSubmitAdForm() {
       const primaryDate = getPrimaryPostDate(formData);
       const normalizedTime = normalizeTime(formData.post_time);
 
-      submitPendingAd({
+      await submitPendingAd({
         advertiser_name: formData.advertiser_name,
         contact_name: formData.contact_name,
         email: formData.email,

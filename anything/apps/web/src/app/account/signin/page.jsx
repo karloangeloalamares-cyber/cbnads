@@ -14,18 +14,25 @@ export default function SignInPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    ensureDb();
-    if (getSignedInUser()) {
-      window.location.href = "/ads";
-    }
+    let cancelled = false;
+    const initialize = async () => {
+      await ensureDb();
+      if (!cancelled && getSignedInUser()) {
+        window.location.href = "/ads";
+      }
+    };
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);
     setError("");
 
-    const result = signIn({ email, password });
+    const result = await signIn({ email, password });
     if (!result.ok) {
       setError(result.error || "Sign in failed.");
       setLoading(false);
@@ -45,7 +52,7 @@ export default function SignInPage() {
             className="mx-auto mb-4 h-16 w-auto"
           />
           <h1 className="text-2xl font-bold text-gray-900">Sign In</h1>
-          <p className="mt-2 text-sm text-gray-600">Local mode with browser storage only.</p>
+          <p className="mt-2 text-sm text-gray-600">Sign in to manage CBN Ads.</p>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>

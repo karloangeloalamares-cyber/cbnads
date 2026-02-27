@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getSignedInUser } from "@/lib/localAuth";
-import { getReconciliationReport, subscribeDb } from "@/lib/localDb";
+import { ensureDb, getReconciliationReport, subscribeDb } from "@/lib/localDb";
 
 export default function ReconciliationPage() {
   const [report, setReport] = useState(() => getReconciliationReport());
@@ -10,13 +10,27 @@ export default function ReconciliationPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
+      if (cancelled) {
+        return;
+      }
       setReport(getReconciliationReport());
       setUser(getSignedInUser());
       setReady(true);
     };
-    sync();
-    return subscribeDb(sync);
+
+    const initialize = async () => {
+      await ensureDb();
+      sync();
+    };
+
+    void initialize();
+    const unsubscribe = subscribeDb(sync);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {

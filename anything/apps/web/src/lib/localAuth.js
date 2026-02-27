@@ -27,7 +27,7 @@ const sanitizeUser = (user) => {
 };
 
 export const getSignedInUser = () => {
-  ensureDb();
+  void ensureDb();
   const userId = getSessionUserId();
   if (!userId) {
     return null;
@@ -37,8 +37,8 @@ export const getSignedInUser = () => {
   return sanitizeUser(user);
 };
 
-export const signIn = ({ email, password }) => {
-  ensureDb();
+export const signIn = async ({ email, password }) => {
+  await ensureDb();
   const db = readDb();
   const normalizedEmail = (email || '').trim().toLowerCase();
   const user = db.users.find(
@@ -63,14 +63,14 @@ export const signOut = () => {
   clearSession();
 };
 
-export const updateCurrentUser = (updates) => {
+export const updateCurrentUser = async (updates) => {
   const current = getSignedInUser();
   if (!current) {
     return null;
   }
 
   let updated = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     db.users = db.users.map((user) => {
       if (user.id !== current.id) {
         return user;

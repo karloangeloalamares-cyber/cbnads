@@ -1,10 +1,15 @@
 import { withNamespace } from '@/lib/appNamespace';
+import { getSupabaseClient, hasSupabaseConfig, tableName } from '@/lib/supabase';
 
 const DB_KEY = withNamespace('local.db.v1');
 const SESSION_KEY = withNamespace('local.session.v1');
+const LOCAL_USERS_KEY = withNamespace('local.users.v1');
+
 const LEGACY_DB_KEY = 'cbnads.local.db.v1';
 const LEGACY_SESSION_KEY = 'cbnads.local.session.v1';
-const DB_VERSION = 1;
+const LEGACY_LOCAL_USERS_KEY = 'cbnads.local.users.v1';
+
+const DB_VERSION = 3;
 
 const REQUIRED_LOCAL_USERS = [
   {
@@ -28,17 +33,20 @@ const REQUIRED_LOCAL_USERS = [
 const LEGACY_TEST_USER_EMAILS = new Set(['admin@cbnads.local']);
 
 const nowIso = () => new Date().toISOString();
+
 const clone = (value) => JSON.parse(JSON.stringify(value));
+
 const numberOrZero = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export const createId = (prefix) =>
-  `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
+const isBrowser = () => typeof window !== 'undefined';
+
+const canUseSupabase = () => isBrowser() && hasSupabaseConfig;
 
 const storage = () => {
-  if (typeof window === 'undefined') {
+  if (!isBrowser()) {
     return null;
   }
   return window.localStorage;
@@ -50,37 +58,133 @@ const migrateLegacyKey = (s, primaryKey, legacyKey) => {
   if (!s || s.getItem(primaryKey)) {
     return;
   }
-
   const legacyValue = s.getItem(legacyKey);
   if (legacyValue) {
     s.setItem(primaryKey, legacyValue);
   }
 };
 
-const baseDb = () => {
-  const now = nowIso();
-  return {
-    version: DB_VERSION,
-    users: REQUIRED_LOCAL_USERS.map((user) => ({
-      ...user,
-      created_at: now,
-      updated_at: now,
-    })),
-    advertisers: [],
-    products: [],
-    ads: [],
-    pending_ads: [],
-    invoices: [],
-    admin_settings: {
-      max_ads_per_slot: 2,
-      default_post_time: '09:00',
-    },
-    notification_preferences: {
-      email_enabled: false,
-      reminder_email: '',
-    },
-    team_members: [],
-  };
+const parseJson = (raw, fallback) => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+};
+
+const createUuid = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  const randomHex = `${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`
+    .padEnd(32, '0')
+    .slice(0, 32);
+
+  return `${randomHex.slice(0, 8)}-${randomHex.slice(8, 12)}-4${randomHex.slice(
+    13,
+    16,
+  )}-8${randomHex.slice(17, 20)}-${randomHex.slice(20, 32)}`;
+};
+
+export const createId = () => createUuid();
+
+const toDateOnly = (value) => {
+  if (!value) {
+    return '';
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return '';
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.valueOf())) {
+    return '';
+  }
+  return parsed.toISOString().slice(0, 10);
+};
+
+const toDateColumn = (value) => {
+  const date = toDateOnly(value);
+  return date || null;
+};
+
+const toTimeOnly = (value) => {
+  if (!value) {
+    return '';
+  }
+  const text = String(value).trim();
+  if (!text) {
+    return '';
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) {
+    return text.slice(0, 5);
+  }
+  if (/^\d{2}:\d{2}$/.test(text)) {
+    return text;
+  }
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (!Number.isNaN(parsed.valueOf())) {
+    return parsed.toISOString().slice(11, 16);
+  }
+  return text.slice(0, 5);
+};
+
+const toTimeColumn = (value) => {
+  const timeOnly = toTimeOnly(value);
+  if (!timeOnly) {
+    return null;
+  }
+  if (/^\d{2}:\d{2}$/.test(timeOnly)) {
+    return `${timeOnly}:00`;
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(timeOnly)) {
+    return timeOnly;
+  }
+  return null;
+};
+
+const normalizePostType = (value) => {
+  const text = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_');
+  if (text === 'one_time_post' || text === 'one_time') {
+    return 'one_time';
+  }
+  if (text === 'daily' || text === 'daily_run') {
+    return 'daily_run';
+  }
+  if (text === 'custom' || text === 'custom_schedule') {
+    return 'custom_schedule';
+  }
+  return text || 'one_time';
+};
+
+const toMoney = (value) => numberOrZero(value).toFixed(2);
+
+const toArray = (value) => (Array.isArray(value) ? value : []);
+
+const isMissingRelationError = (error) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === '42P01' || code === 'PGRST205' || /does not exist/i.test(message);
+};
+
+const isMissingColumnError = (error) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === '42703' || /column .* does not exist/i.test(message);
+};
+
+const throwIfSupabaseError = (label, error) => {
+  if (!error) {
+    return;
+  }
+  throw new Error(`${label}: ${error.message || 'Unknown Supabase error'}`);
 };
 
 const normalizeUsers = (rawUsers) => {
@@ -136,15 +240,94 @@ const normalizeUsers = (rawUsers) => {
   return deduped;
 };
 
+const baseDb = (users = REQUIRED_LOCAL_USERS) => {
+  const now = nowIso();
+  return {
+    version: DB_VERSION,
+    users: normalizeUsers(users).map((user) => ({
+      ...user,
+      created_at: user.created_at || now,
+      updated_at: user.updated_at || now,
+    })),
+    advertisers: [],
+    products: [],
+    ads: [],
+    pending_ads: [],
+    invoices: [],
+    admin_settings: {
+      max_ads_per_slot: 2,
+      max_ads_per_day: 5,
+      default_post_time: '09:00',
+    },
+    notification_preferences: {
+      email_enabled: false,
+      sms_enabled: false,
+      reminder_time_value: 1,
+      reminder_time_unit: 'hours',
+      email_address: '',
+      phone_number: '',
+      sound_enabled: true,
+      reminder_email: '',
+    },
+    team_members: [],
+  };
+};
+
+const readLegacyUsersFromDbStorage = () => {
+  const s = storage();
+  if (!s) {
+    return [];
+  }
+  const raw = readStorageKey(s, DB_KEY, LEGACY_DB_KEY);
+  if (!raw) {
+    return [];
+  }
+  const parsed = parseJson(raw, null);
+  if (!parsed || typeof parsed !== 'object') {
+    return [];
+  }
+  return Array.isArray(parsed.users) ? parsed.users : [];
+};
+
+const readLocalUsers = () => {
+  const s = storage();
+  if (!s) {
+    return normalizeUsers([]);
+  }
+
+  migrateLegacyKey(s, LOCAL_USERS_KEY, LEGACY_LOCAL_USERS_KEY);
+  const rawUsers = readStorageKey(s, LOCAL_USERS_KEY, LEGACY_LOCAL_USERS_KEY);
+  if (rawUsers) {
+    const parsed = parseJson(rawUsers, []);
+    return normalizeUsers(parsed);
+  }
+
+  const fallbackUsers = readLegacyUsersFromDbStorage();
+  const normalized = normalizeUsers(fallbackUsers);
+  s.setItem(LOCAL_USERS_KEY, JSON.stringify(normalized));
+  return normalized;
+};
+
+const persistLocalUsers = (users) => {
+  const s = storage();
+  if (!s) {
+    return;
+  }
+  const normalized = normalizeUsers(users);
+  s.setItem(LOCAL_USERS_KEY, JSON.stringify(normalized));
+  s.removeItem(LEGACY_LOCAL_USERS_KEY);
+};
+
 const normalizeDb = (rawValue) => {
-  const seed = baseDb();
+  const fallbackUsers = readLocalUsers();
+  const seed = baseDb(fallbackUsers);
   const raw = rawValue && typeof rawValue === 'object' ? rawValue : {};
 
   return {
     ...seed,
     ...raw,
     version: DB_VERSION,
-    users: normalizeUsers(raw.users),
+    users: normalizeUsers(raw.users ?? fallbackUsers),
     advertisers: Array.isArray(raw.advertisers) ? raw.advertisers : [],
     products: Array.isArray(raw.products) ? raw.products : [],
     ads: Array.isArray(raw.ads) ? raw.ads : [],
@@ -162,25 +345,8 @@ const normalizeDb = (rawValue) => {
   };
 };
 
-const readRawDb = () => {
-  const s = storage();
-  if (!s) {
-    return normalizeDb(baseDb());
-  }
-
-  const raw = readStorageKey(s, DB_KEY, LEGACY_DB_KEY);
-  if (!raw) {
-    return normalizeDb(baseDb());
-  }
-
-  try {
-    return normalizeDb(JSON.parse(raw));
-  } catch {
-    return normalizeDb(baseDb());
-  }
-};
-
-const refreshDerivedFields = (db) => {
+const refreshDerivedFields = (inputDb) => {
+  const db = normalizeDb(inputDb);
   const today = new Date();
   const spendByAdvertiser = new Map();
   const nextDateByAdvertiser = new Map();
@@ -191,13 +357,14 @@ const refreshDerivedFields = (db) => {
       continue;
     }
 
-    if (ad.payment === 'Paid') {
+    if (String(ad.payment || '').toLowerCase() === 'paid') {
       const nextSpend = (spendByAdvertiser.get(advertiserId) ?? 0) + numberOrZero(ad.price);
       spendByAdvertiser.set(advertiserId, nextSpend);
     }
 
-    if (ad.post_date) {
-      const postDate = new Date(ad.post_date);
+    const candidateDate = ad.post_date || ad.schedule || ad.post_date_from;
+    if (candidateDate) {
+      const postDate = new Date(candidateDate);
       if (!Number.isNaN(postDate.valueOf()) && postDate >= today) {
         const current = nextDateByAdvertiser.get(advertiserId);
         if (!current || postDate < current) {
@@ -214,64 +381,638 @@ const refreshDerivedFields = (db) => {
       ...advertiser,
       ad_spend: spend,
       total_spend: spend,
-      next_ad_date: nextDate ? nextDate.toISOString().slice(0, 10) : '',
+      next_ad_date: nextDate ? nextDate.toISOString().slice(0, 10) : advertiser.next_ad_date || '',
     };
   });
 
   return db;
 };
 
-const writeRawDb = (value) => {
-  const normalized = refreshDerivedFields(normalizeDb(value));
-  const s = storage();
-  if (s) {
-    s.setItem(DB_KEY, JSON.stringify(normalized));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cbn:db-changed'));
-    }
+const emitDbChanged = () => {
+  if (!isBrowser()) {
+    return;
   }
-  return clone(normalized);
+  window.dispatchEvent(new CustomEvent('cbn:db-changed'));
 };
 
-export const ensureDb = () => {
+const persistDbSnapshot = (db) => {
   const s = storage();
-  const current = readRawDb();
   if (!s) {
-    return clone(current);
+    return;
+  }
+  s.setItem(DB_KEY, JSON.stringify(db));
+  s.removeItem(LEGACY_DB_KEY);
+};
+
+const readLegacyDbFromStorage = () => {
+  const s = storage();
+  const fallback = normalizeDb(baseDb());
+  if (!s) {
+    return fallback;
   }
 
   migrateLegacyKey(s, DB_KEY, LEGACY_DB_KEY);
-  migrateLegacyKey(s, SESSION_KEY, LEGACY_SESSION_KEY);
-
-  if (!s.getItem(DB_KEY)) {
-    writeRawDb(current);
+  const raw = readStorageKey(s, DB_KEY, LEGACY_DB_KEY);
+  if (!raw) {
+    return fallback;
   }
-  return clone(readRawDb());
+  const parsed = parseJson(raw, fallback);
+  return refreshDerivedFields(normalizeDb(parsed));
 };
 
-export const readDb = () => clone(readRawDb());
+const writeLegacyDbToStorage = (value) => {
+  const normalized = refreshDerivedFields(normalizeDb(value));
+  persistDbSnapshot(normalized);
+  persistLocalUsers(normalized.users);
+  dbCache = normalized;
+  emitDbChanged();
+  return clone(dbCache);
+};
 
-export const writeDb = (value) => writeRawDb(value);
+const fromAdvertiserRow = (row) => ({
+  id: row.id,
+  advertiser_name: row.advertiser_name || '',
+  contact_name: row.contact_name || '',
+  email: row.email || '',
+  phone: row.phone ?? row.phone_number ?? '',
+  phone_number: row.phone_number ?? row.phone ?? '',
+  business_name: row.business_name || '',
+  status: row.status || 'active',
+  ad_spend: toMoney(row.ad_spend ?? row.total_spend),
+  total_spend: toMoney(row.total_spend ?? row.ad_spend),
+  next_ad_date: toDateOnly(row.next_ad_date),
+  created_at: row.created_at || nowIso(),
+  updated_at: row.updated_at || nowIso(),
+});
 
-export const updateDb = (updater) => {
+const toAdvertiserRow = (input) => ({
+  id: input.id || createId(),
+  advertiser_name: String(input.advertiser_name || '').trim(),
+  contact_name: String(input.contact_name || '').trim(),
+  email: String(input.email || '').trim(),
+  phone: String(input.phone || input.phone_number || '').trim(),
+  phone_number: String(input.phone_number || input.phone || '').trim(),
+  business_name: String(input.business_name || '').trim(),
+  status: String(input.status || 'active'),
+  ad_spend: toMoney(input.ad_spend ?? input.total_spend),
+  total_spend: toMoney(input.total_spend ?? input.ad_spend),
+  next_ad_date: toDateColumn(input.next_ad_date),
+  created_at: input.created_at || nowIso(),
+  updated_at: input.updated_at || nowIso(),
+});
+
+const fromProductRow = (row) => ({
+  id: row.id,
+  product_name: row.product_name || '',
+  placement: row.placement || 'WhatsApp',
+  price: toMoney(row.price),
+  description: row.description || '',
+  created_at: row.created_at || nowIso(),
+  updated_at: row.updated_at || nowIso(),
+});
+
+const toProductRow = (input) => ({
+  id: input.id || createId(),
+  product_name: String(input.product_name || '').trim(),
+  placement: String(input.placement || 'WhatsApp').trim() || 'WhatsApp',
+  price: toMoney(input.price),
+  description: String(input.description || '').trim(),
+  created_at: input.created_at || nowIso(),
+  updated_at: input.updated_at || nowIso(),
+});
+
+const fromAdRow = (row) => {
+  const schedule = toDateOnly(row.schedule || row.post_date || row.post_date_from);
+  return {
+    id: row.id,
+    ad_name: row.ad_name || '',
+    advertiser_id: row.advertiser_id || '',
+    advertiser: row.advertiser || '',
+    product_id: row.product_id || '',
+    product_name: row.product_name || '',
+    post_type: normalizePostType(row.post_type),
+    status: row.status || 'Draft',
+    payment: row.payment || 'Unpaid',
+    post_date: toDateOnly(row.post_date || row.schedule || row.post_date_from),
+    schedule,
+    post_date_from: toDateOnly(row.post_date_from || row.post_date || row.schedule),
+    post_date_to: toDateOnly(row.post_date_to),
+    post_time: toTimeOnly(row.post_time),
+    custom_dates: toArray(row.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+    notes: row.notes || '',
+    ad_text: row.ad_text || '',
+    media: toArray(row.media),
+    media_urls: toArray(row.media_urls),
+    placement: row.placement || '',
+    reminder_minutes: Number(row.reminder_minutes) || 15,
+    price: toMoney(row.price),
+    invoice_id: row.invoice_id || row.paid_via_invoice_id || null,
+    paid_via_invoice_id: row.paid_via_invoice_id || row.invoice_id || null,
+    archived: Boolean(row.archived),
+    published_at: row.published_at || null,
+    published_dates: toArray(row.published_dates),
+    created_at: row.created_at || nowIso(),
+    updated_at: row.updated_at || nowIso(),
+  };
+};
+
+const toAdRow = (input) => {
+  const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
+  const postDateFrom = toDateOnly(input.post_date_from || postDate);
+  return {
+    id: input.id || createId(),
+    ad_name: String(input.ad_name || '').trim(),
+    advertiser_id: input.advertiser_id || null,
+    advertiser: String(input.advertiser || '').trim(),
+    product_id: input.product_id || null,
+    product_name: String(input.product_name || '').trim(),
+    post_type: normalizePostType(input.post_type),
+    status: input.status || 'Draft',
+    payment: input.payment || 'Unpaid',
+    post_date: toDateColumn(postDate),
+    post_date_from: toDateColumn(postDateFrom),
+    post_date_to: toDateColumn(input.post_date_to),
+    post_time: toTimeColumn(input.post_time),
+    custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+    notes: String(input.notes || '').trim(),
+    ad_text: String(input.ad_text || '').trim(),
+    media: toArray(input.media),
+    media_urls: toArray(input.media_urls),
+    placement: String(input.placement || '').trim(),
+    reminder_minutes: Number(input.reminder_minutes) || 15,
+    price: toMoney(input.price),
+    invoice_id: input.invoice_id || null,
+    created_at: input.created_at || nowIso(),
+    updated_at: input.updated_at || nowIso(),
+  };
+};
+
+const fromPendingAdRow = (row) => ({
+  id: row.id,
+  advertiser_name: row.advertiser_name || '',
+  contact_name: row.contact_name || '',
+  email: row.email || '',
+  phone: row.phone || row.phone_number || '',
+  phone_number: row.phone_number || row.phone || '',
+  business_name: row.business_name || '',
+  ad_name: row.ad_name || '',
+  post_type: normalizePostType(row.post_type),
+  post_date: toDateOnly(row.post_date || row.post_date_from),
+  post_date_from: toDateOnly(row.post_date_from || row.post_date),
+  post_date_to: toDateOnly(row.post_date_to),
+  custom_dates: toArray(row.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+  post_time: toTimeOnly(row.post_time),
+  reminder_minutes: Number(row.reminder_minutes) || 15,
+  ad_text: row.ad_text || '',
+  media: toArray(row.media),
+  placement: row.placement || '',
+  notes: row.notes || '',
+  status: row.status || 'pending',
+  viewed_by_admin: Boolean(row.viewed_by_admin),
+  rejected_at: row.rejected_at || null,
+  created_at: row.created_at || nowIso(),
+  updated_at: row.updated_at || nowIso(),
+});
+
+const toPendingAdRow = (input) => ({
+  id: input.id || createId(),
+  advertiser_name: String(input.advertiser_name || '').trim(),
+  contact_name: String(input.contact_name || '').trim(),
+  email: String(input.email || '').trim(),
+  phone: String(input.phone || input.phone_number || '').trim(),
+  phone_number: String(input.phone_number || input.phone || '').trim(),
+  business_name: String(input.business_name || '').trim(),
+  ad_name: String(input.ad_name || '').trim(),
+  post_type: normalizePostType(input.post_type),
+  post_date: toDateColumn(input.post_date || input.post_date_from),
+  post_date_from: toDateColumn(input.post_date_from || input.post_date),
+  post_date_to: toDateColumn(input.post_date_to),
+  custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+  post_time: toTimeColumn(input.post_time),
+  reminder_minutes: Number(input.reminder_minutes) || 15,
+  ad_text: String(input.ad_text || '').trim(),
+  media: toArray(input.media),
+  placement: String(input.placement || '').trim(),
+  notes: String(input.notes || '').trim(),
+  status: input.status || 'pending',
+  created_at: input.created_at || nowIso(),
+  updated_at: input.updated_at || nowIso(),
+});
+
+const fromInvoiceRow = (row) => ({
+  id: row.id,
+  invoice_number: row.invoice_number || '',
+  advertiser_id: row.advertiser_id || '',
+  advertiser_name: row.advertiser_name || '',
+  amount: toMoney(row.amount),
+  due_date: toDateOnly(row.due_date),
+  status: row.status || 'Unpaid',
+  paid_date: toDateOnly(row.paid_date),
+  ad_ids: toArray(row.ad_ids).filter(Boolean),
+  contact_name: row.contact_name || '',
+  contact_email: row.contact_email || '',
+  bill_to: row.bill_to || '',
+  issue_date: toDateOnly(row.issue_date),
+  discount: toMoney(row.discount),
+  tax: toMoney(row.tax),
+  total: toMoney(row.total),
+  notes: row.notes || '',
+  amount_paid: toMoney(row.amount_paid),
+  deleted_at: row.deleted_at || null,
+  is_recurring: Boolean(row.is_recurring),
+  recurring_period: row.recurring_period || '',
+  last_generated_at: row.last_generated_at || null,
+  created_at: row.created_at || nowIso(),
+  updated_at: row.updated_at || nowIso(),
+});
+
+const toInvoiceRow = (input) => ({
+  id: input.id || createId(),
+  invoice_number: String(input.invoice_number || '').trim(),
+  advertiser_id: input.advertiser_id || null,
+  advertiser_name: String(input.advertiser_name || '').trim(),
+  amount: toMoney(input.amount),
+  due_date: toDateColumn(input.due_date),
+  status: input.status || 'Unpaid',
+  paid_date: toDateColumn(input.paid_date),
+  ad_ids: toArray(input.ad_ids).filter(Boolean),
+  created_at: input.created_at || nowIso(),
+  updated_at: input.updated_at || nowIso(),
+});
+
+const fromTeamMemberRow = (row) => ({
+  id: row.id,
+  name: row.name || '',
+  email: row.email || '',
+  role: row.role || 'member',
+  created_at: row.created_at || nowIso(),
+  updated_at: row.updated_at || nowIso(),
+});
+
+const toTeamMemberRow = (input) => ({
+  id: input.id || createId(),
+  name: String(input.name || '').trim(),
+  email: String(input.email || '').trim(),
+  role: String(input.role || 'member'),
+  created_at: input.created_at || nowIso(),
+  updated_at: input.updated_at || nowIso(),
+});
+
+const fromAdminSettingsRow = (row) => ({
+  max_ads_per_slot: Number(row?.max_ads_per_slot) || 2,
+  max_ads_per_day:
+    Number(row?.max_ads_per_day) || Number(row?.max_ads_per_slot) || 5,
+  default_post_time: toTimeOnly(row?.default_post_time || '09:00') || '09:00',
+  created_at: row?.created_at || nowIso(),
+  updated_at: row?.updated_at || nowIso(),
+});
+
+const toAdminSettingsRow = (input) => {
+  const maxAds = Math.max(
+    1,
+    Number(input?.max_ads_per_day || input?.max_ads_per_slot || 5),
+  );
+  return {
+    max_ads_per_slot: maxAds,
+    max_ads_per_day: maxAds,
+    default_post_time: toTimeColumn(input?.default_post_time || '09:00'),
+    updated_at: nowIso(),
+  };
+};
+
+const toAdminSettingsFallbackRow = (input) => {
+  const maxAds = Math.max(
+    1,
+    Number(input?.max_ads_per_day || input?.max_ads_per_slot || 5),
+  );
+  return {
+    max_ads_per_slot: maxAds,
+    default_post_time: toTimeColumn(input?.default_post_time || '09:00'),
+    updated_at: nowIso(),
+  };
+};
+
+const fromNotificationRows = (notificationRow, adminNotificationRow) => ({
+  email_enabled:
+    adminNotificationRow?.email_enabled ?? notificationRow?.email_enabled ?? false,
+  sms_enabled: adminNotificationRow?.sms_enabled ?? false,
+  reminder_time_value: Number(adminNotificationRow?.reminder_time_value) || 1,
+  reminder_time_unit: adminNotificationRow?.reminder_time_unit || 'hours',
+  email_address:
+    adminNotificationRow?.email_address ||
+    notificationRow?.reminder_email ||
+    '',
+  phone_number: adminNotificationRow?.phone_number || '',
+  sound_enabled: adminNotificationRow?.sound_enabled ?? true,
+  reminder_email:
+    notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
+  created_at: notificationRow?.created_at || adminNotificationRow?.created_at || nowIso(),
+  updated_at: notificationRow?.updated_at || adminNotificationRow?.updated_at || nowIso(),
+});
+
+const toNotificationRow = (input) => ({
+  email_enabled: Boolean(input?.email_enabled),
+  reminder_email: String(input?.reminder_email || input?.email_address || ''),
+  updated_at: nowIso(),
+});
+
+const toAdminNotificationRow = (input) => ({
+  email_enabled: Boolean(input?.email_enabled),
+  sms_enabled: Boolean(input?.sms_enabled),
+  reminder_time_value: Math.max(1, Number(input?.reminder_time_value) || 1),
+  reminder_time_unit: String(input?.reminder_time_unit || 'hours'),
+  email_address: String(input?.email_address || input?.reminder_email || ''),
+  phone_number: String(input?.phone_number || ''),
+  sound_enabled: input?.sound_enabled !== false,
+  updated_at: nowIso(),
+});
+
+let dbCache = normalizeDb(baseDb());
+let hasPrimedCache = false;
+let hasLoadedInitialState = false;
+let ensurePromise = null;
+
+const primeCacheFromLocal = () => {
+  if (hasPrimedCache) {
+    return;
+  }
+  hasPrimedCache = true;
+  // Always start from local snapshot to avoid blank UI while remote data hydrates.
+  dbCache = readLegacyDbFromStorage();
+};
+
+const setDbCache = (value, { emit = true } = {}) => {
+  const normalized = refreshDerivedFields(normalizeDb(value));
+  persistDbSnapshot(normalized);
+  persistLocalUsers(normalized.users);
+  dbCache = normalized;
+  if (emit) {
+    emitDbChanged();
+  }
+  return clone(dbCache);
+};
+
+const fetchRows = async (supabase, baseName, { optional = false } = {}) => {
+  const result = await supabase.from(tableName(baseName)).select('*');
+  if (result.error) {
+    if (optional && isMissingRelationError(result.error)) {
+      return [];
+    }
+    throwIfSupabaseError(`select ${baseName}`, result.error);
+  }
+  return result.data || [];
+};
+
+const fetchSingleton = async (supabase, baseName, { optional = false } = {}) => {
+  const result = await supabase.from(tableName(baseName)).select('*').order('id', { ascending: true }).limit(1);
+  if (result.error) {
+    if (optional && isMissingRelationError(result.error)) {
+      return null;
+    }
+    throwIfSupabaseError(`select ${baseName}`, result.error);
+  }
+  return result.data?.[0] || null;
+};
+
+const fetchDbFromSupabase = async () => {
+  const supabase = getSupabaseClient();
+  const [
+    advertiserRows,
+    productRows,
+    adRows,
+    pendingRows,
+    invoiceRows,
+    adminSettingsRow,
+    notificationRow,
+    teamMemberRows,
+    adminNotificationRow,
+  ] = await Promise.all([
+    fetchRows(supabase, 'advertisers'),
+    fetchRows(supabase, 'products'),
+    fetchRows(supabase, 'ads'),
+    fetchRows(supabase, 'pending_ads'),
+    fetchRows(supabase, 'invoices'),
+    fetchSingleton(supabase, 'admin_settings'),
+    fetchSingleton(supabase, 'notification_preferences'),
+    fetchRows(supabase, 'team_members'),
+    fetchSingleton(supabase, 'admin_notification_preferences', { optional: true }),
+  ]);
+
+  const users = readLocalUsers();
+  return refreshDerivedFields(
+    normalizeDb({
+      ...baseDb(users),
+      users,
+      advertisers: advertiserRows.map(fromAdvertiserRow),
+      products: productRows.map(fromProductRow),
+      ads: adRows.map(fromAdRow),
+      pending_ads: pendingRows.map(fromPendingAdRow),
+      invoices: invoiceRows.map(fromInvoiceRow),
+      admin_settings: fromAdminSettingsRow(adminSettingsRow),
+      notification_preferences: fromNotificationRows(notificationRow, adminNotificationRow),
+      team_members: teamMemberRows.map(fromTeamMemberRow),
+    }),
+  );
+};
+
+const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) => {
+  const table = tableName(baseName);
+  const normalizedRows = rows.filter((row) => row && row.id);
+
+  if (normalizedRows.length > 0) {
+    const upsertResult = await supabase.from(table).upsert(normalizedRows, { onConflict: 'id' });
+    if (upsertResult.error) {
+      if (optional && isMissingRelationError(upsertResult.error)) {
+        return;
+      }
+      throwIfSupabaseError(`upsert ${baseName}`, upsertResult.error);
+    }
+  }
+
+  const selectResult = await supabase.from(table).select('id');
+  if (selectResult.error) {
+    if (optional && isMissingRelationError(selectResult.error)) {
+      return;
+    }
+    throwIfSupabaseError(`select ids ${baseName}`, selectResult.error);
+  }
+
+  const keepIds = new Set(normalizedRows.map((row) => String(row.id)));
+  const deleteIds = (selectResult.data || [])
+    .map((row) => row.id)
+    .filter((id) => !keepIds.has(String(id)));
+
+  if (deleteIds.length === 0) {
+    return;
+  }
+
+  const deleteResult = await supabase.from(table).delete().in('id', deleteIds);
+  throwIfSupabaseError(`delete missing ${baseName}`, deleteResult.error);
+};
+
+const syncSingletonTable = async (
+  supabase,
+  baseName,
+  row,
+  {
+    optional = false,
+    fallbackRow = null,
+  } = {},
+) => {
+  const table = tableName(baseName);
+  const existing = await supabase.from(table).select('id').order('id', { ascending: true }).limit(1);
+  if (existing.error) {
+    if (optional && isMissingRelationError(existing.error)) {
+      return;
+    }
+    throwIfSupabaseError(`select singleton ${baseName}`, existing.error);
+  }
+
+  const target = existing.data?.[0] || null;
+  if (!target) {
+    const insertResult = await supabase.from(table).insert(row);
+    if (!insertResult.error) {
+      return;
+    }
+    if (fallbackRow && isMissingColumnError(insertResult.error)) {
+      const fallbackInsert = await supabase.from(table).insert(fallbackRow);
+      throwIfSupabaseError(`insert singleton ${baseName}`, fallbackInsert.error);
+      return;
+    }
+    if (optional && isMissingRelationError(insertResult.error)) {
+      return;
+    }
+    throwIfSupabaseError(`insert singleton ${baseName}`, insertResult.error);
+    return;
+  }
+
+  const updateResult = await supabase.from(table).update(row).eq('id', target.id);
+  if (!updateResult.error) {
+    return;
+  }
+  if (fallbackRow && isMissingColumnError(updateResult.error)) {
+    const fallbackUpdate = await supabase.from(table).update(fallbackRow).eq('id', target.id);
+    throwIfSupabaseError(`update singleton ${baseName}`, fallbackUpdate.error);
+    return;
+  }
+  if (optional && isMissingRelationError(updateResult.error)) {
+    return;
+  }
+  throwIfSupabaseError(`update singleton ${baseName}`, updateResult.error);
+};
+
+const persistDbToSupabase = async (value) => {
+  const db = refreshDerivedFields(normalizeDb(value));
+  const supabase = getSupabaseClient();
+
+  await syncIdTable(supabase, 'advertisers', db.advertisers.map(toAdvertiserRow));
+  await syncIdTable(supabase, 'products', db.products.map(toProductRow));
+  await syncIdTable(supabase, 'team_members', db.team_members.map(toTeamMemberRow));
+  await syncIdTable(supabase, 'pending_ads', db.pending_ads.map(toPendingAdRow));
+  await syncIdTable(supabase, 'invoices', db.invoices.map(toInvoiceRow));
+  await syncIdTable(supabase, 'ads', db.ads.map(toAdRow));
+
+  await syncSingletonTable(
+    supabase,
+    'admin_settings',
+    toAdminSettingsRow(db.admin_settings),
+    { fallbackRow: toAdminSettingsFallbackRow(db.admin_settings) },
+  );
+  await syncSingletonTable(
+    supabase,
+    'notification_preferences',
+    toNotificationRow(db.notification_preferences),
+  );
+  await syncSingletonTable(
+    supabase,
+    'admin_notification_preferences',
+    toAdminNotificationRow(db.notification_preferences),
+    { optional: true },
+  );
+};
+
+const hydrateCache = async () => {
+  primeCacheFromLocal();
+  if (!canUseSupabase()) {
+    const localDb = readLegacyDbFromStorage();
+    setDbCache(localDb, { emit: false });
+    hasLoadedInitialState = true;
+    return clone(dbCache);
+  }
+
+  const remoteDb = await fetchDbFromSupabase();
+  setDbCache(remoteDb, { emit: false });
+  hasLoadedInitialState = true;
+  return clone(dbCache);
+};
+
+export const ensureDb = async () => {
+  primeCacheFromLocal();
+
+  if (hasLoadedInitialState) {
+    return clone(dbCache);
+  }
+
+  if (!ensurePromise) {
+    ensurePromise = hydrateCache()
+      .catch((error) => {
+        console.error('[localDb] Failed to load Supabase data; using local fallback.', error);
+        const fallback = readLegacyDbFromStorage();
+        setDbCache(fallback, { emit: false });
+        hasLoadedInitialState = true;
+        return clone(dbCache);
+      })
+      .finally(() => {
+        ensurePromise = null;
+        emitDbChanged();
+      });
+  }
+
+  return ensurePromise;
+};
+
+export const readDb = () => {
+  primeCacheFromLocal();
+  return clone(dbCache);
+};
+
+export const writeDb = async (value) => {
+  await ensureDb();
+  const normalized = refreshDerivedFields(normalizeDb(value));
+  persistLocalUsers(normalized.users);
+
+  if (!canUseSupabase()) {
+    return writeLegacyDbToStorage(normalized);
+  }
+
+  await persistDbToSupabase(normalized);
+  return setDbCache(normalized, { emit: true });
+};
+
+export const updateDb = async (updater) => {
   const current = readDb();
   const draft = clone(current);
   const maybeNext = updater(draft);
-  return writeDb(maybeNext ?? draft);
+  const resolvedNext = maybeNext instanceof Promise ? await maybeNext : maybeNext;
+  return writeDb(resolvedNext ?? draft);
 };
 
 export const subscribeDb = (listener) => {
-  if (typeof window === 'undefined') {
+  if (!isBrowser()) {
     return () => {};
   }
 
+  const trackedKeys = new Set([
+    DB_KEY,
+    SESSION_KEY,
+    LOCAL_USERS_KEY,
+    LEGACY_DB_KEY,
+    LEGACY_SESSION_KEY,
+    LEGACY_LOCAL_USERS_KEY,
+  ]);
+
   const onStorage = (event) => {
-    if (
-      event.key === DB_KEY ||
-      event.key === SESSION_KEY ||
-      event.key === LEGACY_DB_KEY ||
-      event.key === LEGACY_SESSION_KEY
-    ) {
+    if (trackedKeys.has(event.key)) {
       listener();
     }
   };
@@ -306,14 +1047,14 @@ export const setSessionUserId = (userId) => {
     s.removeItem(SESSION_KEY);
     s.removeItem(LEGACY_SESSION_KEY);
   }
-  window.dispatchEvent(new CustomEvent('cbn:db-changed'));
+  emitDbChanged();
 };
 
 export const clearSession = () => setSessionUserId(null);
 
-export const upsertAdvertiser = (input) => {
+export const upsertAdvertiser = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const now = nowIso();
     const phone = (input.phone_number || input.phone || '').trim();
     const payload = {
@@ -325,9 +1066,9 @@ export const upsertAdvertiser = (input) => {
       phone_number: phone,
       business_name: (input.business_name || '').trim(),
       status: input.status || 'active',
-      ad_spend: '0.00',
-      total_spend: '0.00',
-      next_ad_date: '',
+      ad_spend: toMoney(input.ad_spend ?? input.total_spend),
+      total_spend: toMoney(input.total_spend ?? input.ad_spend),
+      next_ad_date: toDateOnly(input.next_ad_date),
       created_at: input.created_at || now,
       updated_at: now,
     };
@@ -345,8 +1086,8 @@ export const upsertAdvertiser = (input) => {
   return saved;
 };
 
-export const deleteAdvertiser = (advertiserId) => {
-  updateDb((db) => {
+export const deleteAdvertiser = async (advertiserId) => {
+  await updateDb((db) => {
     db.advertisers = db.advertisers.filter((item) => item.id !== advertiserId);
     db.ads = db.ads.map((ad) =>
       ad.advertiser_id === advertiserId
@@ -357,15 +1098,15 @@ export const deleteAdvertiser = (advertiserId) => {
   });
 };
 
-export const upsertProduct = (input) => {
+export const upsertProduct = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const now = nowIso();
     const payload = {
       id: input.id || createId('prd'),
       product_name: (input.product_name || '').trim(),
-      placement: (input.placement || '').trim(),
-      price: numberOrZero(input.price).toFixed(2),
+      placement: (input.placement || 'WhatsApp').trim() || 'WhatsApp',
+      price: toMoney(input.price),
       description: (input.description || '').trim(),
       created_at: input.created_at || now,
       updated_at: now,
@@ -384,8 +1125,8 @@ export const upsertProduct = (input) => {
   return saved;
 };
 
-export const deleteProduct = (productId) => {
-  updateDb((db) => {
+export const deleteProduct = async (productId) => {
+  await updateDb((db) => {
     db.products = db.products.filter((item) => item.id !== productId);
     db.ads = db.ads.map((ad) =>
       ad.product_id === productId ? { ...ad, product_id: '', product_name: ad.product_name || '' } : ad
@@ -394,12 +1135,13 @@ export const deleteProduct = (productId) => {
   });
 };
 
-export const upsertAd = (input) => {
+export const upsertAd = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const now = nowIso();
     const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
     const product = db.products.find((item) => item.id === input.product_id);
+    const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
     const payload = {
       id: input.id || createId('ad'),
       ad_name: (input.ad_name || '').trim(),
@@ -407,14 +1149,22 @@ export const upsertAd = (input) => {
       advertiser: advertiser?.advertiser_name || input.advertiser || '',
       product_id: input.product_id || '',
       product_name: product?.product_name || input.product_name || '',
-      post_type: input.post_type || 'one_time',
+      post_type: normalizePostType(input.post_type || 'one_time'),
       status: input.status || 'Draft',
       payment: input.payment || 'Unpaid',
-      post_date: input.post_date || '',
-      post_time: input.post_time || '',
+      post_date: postDate,
+      schedule: postDate,
+      post_date_from: toDateOnly(input.post_date_from || postDate),
+      post_date_to: toDateOnly(input.post_date_to),
+      post_time: toTimeOnly(input.post_time),
+      custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
       notes: input.notes || '',
-      price: numberOrZero(input.price).toFixed(2),
-      media_urls: Array.isArray(input.media_urls) ? input.media_urls : [],
+      ad_text: input.ad_text || '',
+      media: toArray(input.media),
+      media_urls: toArray(input.media_urls),
+      placement: input.placement || '',
+      reminder_minutes: Number(input.reminder_minutes) || 15,
+      price: toMoney(input.price),
       invoice_id: input.invoice_id || null,
       created_at: input.created_at || now,
       updated_at: now,
@@ -434,8 +1184,8 @@ export const upsertAd = (input) => {
   return saved;
 };
 
-export const deleteAd = (adId) => {
-  updateDb((db) => {
+export const deleteAd = async (adId) => {
+  await updateDb((db) => {
     db.ads = db.ads.filter((item) => item.id !== adId);
     db.invoices = db.invoices.map((invoice) => ({
       ...invoice,
@@ -445,29 +1195,29 @@ export const deleteAd = (adId) => {
   });
 };
 
-export const updateAdStatus = (adId, status) => {
-  updateDb((db) => {
+export const updateAdStatus = async (adId, status) => {
+  await updateDb((db) => {
     db.ads = db.ads.map((ad) => (ad.id === adId ? { ...ad, status, updated_at: nowIso() } : ad));
     return db;
   });
 };
 
-export const updateAdPayment = (adId, payment) => {
-  updateDb((db) => {
+export const updateAdPayment = async (adId, payment) => {
+  await updateDb((db) => {
     db.ads = db.ads.map((ad) => (ad.id === adId ? { ...ad, payment, updated_at: nowIso() } : ad));
     return db;
   });
 };
 
-export const submitPendingAd = (input) => {
+export const submitPendingAd = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const postDateFrom = input.post_date_from || input.post_date || '';
     const postDateTo = input.post_date_to || '';
     const customDates = Array.isArray(input.custom_dates) ? input.custom_dates.filter(Boolean) : [];
     const phone = (input.phone || input.phone_number || '').trim();
     const payload = {
-      id: createId('pending'),
+      id: input.id || createId('pending'),
       advertiser_name: (input.advertiser_name || '').trim(),
       contact_name: (input.contact_name || '').trim(),
       email: (input.email || '').trim(),
@@ -475,12 +1225,12 @@ export const submitPendingAd = (input) => {
       phone_number: phone,
       business_name: (input.business_name || '').trim(),
       ad_name: (input.ad_name || '').trim(),
-      post_type: input.post_type || 'one_time',
-      post_date: input.post_date || postDateFrom || customDates[0] || '',
-      post_date_from: postDateFrom,
-      post_date_to: postDateTo,
-      custom_dates: customDates,
-      post_time: input.post_time || '',
+      post_type: normalizePostType(input.post_type || 'one_time'),
+      post_date: toDateOnly(input.post_date || postDateFrom || customDates[0]),
+      post_date_from: toDateOnly(postDateFrom),
+      post_date_to: toDateOnly(postDateTo),
+      custom_dates: customDates.map((date) => toDateOnly(date)).filter(Boolean),
+      post_time: toTimeOnly(input.post_time),
       reminder_minutes: Number(input.reminder_minutes) || 15,
       ad_text: input.ad_text || '',
       media: Array.isArray(input.media) ? input.media : [],
@@ -497,8 +1247,8 @@ export const submitPendingAd = (input) => {
   return saved;
 };
 
-export const approvePendingAd = (pendingAdId) => {
-  updateDb((db) => {
+export const approvePendingAd = async (pendingAdId) => {
+  await updateDb((db) => {
     const pending = db.pending_ads.find((item) => item.id === pendingAdId);
     if (!pending || pending.status !== 'pending') {
       return db;
@@ -519,10 +1269,14 @@ export const approvePendingAd = (pendingAdId) => {
       advertiser = {
         id: createId('adv'),
         advertiser_name: pending.advertiser_name || pending.email || 'New advertiser',
+        contact_name: pending.contact_name || '',
         email: pending.email || '',
         phone: pending.phone || pending.phone_number || '',
+        phone_number: pending.phone_number || pending.phone || '',
         business_name: pending.business_name || '',
+        status: 'active',
         ad_spend: '0.00',
+        total_spend: '0.00',
         next_ad_date: postDate,
         created_at: nowIso(),
         updated_at: nowIso(),
@@ -537,10 +1291,11 @@ export const approvePendingAd = (pendingAdId) => {
       advertiser: advertiser.advertiser_name,
       product_id: '',
       product_name: '',
-      post_type: pending.post_type || 'one_time',
+      post_type: normalizePostType(pending.post_type || 'one_time'),
       status: 'Draft',
       payment: 'Unpaid',
       post_date: postDate,
+      schedule: postDate,
       post_date_from: pending.post_date_from || postDate,
       post_date_to: pending.post_date_to || '',
       custom_dates: Array.isArray(pending.custom_dates) ? pending.custom_dates : [],
@@ -563,8 +1318,8 @@ export const approvePendingAd = (pendingAdId) => {
   });
 };
 
-export const rejectPendingAd = (pendingAdId) => {
-  updateDb((db) => {
+export const rejectPendingAd = async (pendingAdId) => {
+  await updateDb((db) => {
     db.pending_ads = db.pending_ads.map((item) =>
       item.id === pendingAdId ? { ...item, status: 'not_approved', updated_at: nowIso() } : item
     );
@@ -572,8 +1327,8 @@ export const rejectPendingAd = (pendingAdId) => {
   });
 };
 
-export const deletePendingAd = (pendingAdId) => {
-  updateDb((db) => {
+export const deletePendingAd = async (pendingAdId) => {
+  await updateDb((db) => {
     db.pending_ads = db.pending_ads.filter((item) => item.id !== pendingAdId);
     return db;
   });
@@ -606,9 +1361,9 @@ const applyInvoiceLinks = (db, invoiceId, previousAdIds, nextAdIds, invoiceStatu
   });
 };
 
-export const upsertInvoice = (input) => {
+export const upsertInvoice = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const now = nowIso();
     const invoiceId = input.id || createId('inv');
     const adIds = Array.isArray(input.ad_ids) ? input.ad_ids.filter(Boolean) : [];
@@ -621,10 +1376,10 @@ export const upsertInvoice = (input) => {
       invoice_number: (input.invoice_number || '').trim() || `INV-${Date.now().toString().slice(-6)}`,
       advertiser_id: input.advertiser_id || '',
       advertiser_name: advertiser?.advertiser_name || input.advertiser_name || '',
-      amount: numberOrZero(input.amount).toFixed(2),
-      due_date: input.due_date || '',
+      amount: toMoney(input.amount),
+      due_date: toDateOnly(input.due_date),
       status: input.status || 'Unpaid',
-      paid_date: input.status === 'Paid' ? input.paid_date || now.slice(0, 10) : '',
+      paid_date: input.status === 'Paid' ? toDateOnly(input.paid_date || now.slice(0, 10)) : '',
       ad_ids: adIds,
       created_at: existing?.created_at || now,
       updated_at: now,
@@ -644,8 +1399,8 @@ export const upsertInvoice = (input) => {
   return saved;
 };
 
-export const deleteInvoice = (invoiceId) => {
-  updateDb((db) => {
+export const deleteInvoice = async (invoiceId) => {
+  await updateDb((db) => {
     const invoice = db.invoices.find((item) => item.id === invoiceId);
     const linkedAdIds = invoice?.ad_ids || [];
     db.invoices = db.invoices.filter((item) => item.id !== invoiceId);
@@ -654,9 +1409,9 @@ export const deleteInvoice = (invoiceId) => {
   });
 };
 
-export const upsertTeamMember = (input) => {
+export const upsertTeamMember = async (input) => {
   let saved = null;
-  updateDb((db) => {
+  await updateDb((db) => {
     const now = nowIso();
     const payload = {
       id: input.id || createId('member'),
@@ -679,15 +1434,15 @@ export const upsertTeamMember = (input) => {
   return saved;
 };
 
-export const deleteTeamMember = (memberId) => {
-  updateDb((db) => {
+export const deleteTeamMember = async (memberId) => {
+  await updateDb((db) => {
     db.team_members = db.team_members.filter((member) => member.id !== memberId);
     return db;
   });
 };
 
-export const saveAdminSettings = (settings) => {
-  updateDb((db) => {
+export const saveAdminSettings = async (settings) => {
+  await updateDb((db) => {
     db.admin_settings = {
       ...db.admin_settings,
       ...settings,
@@ -696,8 +1451,8 @@ export const saveAdminSettings = (settings) => {
   });
 };
 
-export const saveNotificationPreferences = (preferences) => {
-  updateDb((db) => {
+export const saveNotificationPreferences = async (preferences) => {
+  await updateDb((db) => {
     db.notification_preferences = {
       ...db.notification_preferences,
       ...preferences,
@@ -706,8 +1461,8 @@ export const saveNotificationPreferences = (preferences) => {
   });
 };
 
-export const resetDb = () => {
-  writeDb(baseDb());
+export const resetDb = async () => {
+  await writeDb(baseDb(readLocalUsers()));
   clearSession();
 };
 
@@ -742,7 +1497,7 @@ export const exportAdsCsv = () => {
       ad.price,
     ]
       .map((field) => `"${String(field ?? '').replace(/"/g, '""')}"`)
-      .join(',')
+      .join(','),
   );
 
   return [headers.join(','), ...rows].join('\n');

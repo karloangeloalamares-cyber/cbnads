@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backend Audit"
+  short_description: "Audit API correctness, auth, and data integrity"
+  default_prompt: "Review this backend implementation for auth, schema alignment, API contract quality, and operational risk. Return severity-ranked findings."

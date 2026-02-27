@@ -7,7 +7,8 @@
 		"build": "react-router build",
 		"preview": "vite preview",
 		"typecheck": "react-router typegen && tsc --noEmit",
-		"smoke:launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-smoke.ps1"
+		"smoke:launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-smoke.ps1",
+		"seed:demo": "node ./scripts/seed-supabase-demo.mjs"
 	},
 	"dependencies": {
 		"@auth/core": "^0.34.3",
