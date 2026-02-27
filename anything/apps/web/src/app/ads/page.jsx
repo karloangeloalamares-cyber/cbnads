@@ -48,6 +48,11 @@ import {
   X,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
+import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
+import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
+import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
+import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
+import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
 import {
   approvePendingAd,
@@ -99,12 +104,19 @@ const blankAd = {
   ad_name: "",
   advertiser_id: "",
   product_id: "",
+  placement: "",
   post_type: "one_time",
   status: "Draft",
   payment: "Unpaid",
+  payment_mode: "TBD",
   post_date: "",
+  post_date_from: "",
+  post_date_to: "",
+  custom_dates: [],
   post_time: "",
   price: "",
+  ad_text: "",
+  media: [],
   notes: "",
 };
 
@@ -1288,27 +1300,26 @@ const getMonthCalendarDays = (year, month) => {
   const daysInMonth = lastDay.getDate();
   const startingDayOfWeek = firstDay.getDay();
   const days = [];
-  const prevMonthLastDay = new Date(year, month, 0).getDate();
 
-  for (let i = startingDayOfWeek - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < startingDayOfWeek; i += 1) {
     days.push({
-      date: new Date(year, month - 1, prevMonthLastDay - i),
-      isCurrentMonth: false,
+      date: null,
+      isPlaceholder: true,
     });
   }
 
   for (let i = 1; i <= daysInMonth; i += 1) {
     days.push({
       date: new Date(year, month, i),
-      isCurrentMonth: true,
+      isPlaceholder: false,
     });
   }
 
-  const remainingDays = 42 - days.length;
+  const remainingDays = (7 - (days.length % 7)) % 7;
   for (let i = 1; i <= remainingDays; i += 1) {
     days.push({
-      date: new Date(year, month + 1, i),
-      isCurrentMonth: false,
+      date: null,
+      isPlaceholder: true,
     });
   }
 
@@ -1380,6 +1391,15 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
 
       <div className="grid grid-cols-7">
         {calendarDays.map((dayInfo, index) => {
+          if (dayInfo.isPlaceholder || !dayInfo.date) {
+            return (
+              <div
+                key={`placeholder-${year}-${month}-${index}`}
+                className="min-h-[120px] border-b border-r border-gray-200 bg-white"
+              />
+            );
+          }
+
           const dayAds = getAdsForDate(ads, dayInfo.date);
           const capacity = getCapacityStatus(dayAds.length, maxAdsPerDay);
           const today = toDateKey(dayInfo.date) === toDateKey(new Date());
@@ -1388,22 +1408,19 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
             <div
               key={`${toDateKey(dayInfo.date)}-${index}`}
               onClick={() => onDateClick(dayInfo.date)}
-              className={`min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors ${!dayInfo.isCurrentMonth ? "bg-gray-50" : "bg-white"
-                }`}
+              className="min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors bg-white"
             >
               <div className="flex items-center justify-between mb-2">
                 <span
-                  className={`text-sm font-medium ${!dayInfo.isCurrentMonth
-                    ? "text-gray-400"
-                    : today
-                      ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
-                      : "text-gray-900"
+                  className={`text-sm font-medium ${today
+                    ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                    : "text-gray-900"
                     }`}
                 >
                   {dayInfo.date.getDate()}
                 </span>
 
-                {dayInfo.isCurrentMonth && dayAds.length > 0 ? (
+                {dayAds.length > 0 ? (
                   <span
                     className={`text-xs px-1.5 py-0.5 rounded ${capacity.bg} ${capacity.color}`}
                   >
@@ -1875,9 +1892,10 @@ export default function AdsPage() {
   const invoiceMenuRef = useRef(null);
   const invoiceCreateMenuRef = useRef(null);
   const adsAdvancedFiltersRef = useRef(null);
-  const createAdTextAreaRef = useRef(null);
 
   const [ad, setAd] = useState(blankAd);
+  const [createAdCustomDate, setCreateAdCustomDate] = useState("");
+  const [createAdCustomTime, setCreateAdCustomTime] = useState("");
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
@@ -3804,19 +3822,36 @@ export default function AdsPage() {
       ...item,
       advertiser_id: advertiserId,
       product_id: productId,
+      placement: item.placement || "",
       post_date: item.schedule || item.post_date || item.post_date_from || "",
+      post_date_from: item.post_date_from || item.schedule || item.post_date || "",
+      post_date_to: item.post_date_to || "",
+      custom_dates: Array.isArray(item.custom_dates) ? item.custom_dates : [],
       post_time: String(item.post_time || "").slice(0, 5),
+      ad_text: item.ad_text || item.notes || "",
+      media: parseAdMedia(item.media),
       payment:
         String(item.payment_raw || item.payment || "").toLowerCase() === "paid"
           ? "Paid"
           : "Unpaid",
+      payment_mode:
+        item.payment_mode ||
+        (String(item.payment_raw || item.payment || "").toLowerCase() === "paid"
+          ? "Paid"
+          : item.price
+            ? "Custom Amount"
+            : "TBD"),
     });
+    setCreateAdCustomDate("");
+    setCreateAdCustomTime("");
     setView("createAd");
   };
 
   const closeCreateAd = () => {
     setView("list");
     setAd(blankAd);
+    setCreateAdCustomDate("");
+    setCreateAdCustomTime("");
   };
 
   const setCreateAdPostType = (postType) => {
@@ -3827,17 +3862,127 @@ export default function AdsPage() {
       };
 
       if (postType === "One-Time Post") {
-        next.post_date_from = "";
+        next.post_date_from = current.post_date_from || current.post_date || "";
+        next.post_date = next.post_date_from;
         next.post_date_to = "";
         next.custom_dates = [];
       } else if (postType === "Daily Run") {
+        next.post_date = current.post_date || current.post_date_from || "";
         next.custom_dates = [];
-      } else if (!Array.isArray(next.custom_dates) || next.custom_dates.length === 0) {
-        next.custom_dates = [""];
+      } else if (!Array.isArray(next.custom_dates)) {
+        next.custom_dates = [];
       }
 
       return next;
     });
+  };
+
+  const handleCreateAdChange = (field, value) => {
+    if (field === "post_type") {
+      setCreateAdPostType(value);
+      return;
+    }
+
+    setAd((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleCreateAdAddCustomDate = () => {
+    if (!createAdCustomDate) {
+      return;
+    }
+
+    setAd((current) => {
+      const existing = Array.isArray(current.custom_dates) ? current.custom_dates : [];
+      const exists = existing.some((entry) => {
+        const existingDate =
+          typeof entry === "object" && entry !== null ? entry.date : entry;
+        return String(existingDate || "") === createAdCustomDate;
+      });
+      if (exists) {
+        return current;
+      }
+
+      const timeForDate = createAdCustomTime || current.post_time || "";
+      const timeWithSeconds =
+        timeForDate && timeForDate.length === 5 ? `${timeForDate}:00` : timeForDate;
+
+      return {
+        ...current,
+        custom_dates: [
+          ...existing,
+          {
+            date: createAdCustomDate,
+            time: timeWithSeconds,
+          },
+        ],
+      };
+    });
+
+    setCreateAdCustomDate("");
+    setCreateAdCustomTime("");
+  };
+
+  const handleCreateAdRemoveCustomDate = (dateToRemove) => {
+    setAd((current) => {
+      const existing = Array.isArray(current.custom_dates) ? current.custom_dates : [];
+      return {
+        ...current,
+        custom_dates: existing.filter((entry) => {
+          const entryDate = typeof entry === "object" && entry !== null ? entry.date : entry;
+          return String(entryDate || "") !== String(dateToRemove || "");
+        }),
+      };
+    });
+  };
+
+  const handleCreateAdUpdateCustomDateTime = (dateToUpdate, nextTime) => {
+    const timeWithSeconds = nextTime && nextTime.length === 5 ? `${nextTime}:00` : nextTime;
+    setAd((current) => {
+      const existing = Array.isArray(current.custom_dates) ? current.custom_dates : [];
+      return {
+        ...current,
+        custom_dates: existing.map((entry) => {
+          const entryDate = typeof entry === "object" && entry !== null ? entry.date : entry;
+          if (String(entryDate || "") !== String(dateToUpdate || "")) {
+            return entry;
+          }
+
+          if (typeof entry === "object" && entry !== null) {
+            return {
+              ...entry,
+              date: entryDate,
+              time: timeWithSeconds,
+            };
+          }
+
+          return {
+            date: entryDate,
+            time: timeWithSeconds,
+          };
+        }),
+      };
+    });
+  };
+
+  const handleCreateAdAddMedia = (mediaItem) => {
+    setAd((current) => ({
+      ...current,
+      media: [...(Array.isArray(current.media) ? current.media : []), mediaItem],
+    }));
+  };
+
+  const handleCreateAdRemoveMedia = (indexToRemove) => {
+    setAd((current) => ({
+      ...current,
+      media: (Array.isArray(current.media) ? current.media : []).filter(
+        (_, index) => index !== indexToRemove,
+      ),
+    }));
+  };
+
+  const showCreateAdAlert = async ({ title, message: alertMessage }) => {
+    const body = [title, alertMessage].filter(Boolean).join("\n\n");
+    window.alert(body || "Action required.");
   };
 
   const saveCreateAd = (mode = "save") =>
@@ -3850,9 +3995,15 @@ export default function AdsPage() {
       }
 
       const selectedPostType = normalizeCreateAdPostType(ad.post_type);
-      const customDates = Array.isArray(ad.custom_dates)
-        ? ad.custom_dates.filter((item) => String(item || "").trim())
-        : [];
+      const customDates = (Array.isArray(ad.custom_dates) ? ad.custom_dates : [])
+        .map((entry) => {
+          if (typeof entry === "object" && entry !== null) {
+            return entry.date;
+          }
+          return entry;
+        })
+        .map((entry) => String(entry || "").slice(0, 10))
+        .filter(Boolean);
       const paymentMode =
         ad.payment_mode ||
         (String(ad.payment || "").toLowerCase() === "paid"
@@ -3875,7 +4026,10 @@ export default function AdsPage() {
       } else if (selectedPostType === "Custom Schedule") {
         payload.post_date = customDates[0] || "";
       } else {
-        payload.post_date = payload.post_date || "";
+        payload.post_date = payload.post_date || payload.post_date_from || "";
+        payload.post_date_from = payload.post_date;
+        payload.post_date_to = "";
+        payload.custom_dates = [];
       }
 
       await upsertAd(payload);
@@ -3903,8 +4057,17 @@ export default function AdsPage() {
       : ad.price
         ? "Custom Amount"
         : "TBD");
-  const createAdCustomDates =
-    Array.isArray(ad.custom_dates) && ad.custom_dates.length > 0 ? ad.custom_dates : [""];
+  const createAdPreviewData = useMemo(() => {
+    const advertiserName =
+      advertisers.find((item) => item.id === ad.advertiser_id)?.advertiser_name || "";
+    return {
+      ...ad,
+      advertiser_name: advertiserName,
+      post_date_from: ad.post_date_from || ad.post_date || "",
+      ad_text: ad.ad_text || ad.notes || "",
+      media: Array.isArray(ad.media) ? ad.media : [],
+    };
+  }, [ad, advertisers]);
 
   const exportVisibleAdsCsv = () => {
     const headers = [
@@ -5751,272 +5914,242 @@ export default function AdsPage() {
             </div>
           )}
           {activeSection === "Ads" && view === "createAd" && (
-            <div className="flex-1 overflow-auto bg-gray-50 -m-8">
-              <div className="bg-white border-b border-gray-200 px-6 py-4 shadow-sm">
-                <div className="max-w-[1200px] mx-auto flex items-center justify-between relative">
-                  <button
-                    type="button"
-                    onClick={closeCreateAd}
-                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
-                  >
-                    <ArrowLeft size={18} />
-                    Back
-                  </button>
-                  <h1 className="text-base font-semibold text-gray-900 absolute left-1/2 -translate-x-1/2">
-                    {ad.id ? "Edit Advertisement" : "New Advertisement"}
-                  </h1>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={closeCreateAd}
-                      className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    {ad.id ? (
+            <div className="flex-1 overflow-auto bg-white -m-8">
+              <div className="flex max-w-none mx-auto">
+                <div className="flex-1 bg-white p-12">
+                  <div className="max-w-[680px] mx-auto">
+                    <div className="mb-10 flex items-center justify-between gap-4">
                       <button
                         type="button"
-                        onClick={() => saveCreateAd("save")}
-                        className="px-5 py-2.5 text-sm font-semibold text-white bg-black rounded-lg hover:bg-gray-800 transition-all"
+                        onClick={closeCreateAd}
+                        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
                       >
-                        Save
+                        <ArrowLeft size={18} />
+                        Back
                       </button>
-                    ) : (
-                      <>
+                      <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={() => saveCreateAd("draft")}
-                          className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all"
+                          onClick={closeCreateAd}
+                          className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
                         >
-                          Save as draft
+                          Cancel
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => saveCreateAd("continue")}
-                          className="px-5 py-2.5 text-sm font-semibold text-white bg-black rounded-lg hover:bg-gray-800 transition-all flex items-center gap-2"
-                        >
-                          Continue to billing
-                          <ArrowRight size={16} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="max-w-[800px] mx-auto py-10 px-6 space-y-10">
-                <div>
-                  <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                    {ad.id ? "Edit advertisement" : "Create a new ad"}
-                  </h2>
-                  <p className="text-sm text-gray-500">
-                    Fill in the details below to create your advertisement
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Details</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        Advertiser
-                      </label>
-                      <select
-                        value={ad.advertiser_id || ""}
-                        onChange={(event) =>
-                          setAd((current) => ({ ...current, advertiser_id: event.target.value }))
-                        }
-                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
-                      >
-                        <option value="">Select advertiser</option>
-                        {advertisers.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.advertiser_name}
-                          </option>
-                        ))}
-                      </select>
+                        {ad.id ? (
+                          <button
+                            type="button"
+                            onClick={() => saveCreateAd("save")}
+                            className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all"
+                          >
+                            Save
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => saveCreateAd("draft")}
+                              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
+                            >
+                              Save as draft
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => saveCreateAd("continue")}
+                              className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all flex items-center gap-2"
+                            >
+                              Continue to billing
+                              <ArrowRight size={16} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        Placement
-                      </label>
-                      <select
-                        value={ad.placement || ""}
-                        onChange={(event) =>
-                          setAd((current) => ({ ...current, placement: event.target.value }))
-                        }
-                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
-                      >
-                        <option value="">Select placement</option>
-                        {createAdPlacementOptions.map((placement) => (
-                          <option key={placement} value={placement}>
-                            {placement}
-                          </option>
-                        ))}
-                      </select>
+
+                    <div className="mb-10">
+                      <div className="flex items-center gap-3 mb-6">
+                        <div className="w-12 h-12 flex items-center justify-center flex-shrink-0">
+                          <img
+                            src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                            alt="CBN Unfiltered Logo"
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      </div>
+                      <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                        {ad.id ? "Edit ad" : "Create a new ad"}
+                      </h1>
+                      <p className="text-gray-600 text-sm">
+                        Fill out the form below to create your advertising content.
+                      </p>
                     </div>
-                  </div>
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 mb-4">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Ad Title</label>
-                    <input
-                      type="text"
-                      value={ad.ad_name || ""}
-                      onChange={(event) =>
-                        setAd((current) => ({ ...current, ad_name: event.target.value }))
-                      }
-                      placeholder="Enter a descriptive title for your ad"
-                      className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
-                    />
-                  </div>
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Ad Product</label>
-                    <select
-                      value={ad.product_id || ""}
-                      onChange={(event) => {
-                        const selectedProduct = products.find((item) => item.id === event.target.value);
-                        setAd((current) => ({
-                          ...current,
-                          product_id: event.target.value,
-                          placement: selectedProduct?.placement || current.placement || "",
-                          price: selectedProduct?.price || current.price || "",
-                        }));
+
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        saveCreateAd("save");
                       }}
-                      className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
+                      className="space-y-8"
                     >
-                      <option value="">Select a product package</option>
-                      {products.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.product_name} - {item.placement || "N/A"} - $
-                          {Number(item.price || 0).toFixed(2)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-4">Details</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Advertiser <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              required
+                              value={ad.advertiser_id || ""}
+                              onChange={(event) =>
+                                setAd((current) => ({
+                                  ...current,
+                                  advertiser_id: event.target.value,
+                                }))
+                              }
+                              className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="">Select advertiser</option>
+                              {advertisers.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.advertiser_name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Post type</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {CREATE_AD_POST_TYPE_OPTIONS.map((postType) => (
-                      <button
-                        key={postType.value}
-                        type="button"
-                        onClick={() => setCreateAdPostType(postType.value)}
-                        className={`px-4 py-4 border rounded-xl text-left transition-all bg-white ${selectedCreateAdPostType === postType.value
-                          ? "border-gray-900 ring-2 ring-gray-900 ring-offset-0 shadow-sm"
-                          : "border-gray-200"
-                          }`}
-                      >
-                        <span className="text-sm font-semibold text-gray-900 block mb-1">
-                          {postType.title}
-                        </span>
-                        <p className="text-xs text-gray-500 leading-relaxed">{postType.description}</p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Placement
+                            </label>
+                            <select
+                              value={ad.placement || ""}
+                              onChange={(event) =>
+                                setAd((current) => ({ ...current, placement: event.target.value }))
+                              }
+                              className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="">Select placement</option>
+                              {createAdPlacementOptions.map((placement) => (
+                                <option key={placement} value={placement}>
+                                  {placement}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Post Date, Time &amp; Reminder</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        {selectedCreateAdPostType === "Daily Run" ? "From Date" : "Post Date"}
-                      </label>
-                      <input
-                        type="date"
-                        value={selectedCreateAdPostType === "Daily Run" ? ad.post_date_from || "" : ad.post_date || ""}
-                        onChange={(event) =>
-                          setAd((current) => ({
-                            ...current,
-                            [selectedCreateAdPostType === "Daily Run" ? "post_date_from" : "post_date"]:
-                              event.target.value,
-                          }))
-                        }
-                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 mb-4">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Ad Product
+                          </label>
+                          <select
+                            value={ad.product_id || ""}
+                            onChange={(event) => {
+                              const selectedProduct = products.find(
+                                (item) => item.id === event.target.value,
+                              );
+                              setAd((current) => ({
+                                ...current,
+                                product_id: event.target.value,
+                                placement: selectedProduct?.placement || current.placement || "",
+                                price: selectedProduct?.price || current.price || "",
+                              }));
+                            }}
+                            className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="">Select a product package</option>
+                            {products.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.product_name} - {item.placement || "N/A"} - $
+                                {Number(item.price || 0).toFixed(2)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <AdDetailsSection
+                        formData={ad}
+                        onChange={handleCreateAdChange}
+                        onAddMedia={handleCreateAdAddMedia}
+                        onRemoveMedia={handleCreateAdRemoveMedia}
+                        showAlert={showCreateAdAlert}
                       />
-                    </div>
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        {selectedCreateAdPostType === "Daily Run" ? "To Date" : "Post Time"}
-                      </label>
-                      {selectedCreateAdPostType === "Daily Run" ? (
-                        <input
-                          type="date"
-                          value={ad.post_date_to || ""}
-                          onChange={(event) =>
-                            setAd((current) => ({ ...current, post_date_to: event.target.value }))
-                          }
-                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
-                        />
-                      ) : (
-                        <input
-                          type="time"
-                          value={ad.post_time || ""}
-                          onChange={(event) =>
-                            setAd((current) => ({ ...current, post_time: event.target.value }))
-                          }
-                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
-                        />
-                      )}
-                    </div>
-                  </div>
-                </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 mb-3">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Payment status</label>
-                    <select
-                      value={createAdPaymentMode}
-                      onChange={(event) =>
-                        setAd((current) => ({
-                          ...current,
-                          payment_mode: event.target.value,
-                          payment: event.target.value === "Paid" ? "Paid" : "Unpaid",
-                        }))
-                      }
-                      className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
-                    >
-                      <option value="TBD">TBD</option>
-                      <option value="Paid">Paid</option>
-                      <option value="Custom Amount">Custom Amount</option>
-                    </select>
-                  </div>
-                  {createAdPaymentMode === "Custom Amount" ? (
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">Amount</label>
-                      <input
-                        type="text"
-                        value={ad.price || ""}
-                        onChange={(event) =>
-                          setAd((current) => ({ ...current, price: event.target.value }))
-                        }
-                        placeholder="$1,500"
-                        className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                      <PostTypeSection
+                        selectedType={selectedCreateAdPostType}
+                        onChange={handleCreateAdChange}
                       />
-                    </div>
-                  ) : null}
+
+                      <ScheduleSection
+                        postType={selectedCreateAdPostType}
+                        formData={ad}
+                        onChange={handleCreateAdChange}
+                        customDate={createAdCustomDate}
+                        setCustomDate={setCreateAdCustomDate}
+                        customTime={createAdCustomTime}
+                        setCustomTime={setCreateAdCustomTime}
+                        onAddCustomDate={handleCreateAdAddCustomDate}
+                        onRemoveCustomDate={handleCreateAdRemoveCustomDate}
+                        onUpdateCustomDateTime={handleCreateAdUpdateCustomDateTime}
+                        onCheckAvailability={undefined}
+                        checkingAvailability={false}
+                        availabilityError={null}
+                        pastTimeError={null}
+                        fullyBookedDates={[]}
+                      />
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 mb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Payment status
+                          </label>
+                          <select
+                            value={createAdPaymentMode}
+                            onChange={(event) =>
+                              setAd((current) => ({
+                                ...current,
+                                payment_mode: event.target.value,
+                                payment: event.target.value === "Paid" ? "Paid" : "Unpaid",
+                              }))
+                            }
+                            className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="TBD">TBD</option>
+                            <option value="Paid">Paid</option>
+                            <option value="Custom Amount">Custom Amount</option>
+                          </select>
+                        </div>
+                        {createAdPaymentMode === "Custom Amount" ? (
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Amount
+                            </label>
+                            <input
+                              type="text"
+                              value={ad.price || ""}
+                              onChange={(event) =>
+                                setAd((current) => ({ ...current, price: event.target.value }))
+                              }
+                              placeholder="$1,500"
+                              className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <NotesSection notes={ad.notes || ""} onChange={handleCreateAdChange} />
+                    </form>
+                  </div>
                 </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Ad content</h3>
-                  <div className="border border-gray-200 rounded-lg bg-white mb-4 overflow-hidden">
-                    <textarea
-                      ref={createAdTextAreaRef}
-                      value={ad.notes || ""}
-                      onChange={(event) =>
-                        setAd((current) => ({ ...current, notes: event.target.value }))
-                      }
-                      placeholder="Enter your ad text here..."
-                      rows={6}
-                      className="w-full px-4 py-3 text-sm placeholder:text-gray-400 bg-transparent focus:outline-none resize-none"
-                    />
-                  </div>
-                  <label className="cursor-pointer flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-xl bg-white hover:border-gray-300 hover:bg-gray-50 transition-all">
-                    <Plus size={18} className="text-gray-400" />
-                    <span className="text-sm font-medium text-gray-700">Add images or videos</span>
-                  </label>
+                <div className="hidden lg:block w-[700px] bg-[#F5F5F5] p-12 flex-shrink-0">
+                  <AdPreview formData={createAdPreviewData} />
                 </div>
               </div>
             </div>
