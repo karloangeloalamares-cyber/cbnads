@@ -13,7 +13,7 @@ export default function SettingsPage() {
   const tabs = [
     { id: "profile", label: "Profile" },
     { id: "team", label: "Team" },
-    { id: "general", label: "General" },
+    { id: "notifications", label: "Notifications" },
     { id: "scheduling", label: "Ad Scheduling" },
     { id: "billing", label: "Billing" },
     { id: "system", label: "System" },
@@ -54,7 +54,7 @@ export default function SettingsPage() {
         <div>
           {activeTab === "profile" && <ProfileSettings />}
           {activeTab === "team" && <TeamSettings />}
-          {activeTab === "general" && <NotificationSettings />}
+          {activeTab === "notifications" && <NotificationSettings />}
           {activeTab === "scheduling" && <AdSchedulingSettings />}
           {activeTab === "billing" && (
             <div className="bg-white rounded-lg border border-gray-200 p-6">

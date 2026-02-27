@@ -38,7 +38,10 @@ import {
   Upload,
   Check,
   Crown,
+  Mail,
   MessageSquare,
+  Send,
+  Link,
   Volume2,
   X,
 } from "lucide-react";
@@ -71,6 +74,7 @@ const sections = [
   "Dashboard",
   "Calendar",
   "Submissions",
+  "WhatsApp",
   "Advertisers",
   "Ads",
   "Products",
@@ -82,7 +86,7 @@ const sections = [
 const settingsTabs = [
   { id: "profile", label: "Profile" },
   { id: "team", label: "Team" },
-  { id: "general", label: "General" },
+  { id: "notifications", label: "Notifications" },
   { id: "scheduling", label: "Ad Scheduling" },
   { id: "billing", label: "Billing" },
   { id: "system", label: "System" },
@@ -219,6 +223,23 @@ const formatTime = (value) => {
   const period = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 === 0 ? 12 : hour % 12;
   return `${displayHour}:${minuteText} ${period}`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return "N/A";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "N/A";
+  }
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 };
 
 const adsSelectStyle = {
@@ -475,9 +496,8 @@ function AdsScheduleCell({ ad }) {
                 return (
                   <div
                     key={item.date}
-                    className={`flex items-center gap-2 text-xs py-1 px-2 rounded ${
-                      item.isNext ? "bg-blue-50" : ""
-                    }`}
+                    className={`flex items-center gap-2 text-xs py-1 px-2 rounded ${item.isNext ? "bg-blue-50" : ""
+                      }`}
                   >
                     <span className={`text-[10px] ${statusClass}`}>{statusLabel}</span>
                     <span className={`flex-1 ${dateClass}`}>{formatAdsDate(item.date)}</span>
@@ -575,9 +595,8 @@ function AdsTableRow({ ad, onPreview, onEdit, onMarkPublished, onDelete }) {
         {activeMenu ? (
           <div
             ref={menuRef}
-            className={`absolute ${
-              menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"
-            } ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+            className={`absolute ${menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"
+              } ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
           >
             <button
               onClick={() => {
@@ -749,9 +768,8 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices }) {
                               {statusLabel}
                             </span>
                             <span
-                              className={`flex-1 ${
-                                isPublished ? "line-through text-gray-400" : "text-gray-700"
-                              }`}
+                              className={`flex-1 ${isPublished ? "line-through text-gray-400" : "text-gray-700"
+                                }`}
                             >
                               {formatAdsDate(dateText)}
                             </span>
@@ -839,15 +857,14 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices }) {
                                   {invoiceItem.invoice_number || "Invoice"}
                                 </span>
                                 <span
-                                  className={`px-2 py-1 rounded text-xs font-semibold ${
-                                    status === "Paid"
-                                      ? "bg-green-100 text-green-700"
-                                      : status === "Partial"
-                                        ? "bg-yellow-100 text-yellow-700"
-                                        : status === "Overdue"
-                                          ? "bg-red-100 text-red-700"
-                                          : "bg-gray-100 text-gray-700"
-                                  }`}
+                                  className={`px-2 py-1 rounded text-xs font-semibold ${status === "Paid"
+                                    ? "bg-green-100 text-green-700"
+                                    : status === "Partial"
+                                      ? "bg-yellow-100 text-yellow-700"
+                                      : status === "Overdue"
+                                        ? "bg-red-100 text-red-700"
+                                        : "bg-gray-100 text-gray-700"
+                                    }`}
                                 >
                                   {status}
                                 </span>
@@ -1175,19 +1192,17 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
             <div
               key={`${toDateKey(dayInfo.date)}-${index}`}
               onClick={() => onDateClick(dayInfo.date)}
-              className={`min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors ${
-                !dayInfo.isCurrentMonth ? "bg-gray-50" : "bg-white"
-              }`}
+              className={`min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors ${!dayInfo.isCurrentMonth ? "bg-gray-50" : "bg-white"
+                }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <span
-                  className={`text-sm font-medium ${
-                    !dayInfo.isCurrentMonth
-                      ? "text-gray-400"
-                      : today
-                        ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
-                        : "text-gray-900"
-                  }`}
+                  className={`text-sm font-medium ${!dayInfo.isCurrentMonth
+                    ? "text-gray-400"
+                    : today
+                      ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                      : "text-gray-900"
+                    }`}
                 >
                   {dayInfo.date.getDate()}
                 </span>
@@ -1248,20 +1263,18 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
           return (
             <div
               key={toDateKey(date)}
-              className={`border-r border-b border-gray-200 p-3 min-h-[400px] ${
-                today ? "bg-blue-50" : "bg-white"
-              }`}
+              className={`border-r border-b border-gray-200 p-3 min-h-[400px] ${today ? "bg-blue-50" : "bg-white"
+                }`}
             >
               <div className="text-center mb-3">
                 <div className="text-xs font-semibold text-gray-600 uppercase">
                   {date.toLocaleDateString("en-US", { weekday: "short" })}
                 </div>
                 <div
-                  className={`text-lg font-semibold mt-1 ${
-                    today
-                      ? "bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto"
-                      : "text-gray-900"
-                  }`}
+                  className={`text-lg font-semibold mt-1 ${today
+                    ? "bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto"
+                    : "text-gray-900"
+                    }`}
                 >
                   {date.getDate()}
                 </div>
@@ -1672,6 +1685,7 @@ export default function AdsPage() {
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
   const [settingsProfileImage, setSettingsProfileImage] = useState("");
+  const [settingsProfileWhatsapp, setSettingsProfileWhatsapp] = useState("");
   const [settingsProfileSaving, setSettingsProfileSaving] = useState(false);
   const [settingsProfileUploading, setSettingsProfileUploading] = useState(false);
   const [settingsProfileMessage, setSettingsProfileMessage] = useState(null);
@@ -1684,6 +1698,7 @@ export default function AdsPage() {
   const [settingsNotification, setSettingsNotification] = useState({
     email_enabled: true,
     sms_enabled: false,
+    telegram_enabled: false,
     reminder_time_value: 1,
     reminder_time_unit: "hours",
     email_address: "",
@@ -1697,13 +1712,24 @@ export default function AdsPage() {
   const [settingsNotificationMessage, setSettingsNotificationMessage] =
     useState(null);
   const [settingsReminderResults, setSettingsReminderResults] = useState(null);
+  const [settingsTelegramNewLabel, setSettingsTelegramNewLabel] = useState("");
+  const [settingsTelegramNewChatId, setSettingsTelegramNewChatId] = useState("");
+  const [settingsTelegramAdding, setSettingsTelegramAdding] = useState(false);
+  const [settingsTelegramTesting, setSettingsTelegramTesting] = useState(null);
+  const [settingsTelegramWebhookLoading, setSettingsTelegramWebhookLoading] =
+    useState(false);
+  const [settingsTelegramWebhookStatus, setSettingsTelegramWebhookStatus] =
+    useState(null);
   const [settingsMaxAdsPerDay, setSettingsMaxAdsPerDay] = useState("5");
   const [settingsSchedulingSaving, setSettingsSchedulingSaving] = useState(false);
   const [settingsSchedulingError, setSettingsSchedulingError] = useState("");
   const [settingsSchedulingSuccess, setSettingsSchedulingSuccess] = useState(false);
-  const [settingsSyncing, setSettingsSyncing] = useState(false);
-  const [settingsSyncResult, setSettingsSyncResult] = useState(null);
-  const [settingsSyncError, setSettingsSyncError] = useState("");
+  const [settingsSystemSyncResult, setSettingsSystemSyncResult] = useState(null);
+  const [settingsSystemError, setSettingsSystemError] = useState("");
+  const [whatsAppFilterUnread, setWhatsAppFilterUnread] = useState(false);
+  const [whatsAppSearchTerm, setWhatsAppSearchTerm] = useState("");
+  const [whatsAppSelectedMessageId, setWhatsAppSelectedMessageId] = useState(null);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -1835,12 +1861,64 @@ export default function AdsPage() {
   const teamMembers = db.team_members || [];
   const adminSettings = db.admin_settings || {};
   const notificationPreferences = db.notification_preferences || {};
+  const settingsTelegramChatIds = Array.isArray(db.telegram_chat_ids)
+    ? db.telegram_chat_ids
+    : [];
+  const settingsActiveTelegramCount = settingsTelegramChatIds.filter(
+    (item) => item.is_active !== false,
+  ).length;
+  const whatsAppMessages = useMemo(() => {
+    const source = Array.isArray(db.whatsapp_messages) ? db.whatsapp_messages : [];
+    return [...source].sort((a, b) => {
+      const aDate = new Date(a.created_at || 0).valueOf();
+      const bDate = new Date(b.created_at || 0).valueOf();
+      return bDate - aDate;
+    });
+  }, [db.whatsapp_messages]);
+  const whatsAppUnreadCount = useMemo(
+    () =>
+      whatsAppMessages.filter(
+        (item) => !Boolean(item.is_read ?? item.isRead ?? false),
+      ).length,
+    [whatsAppMessages],
+  );
+  const filteredWhatsAppMessages = useMemo(() => {
+    const search = whatsAppSearchTerm.trim().toLowerCase();
+    return whatsAppMessages.filter((item) => {
+      const isRead = Boolean(item.is_read ?? item.isRead ?? false);
+      if (whatsAppFilterUnread && isRead) {
+        return false;
+      }
+      if (!search) {
+        return true;
+      }
+      const haystack = [
+        item.message_text,
+        item.message,
+        item.from_name,
+        item.from_number,
+        item.advertiser_name,
+        item.notes,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      return haystack.includes(search);
+    });
+  }, [whatsAppFilterUnread, whatsAppMessages, whatsAppSearchTerm]);
+  const selectedWhatsAppMessage = useMemo(
+    () =>
+      filteredWhatsAppMessages.find((item) => item.id === whatsAppSelectedMessageId) ||
+      filteredWhatsAppMessages[0] ||
+      null,
+    [filteredWhatsAppMessages, whatsAppSelectedMessageId],
+  );
 
   useEffect(() => {
     setSettingsProfileName(user?.name || "");
     setSettingsProfileImage(user?.image || "");
+    setSettingsProfileWhatsapp(user?.whatsapp_number || "");
     setSettingsProfileMessage(null);
-  }, [user?.id, user?.name, user?.image]);
+  }, [user?.id, user?.name, user?.image, user?.whatsapp_number]);
 
   useEffect(() => {
     setSettingsNotification((current) => ({
@@ -1849,6 +1927,8 @@ export default function AdsPage() {
         notificationPreferences.email_enabled ?? current.email_enabled ?? true,
       sms_enabled:
         notificationPreferences.sms_enabled ?? current.sms_enabled ?? false,
+      telegram_enabled:
+        notificationPreferences.telegram_enabled ?? current.telegram_enabled ?? false,
       reminder_time_value:
         Number(notificationPreferences.reminder_time_value) ||
         current.reminder_time_value ||
@@ -1872,6 +1952,21 @@ export default function AdsPage() {
       String(adminSettings.max_ads_per_day || adminSettings.max_ads_per_slot || 5),
     );
   }, [adminSettings, notificationPreferences, user?.email]);
+
+  useEffect(() => {
+    if (filteredWhatsAppMessages.length === 0) {
+      if (whatsAppSelectedMessageId !== null) {
+        setWhatsAppSelectedMessageId(null);
+      }
+      return;
+    }
+    if (
+      !whatsAppSelectedMessageId ||
+      !filteredWhatsAppMessages.some((item) => item.id === whatsAppSelectedMessageId)
+    ) {
+      setWhatsAppSelectedMessageId(filteredWhatsAppMessages[0].id);
+    }
+  }, [filteredWhatsAppMessages, whatsAppSelectedMessageId]);
 
   const visibleAdsForInvoice = useMemo(() => {
     if (!invoice.advertiser_id) {
@@ -2607,13 +2702,13 @@ export default function AdsPage() {
         case "advertiser_name":
           aValue = String(
             a.advertiser_name ||
-              advertisers.find((adv) => adv.id === a.advertiser_id)?.advertiser_name ||
-              "",
+            advertisers.find((adv) => adv.id === a.advertiser_id)?.advertiser_name ||
+            "",
           );
           bValue = String(
             b.advertiser_name ||
-              advertisers.find((adv) => adv.id === b.advertiser_id)?.advertiser_name ||
-              "",
+            advertisers.find((adv) => adv.id === b.advertiser_id)?.advertiser_name ||
+            "",
           );
           break;
         case "date":
@@ -2742,6 +2837,7 @@ export default function AdsPage() {
       const updated = await updateCurrentUser({
         name: settingsProfileName.trim() || user.name || "User",
         image: settingsProfileImage || "",
+        whatsapp_number: settingsProfileWhatsapp.trim(),
       });
       if (!updated) {
         throw new Error("Failed to update profile");
@@ -2916,6 +3012,133 @@ export default function AdsPage() {
     }, 500);
   };
 
+  const handleSettingsAddTelegramChatId = async () => {
+    const label = settingsTelegramNewLabel.trim();
+    const chatId = settingsTelegramNewChatId.trim();
+    if (!label || !chatId) {
+      return;
+    }
+
+    setSettingsTelegramAdding(true);
+    setSettingsNotificationMessage(null);
+    try {
+      await updateDb((currentDb) => {
+        const list = Array.isArray(currentDb.telegram_chat_ids)
+          ? currentDb.telegram_chat_ids
+          : [];
+        if (list.some((item) => String(item.chat_id || "").trim() === chatId)) {
+          throw new Error("That chat ID already exists.");
+        }
+        const now = new Date().toISOString();
+        currentDb.telegram_chat_ids = [
+          ...list,
+          {
+            id: createId(),
+            label,
+            chat_id: chatId,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+          },
+        ];
+        return currentDb;
+      });
+      setDb(readDb());
+      setSettingsTelegramNewLabel("");
+      setSettingsTelegramNewChatId("");
+      setSettingsNotificationMessage({
+        type: "success",
+        text: "Telegram chat ID added.",
+      });
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to add Telegram chat ID.",
+      });
+    } finally {
+      setSettingsTelegramAdding(false);
+    }
+  };
+
+  const handleSettingsToggleTelegramChatId = async (id, nextActive) => {
+    try {
+      await updateDb((currentDb) => {
+        const list = Array.isArray(currentDb.telegram_chat_ids)
+          ? currentDb.telegram_chat_ids
+          : [];
+        const now = new Date().toISOString();
+        currentDb.telegram_chat_ids = list.map((item) =>
+          item.id === id ? { ...item, is_active: nextActive, updated_at: now } : item,
+        );
+        return currentDb;
+      });
+      setDb(readDb());
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to update Telegram chat ID.",
+      });
+    }
+  };
+
+  const handleSettingsDeleteTelegramChatId = async (id) => {
+    if (!window.confirm("Delete this Telegram chat ID?")) {
+      return;
+    }
+    try {
+      await updateDb((currentDb) => {
+        const list = Array.isArray(currentDb.telegram_chat_ids)
+          ? currentDb.telegram_chat_ids
+          : [];
+        currentDb.telegram_chat_ids = list.filter((item) => item.id !== id);
+        return currentDb;
+      });
+      setDb(readDb());
+      setSettingsNotificationMessage({
+        type: "success",
+        text: "Telegram chat ID removed.",
+      });
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to remove Telegram chat ID.",
+      });
+    }
+  };
+
+  const handleSettingsTestTelegram = (chatId, label) => {
+    setSettingsTelegramTesting(chatId);
+    setSettingsNotificationMessage(null);
+    window.setTimeout(() => {
+      setSettingsTelegramTesting(null);
+      setSettingsNotificationMessage({
+        type: "success",
+        text: `Test message sent to "${label}"!`,
+      });
+    }, 500);
+  };
+
+  const handleSettingsSetupTelegramWebhook = () => {
+    setSettingsTelegramWebhookLoading(true);
+    setSettingsTelegramWebhookStatus(null);
+    window.setTimeout(() => {
+      setSettingsTelegramWebhookLoading(false);
+      setSettingsTelegramWebhookStatus({
+        type: "success",
+        text: "Webhook registered. Telegram quick actions are ready.",
+      });
+    }, 600);
+  };
+
   const handleSettingsCheckReminders = () => {
     setSettingsNotificationChecking(true);
     setSettingsReminderResults(null);
@@ -2966,6 +3189,18 @@ export default function AdsPage() {
             status: "queued",
             ad_name: adItem.ad_name,
           });
+        }
+        if (settingsNotification.telegram_enabled) {
+          settingsTelegramChatIds
+            .filter((item) => item.is_active !== false && item.chat_id)
+            .forEach((item) => {
+              results.push({
+                type: "admin-telegram",
+                to: item.label || item.chat_id,
+                status: "queued",
+                ad_name: adItem.ad_name,
+              });
+            });
         }
         if (advertiser?.email) {
           results.push({
@@ -3032,65 +3267,144 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsSyncAdvertiserSpending = async () => {
-    setSettingsSyncing(true);
-    setSettingsSyncError("");
-    setSettingsSyncResult(null);
+  const handleSettingsRunSync = async () => {
+    setSyncing(true);
+    setSettingsSystemError("");
+    setSettingsSystemSyncResult(null);
 
     try {
-      const totalsByAdvertiser = new Map();
-      for (const invoiceItem of invoices) {
-        if (normalizeInvoiceStatus(invoiceItem.status) !== "Paid") {
-          continue;
-        }
-        const advertiserId = invoiceItem.advertiser_id;
-        if (!advertiserId) {
-          continue;
-        }
-        const total =
-          (totalsByAdvertiser.get(advertiserId) || 0) +
-          (Number(invoiceItem.amount) || 0);
-        totalsByAdvertiser.set(advertiserId, total);
+      const response = await fetch("/api/admin/fix-all-spending", {
+        method: "POST",
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(
+          typeof data.error === "string"
+            ? data.error
+            : `Failed to sync advertiser spending (${response.status})`,
+        );
       }
 
-      await updateDb((currentDb) => {
-        const now = new Date().toISOString();
-        currentDb.advertisers = (currentDb.advertisers || []).map((advertiser) => {
-          const total = Number(totalsByAdvertiser.get(advertiser.id) || 0).toFixed(2);
-          return {
-            ...advertiser,
-            total_spend: total,
-            ad_spend: total,
-            updated_at: now,
-          };
-        });
-        return currentDb;
-      });
-
-      const refreshedDb = readDb();
-      setDb(refreshedDb);
-      const results = (refreshedDb.advertisers || []).map((advertiser) => ({
-        id: advertiser.id,
-        name: advertiser.advertiser_name || "Unknown advertiser",
-        newTotal:
-          advertiser.total_spend || advertiser.ad_spend || advertiser.spend || "0.00",
-      }));
-      setSettingsSyncResult({
-        message: `Synced advertiser totals for ${results.length} account${
-          results.length === 1 ? "" : "s"
-        }.`,
-        results,
-      });
+      setSettingsSystemSyncResult(data);
     } catch (error) {
-      setSettingsSyncError(
+      setSettingsSystemError(
         error instanceof Error
           ? error.message
           : "Failed to sync advertiser spending",
       );
     } finally {
-      setSettingsSyncing(false);
+      setSyncing(false);
     }
   };
+
+  const handleWhatsAppMarkRead = (messageId) =>
+    run(async () => {
+      await updateDb((currentDb) => {
+        const now = new Date().toISOString();
+        const messages = Array.isArray(currentDb.whatsapp_messages)
+          ? currentDb.whatsapp_messages
+          : [];
+        currentDb.whatsapp_messages = messages.map((item) =>
+          item.id === messageId
+            ? {
+              ...item,
+              is_read: true,
+              updated_at: now,
+            }
+            : item,
+        );
+        return currentDb;
+      });
+    }, "Message marked as read.");
+
+  const handleWhatsAppMarkReplied = (messageId) =>
+    run(async () => {
+      await updateDb((currentDb) => {
+        const now = new Date().toISOString();
+        const messages = Array.isArray(currentDb.whatsapp_messages)
+          ? currentDb.whatsapp_messages
+          : [];
+        currentDb.whatsapp_messages = messages.map((item) =>
+          item.id === messageId
+            ? {
+              ...item,
+              is_read: true,
+              replied_to: true,
+              updated_at: now,
+            }
+            : item,
+        );
+        return currentDb;
+      });
+    }, "Message marked as replied.");
+
+  const handleWhatsAppDelete = (messageId) =>
+    run(async () => {
+      await updateDb((currentDb) => {
+        const messages = Array.isArray(currentDb.whatsapp_messages)
+          ? currentDb.whatsapp_messages
+          : [];
+        currentDb.whatsapp_messages = messages.filter((item) => item.id !== messageId);
+        return currentDb;
+      });
+      setWhatsAppSelectedMessageId((current) => (current === messageId ? null : current));
+    }, "Message deleted.");
+
+  const handleWhatsAppSeedDemo = () =>
+    run(async () => {
+      await updateDb((currentDb) => {
+        const existing = Array.isArray(currentDb.whatsapp_messages)
+          ? currentDb.whatsapp_messages
+          : [];
+        if (existing.length > 0) {
+          return currentDb;
+        }
+        const now = Date.now();
+        currentDb.whatsapp_messages = [
+          {
+            id: createId(),
+            from_name: "Michael Rivera",
+            from_number: "+1 (786) 555-0188",
+            advertiser_name: "Rivera Landscaping",
+            message_text: "Can we move the promo post to tomorrow at 10:00 AM?",
+            notes: "Requested schedule adjustment.",
+            is_read: false,
+            replied_to: false,
+            created_at: new Date(now - 1000 * 60 * 12).toISOString(),
+            updated_at: new Date(now - 1000 * 60 * 12).toISOString(),
+          },
+          {
+            id: createId(),
+            from_name: "Jasmine Lee",
+            from_number: "+1 (305) 555-0135",
+            advertiser_name: "Lee Fitness Studio",
+            message_text:
+              "Please include the new discount code in the next ad creative.",
+            notes: "",
+            is_read: true,
+            replied_to: true,
+            created_at: new Date(now - 1000 * 60 * 60 * 3).toISOString(),
+            updated_at: new Date(now - 1000 * 60 * 60 * 2.5).toISOString(),
+          },
+          {
+            id: createId(),
+            from_name: "Support Queue",
+            from_number: "+1 (877) 555-0101",
+            advertiser_name: "General",
+            message_text: "New inbound message routed from webhook.",
+            notes: "Auto-imported.",
+            is_read: false,
+            replied_to: false,
+            created_at: new Date(now - 1000 * 60 * 4).toISOString(),
+            updated_at: new Date(now - 1000 * 60 * 4).toISOString(),
+          },
+        ];
+        return currentDb;
+      });
+    }, "Sample WhatsApp messages loaded.");
+
+
 
   const handleAdsSort = (key) => {
     setAdsSortConfig((current) => {
@@ -3376,16 +3690,7 @@ export default function AdsPage() {
     setShowProfileDropdown(false);
   };
 
-  const syncDashboardData = () => {
-    if (syncing) {
-      return;
-    }
-    setSyncing(true);
-    setDb(readDb());
-    setMessage("Dashboard synced.");
-    window.setTimeout(() => setMessage(""), 1800);
-    window.setTimeout(() => setSyncing(false), 500);
-  };
+
 
   const openAdvertiserMenu = (advertiserId, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -3650,7 +3955,8 @@ export default function AdsPage() {
 
   const settingsProfileHasChanges =
     settingsProfileName !== (user?.name || "") ||
-    settingsProfileImage !== (user?.image || "");
+    settingsProfileImage !== (user?.image || "") ||
+    settingsProfileWhatsapp !== (user?.whatsapp_number || "");
 
   if (!ready) {
     return (
@@ -3757,9 +4063,8 @@ export default function AdsPage() {
         )}
 
         <main
-          className={`flex-1 overflow-auto bg-gray-50 ${
-            activeSection === "Calendar" ? "p-0" : "p-8"
-          }`}
+          className={`flex-1 overflow-auto bg-gray-50 ${activeSection === "Calendar" ? "p-0" : "p-8"
+            }`}
         >
           {message ? (
             <div className="mb-4 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
@@ -3773,15 +4078,6 @@ export default function AdsPage() {
                   <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
                   <p className="text-gray-600 mt-1">Overview of your ad management</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={syncDashboardData}
-                  disabled={syncing}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <RefreshCw className={`w-4 h-4 ${syncing ? "animate-spin" : ""}`} />
-                  {syncing ? "Syncing..." : "Sync Data"}
-                </button>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 mb-8">
@@ -3892,11 +4188,10 @@ export default function AdsPage() {
                                 {formatTime(item.post_time)}
                               </p>
                               <span
-                                className={`inline-block mt-1 rounded px-2 py-0.5 text-xs font-medium ${
-                                  item.status === "Published"
-                                    ? "bg-gray-100 text-gray-700"
-                                    : "bg-gray-50 text-gray-600"
-                                }`}
+                                className={`inline-block mt-1 rounded px-2 py-0.5 text-xs font-medium ${item.status === "Published"
+                                  ? "bg-gray-100 text-gray-700"
+                                  : "bg-gray-50 text-gray-600"
+                                  }`}
                               >
                                 {item.status || "Draft"}
                               </span>
@@ -4055,18 +4350,17 @@ export default function AdsPage() {
                             </div>
                             <div className="ml-4 text-right flex-shrink-0">
                               <span
-                                className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-                                  item.status === "Published"
-                                    ? "bg-gray-100 text-gray-700"
-                                    : "bg-gray-50 text-gray-600"
-                                }`}
+                                className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${item.status === "Published"
+                                  ? "bg-gray-100 text-gray-700"
+                                  : "bg-gray-50 text-gray-600"
+                                  }`}
                               >
                                 {item.status || "Draft"}
                               </span>
                               <p className="mt-1 text-xs text-gray-500">
                                 {formatRelativeTime(
                                   item.created_at ||
-                                    `${item.post_date || ""}T${item.post_time || "00:00:00"}`,
+                                  `${item.post_date || ""}T${item.post_time || "00:00:00"}`,
                                 )}
                               </p>
                             </div>
@@ -4150,33 +4444,30 @@ export default function AdsPage() {
                       <div className="flex border border-gray-300 rounded-lg overflow-hidden">
                         <button
                           onClick={() => setCalendarMode("month")}
-                          className={`px-3 py-1.5 text-sm ${
-                            calendarMode === "month"
-                              ? "bg-gray-900 text-white"
-                              : "bg-white text-gray-700 hover:bg-gray-50"
-                          }`}
+                          className={`px-3 py-1.5 text-sm ${calendarMode === "month"
+                            ? "bg-gray-900 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                            }`}
                           type="button"
                         >
                           Month
                         </button>
                         <button
                           onClick={() => setCalendarMode("week")}
-                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${
-                            calendarMode === "week"
-                              ? "bg-gray-900 text-white"
-                              : "bg-white text-gray-700 hover:bg-gray-50"
-                          }`}
+                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${calendarMode === "week"
+                            ? "bg-gray-900 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                            }`}
                           type="button"
                         >
                           Week
                         </button>
                         <button
                           onClick={() => setCalendarMode("day")}
-                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${
-                            calendarMode === "day"
-                              ? "bg-gray-900 text-white"
-                              : "bg-white text-gray-700 hover:bg-gray-50"
-                          }`}
+                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${calendarMode === "day"
+                            ? "bg-gray-900 text-white"
+                            : "bg-white text-gray-700 hover:bg-gray-50"
+                            }`}
                           type="button"
                         >
                           Day
@@ -4222,11 +4513,10 @@ export default function AdsPage() {
 
                       <button
                         onClick={() => setCalendarShowFilters((current) => !current)}
-                        className={`px-3 py-2 border border-gray-300 rounded-lg text-sm flex items-center gap-2 ${
-                          calendarShowFilters
-                            ? "bg-gray-900 text-white"
-                            : "bg-white text-gray-700 hover:bg-gray-50"
-                        }`}
+                        className={`px-3 py-2 border border-gray-300 rounded-lg text-sm flex items-center gap-2 ${calendarShowFilters
+                          ? "bg-gray-900 text-white"
+                          : "bg-white text-gray-700 hover:bg-gray-50"
+                          }`}
                         type="button"
                       >
                         <Filter className="w-4 h-4" />
@@ -4387,8 +4677,7 @@ export default function AdsPage() {
                                   title="View Details"
                                   onClick={() => {
                                     setMessage(
-                                      `${item.ad_name || "Submission"} by ${
-                                        item.advertiser_name || "unknown advertiser"
+                                      `${item.ad_name || "Submission"} by ${item.advertiser_name || "unknown advertiser"
                                       }`,
                                     );
                                     window.setTimeout(() => setMessage(""), 1800);
@@ -4470,6 +4759,235 @@ export default function AdsPage() {
             </div>
           )}
 
+          {activeSection === "WhatsApp" && (
+            <div className="max-w-[1300px] mx-auto">
+              <div className="mb-8">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+                      <MessageSquare className="w-8 h-8 text-green-600" />
+                      WhatsApp Messages
+                    </h1>
+                    <p className="text-gray-600 mt-2">
+                      Incoming messages from advertisers and customers
+                    </p>
+                  </div>
+                  {whatsAppUnreadCount > 0 && (
+                    <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold">
+                      {whatsAppUnreadCount} unread
+                    </div>
+                  )}
+                </div>
+                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-blue-900">Webhook URL</p>
+                  <p className="text-sm text-blue-700 mt-1">
+                    Configure this endpoint in your WhatsApp provider:
+                  </p>
+                  <code className="block mt-2 bg-white px-3 py-2 rounded text-sm text-blue-900 border border-blue-200">
+                    {typeof window !== "undefined"
+                      ? `${window.location.origin}/api/whatsapp/webhook`
+                      : "/api/whatsapp/webhook"}
+                  </code>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-gray-200">
+                <div className="flex gap-4 items-center flex-wrap">
+                  <div className="flex-1 min-w-[300px] relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search messages, phone numbers, advertisers..."
+                      value={whatsAppSearchTerm}
+                      onChange={(event) => setWhatsAppSearchTerm(event.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWhatsAppFilterUnread((current) => !current)}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${whatsAppFilterUnread
+                      ? "bg-green-600 text-white"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      }`}
+                  >
+                    Unread Only
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-200">
+                    <h2 className="text-lg font-semibold text-gray-900">Message Inbox</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Review and track incoming WhatsApp communication.
+                    </p>
+                  </div>
+
+                  {filteredWhatsAppMessages.length === 0 ? (
+                    <div className="p-10 text-center">
+                      <p className="text-sm text-gray-500 mb-4">
+                        {whatsAppMessages.length === 0
+                          ? "No WhatsApp messages yet."
+                          : "No messages match your filters."}
+                      </p>
+                      {whatsAppMessages.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={handleWhatsAppSeedDemo}
+                          className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+                        >
+                          Load sample messages
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="max-h-[560px] overflow-y-auto divide-y divide-gray-200">
+                      {filteredWhatsAppMessages.map((item) => {
+                        const isRead = Boolean(item.is_read ?? item.isRead ?? false);
+                        const isReplied = Boolean(item.replied_to ?? item.repliedTo ?? false);
+                        const sender =
+                          item.from_name || item.advertiser_name || item.from_number || "Unknown";
+                        const snippet = String(item.message_text || item.message || "").trim();
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setWhatsAppSelectedMessageId(item.id)}
+                            className={`w-full text-left px-6 py-4 hover:bg-gray-50 transition-colors ${selectedWhatsAppMessage?.id === item.id ? "bg-blue-50/60" : ""
+                              }`}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  {!isRead && (
+                                    <span className="w-2 h-2 rounded-full bg-green-600 shrink-0" />
+                                  )}
+                                  <p className="text-sm font-semibold text-gray-900 truncate">
+                                    {sender}
+                                  </p>
+                                  {isReplied && (
+                                    <span className="px-2 py-0.5 text-[11px] font-medium bg-green-100 text-green-800 rounded-full">
+                                      Replied
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {item.from_number || "No phone number"}
+                                </p>
+                                <p className="text-sm text-gray-700 mt-2 truncate">
+                                  {snippet || "No message body"}
+                                </p>
+                              </div>
+                              <p className="text-xs text-gray-500 shrink-0">
+                                {formatDateTime(item.created_at)}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                  {!selectedWhatsAppMessage ? (
+                    <div className="h-full flex items-center justify-center text-center text-gray-500 text-sm">
+                      Select a message to view details.
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          {selectedWhatsAppMessage.from_name ||
+                            selectedWhatsAppMessage.advertiser_name ||
+                            selectedWhatsAppMessage.from_number ||
+                            "Unknown Sender"}
+                        </h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                          {selectedWhatsAppMessage.from_number || "No phone number"}
+                        </p>
+                      </div>
+
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <p className="font-medium text-gray-700">Advertiser</p>
+                          <p className="text-gray-600">
+                            {selectedWhatsAppMessage.advertiser_name || "Unassigned"}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Received</p>
+                          <p className="text-gray-600">
+                            {formatDateTime(selectedWhatsAppMessage.created_at)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-700">Message</p>
+                          <p className="text-gray-900 whitespace-pre-wrap leading-relaxed mt-1">
+                            {String(
+                              selectedWhatsAppMessage.message_text ||
+                              selectedWhatsAppMessage.message ||
+                              "No message body",
+                            )}
+                          </p>
+                        </div>
+                        {selectedWhatsAppMessage.notes && (
+                          <div>
+                            <p className="font-medium text-gray-700">Notes</p>
+                            <p className="text-gray-600 whitespace-pre-wrap">
+                              {selectedWhatsAppMessage.notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-4 border-t border-gray-200 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleWhatsAppMarkRead(selectedWhatsAppMessage.id)}
+                          disabled={Boolean(
+                            selectedWhatsAppMessage.is_read ??
+                            selectedWhatsAppMessage.isRead ??
+                            false,
+                          )}
+                          className="px-3 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Mark Read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleWhatsAppMarkReplied(selectedWhatsAppMessage.id)}
+                          disabled={Boolean(
+                            selectedWhatsAppMessage.replied_to ??
+                            selectedWhatsAppMessage.repliedTo ??
+                            false,
+                          )}
+                          className="px-3 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Mark Replied
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm("Delete this message?")) {
+                              handleWhatsAppDelete(selectedWhatsAppMessage.id);
+                            }
+                          }}
+                          className="px-3 py-2 bg-white text-red-700 text-sm font-medium rounded-lg border border-red-200 hover:bg-red-50 transition-colors inline-flex items-center gap-1.5"
+                        >
+                          <Trash2 size={14} />
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeSection === "Ads" && view === "list" && (
             <div className="max-w-[1400px] mx-auto">
               <div className="mb-8">
@@ -4481,286 +4999,284 @@ export default function AdsPage() {
               </div>
 
               <div className="flex items-center gap-2 mb-6 min-w-0">
-                  <select
-                    value={adsFilters.status}
-                    onChange={(event) =>
-                      setAdsFilters((current) => ({ ...current, status: event.target.value }))
-                    }
-                    className="w-[118px] h-11 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all shrink-0"
-                    style={adsSelectStyle}
-                  >
-                    <option value="All Ads">All Ads</option>
-                    <option value="Upcoming Ads">Upcoming Ads</option>
-                    <option value="Past Ads">Past Ads</option>
-                    <option value="Published">Published</option>
-                    <option value="Draft">Draft</option>
-                    <option value="Scheduled">Scheduled</option>
-                  </select>
+                <select
+                  value={adsFilters.status}
+                  onChange={(event) =>
+                    setAdsFilters((current) => ({ ...current, status: event.target.value }))
+                  }
+                  className="w-[118px] h-11 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all shrink-0"
+                  style={adsSelectStyle}
+                >
+                  <option value="All Ads">All Ads</option>
+                  <option value="Upcoming Ads">Upcoming Ads</option>
+                  <option value="Past Ads">Past Ads</option>
+                  <option value="Published">Published</option>
+                  <option value="Draft">Draft</option>
+                  <option value="Scheduled">Scheduled</option>
+                </select>
 
-                  <button
-                    onClick={() =>
-                      setAdsFilters((current) => ({
-                        ...current,
-                        status: current.status === "Today" ? "All Ads" : "Today",
-                      }))
-                    }
-                    className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${
-                      adsFilters.status === "Today"
-                        ? "bg-gray-900 text-white"
-                        : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                <button
+                  onClick={() =>
+                    setAdsFilters((current) => ({
+                      ...current,
+                      status: current.status === "Today" ? "All Ads" : "Today",
+                    }))
+                  }
+                  className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${adsFilters.status === "Today"
+                    ? "bg-gray-900 text-white"
+                    : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
                     }`}
+                  type="button"
+                >
+                  {adsFilters.status === "Today" ? <X size={16} /> : <Clock size={16} />}
+                  Today&apos;s Ads
+                </button>
+
+                <button
+                  onClick={() =>
+                    setAdsFilters((current) => ({
+                      ...current,
+                      status: current.status === "This Week" ? "All Ads" : "This Week",
+                    }))
+                  }
+                  className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${adsFilters.status === "This Week"
+                    ? "bg-gray-900 text-white"
+                    : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                    }`}
+                  type="button"
+                >
+                  {adsFilters.status === "This Week" ? (
+                    <X size={16} />
+                  ) : (
+                    <Calendar size={16} />
+                  )}
+                  This Week
+                </button>
+
+                <div className="relative" ref={adsAdvancedFiltersRef}>
+                  <button
+                    onClick={() => setAdsShowAdvancedFilters((current) => !current)}
+                    className="h-11 min-w-[150px] px-3.5 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0"
                     type="button"
                   >
-                    {adsFilters.status === "Today" ? <X size={16} /> : <Clock size={16} />}
-                    Today&apos;s Ads
+                    <Filter size={16} />
+                    Advanced filters
+                    {adsActiveAdvancedFilterCount > 0 ? (
+                      <span className="ml-1 px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
+                        {adsActiveAdvancedFilterCount}
+                      </span>
+                    ) : null}
+                    <ChevronDown size={16} />
                   </button>
 
-                  <button
-                    onClick={() =>
-                      setAdsFilters((current) => ({
-                        ...current,
-                        status: current.status === "This Week" ? "All Ads" : "This Week",
-                      }))
-                    }
-                    className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${
-                      adsFilters.status === "This Week"
-                        ? "bg-gray-900 text-white"
-                        : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-                    }`}
-                    type="button"
-                  >
-                    {adsFilters.status === "This Week" ? (
-                      <X size={16} />
-                    ) : (
-                      <Calendar size={16} />
-                    )}
-                    This Week
-                  </button>
-
-                  <div className="relative" ref={adsAdvancedFiltersRef}>
-                    <button
-                      onClick={() => setAdsShowAdvancedFilters((current) => !current)}
-                      className="h-11 min-w-[150px] px-3.5 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0"
-                      type="button"
-                    >
-                      <Filter size={16} />
-                      Advanced filters
-                      {adsActiveAdvancedFilterCount > 0 ? (
-                        <span className="ml-1 px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
-                          {adsActiveAdvancedFilterCount}
-                        </span>
-                      ) : null}
-                      <ChevronDown size={16} />
-                    </button>
-
-                    {adsShowAdvancedFilters ? (
-                      <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                              Date Range
-                            </label>
-                            <button
-                              onClick={() =>
-                                setAdsShowDateRangePicker((current) => !current)
-                              }
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
-                              type="button"
-                            >
-                              <Calendar size={16} />
-                              {adsFilters.dateFrom && adsFilters.dateTo
-                                ? `${adsFilters.dateFrom} - ${adsFilters.dateTo}`
-                                : "Select date range"}
-                            </button>
-                            {adsShowDateRangePicker ? (
-                              <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <input
-                                    type="date"
-                                    value={adsFilters.dateFrom}
-                                    onChange={(event) =>
-                                      setAdsFilters((current) => ({
-                                        ...current,
-                                        dateFrom: event.target.value,
-                                      }))
-                                    }
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                                  />
-                                  <input
-                                    type="date"
-                                    value={adsFilters.dateTo}
-                                    onChange={(event) =>
-                                      setAdsFilters((current) => ({
-                                        ...current,
-                                        dateTo: event.target.value,
-                                      }))
-                                    }
-                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                                  />
-                                </div>
-                                {adsFilters.dateFrom || adsFilters.dateTo ? (
-                                  <button
-                                    onClick={() =>
-                                      setAdsFilters((current) => ({
-                                        ...current,
-                                        dateFrom: "",
-                                        dateTo: "",
-                                      }))
-                                    }
-                                    className="w-full mt-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
-                                    type="button"
-                                  >
-                                    Clear Dates
-                                  </button>
-                                ) : null}
+                  {adsShowAdvancedFilters ? (
+                    <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                            Date Range
+                          </label>
+                          <button
+                            onClick={() =>
+                              setAdsShowDateRangePicker((current) => !current)
+                            }
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
+                            type="button"
+                          >
+                            <Calendar size={16} />
+                            {adsFilters.dateFrom && adsFilters.dateTo
+                              ? `${adsFilters.dateFrom} - ${adsFilters.dateTo}`
+                              : "Select date range"}
+                          </button>
+                          {adsShowDateRangePicker ? (
+                            <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                              <div className="grid grid-cols-2 gap-2">
+                                <input
+                                  type="date"
+                                  value={adsFilters.dateFrom}
+                                  onChange={(event) =>
+                                    setAdsFilters((current) => ({
+                                      ...current,
+                                      dateFrom: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                />
+                                <input
+                                  type="date"
+                                  value={adsFilters.dateTo}
+                                  onChange={(event) =>
+                                    setAdsFilters((current) => ({
+                                      ...current,
+                                      dateTo: event.target.value,
+                                    }))
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                />
                               </div>
-                            ) : null}
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                              Placement
-                            </label>
-                            <select
-                              value={adsFilters.placement}
-                              onChange={(event) =>
-                                setAdsFilters((current) => ({
-                                  ...current,
-                                  placement: event.target.value,
-                                }))
-                              }
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                              style={adsSelectStyle}
-                            >
-                              <option value="All Placement">All Placement</option>
-                              {adsPlacementOptions.map((item) => (
-                                <option key={item} value={item}>
-                                  {item}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                              Post Type
-                            </label>
-                            <select
-                              value={adsFilters.postType}
-                              onChange={(event) =>
-                                setAdsFilters((current) => ({
-                                  ...current,
-                                  postType: event.target.value,
-                                }))
-                              }
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                              style={adsSelectStyle}
-                            >
-                              <option value="All post types">All post types</option>
-                              {adsPostTypeOptions.map((item) => (
-                                <option key={item} value={item}>
-                                  {item}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                              Advertiser
-                            </label>
-                            <select
-                              value={adsFilters.advertiser}
-                              onChange={(event) =>
-                                setAdsFilters((current) => ({
-                                  ...current,
-                                  advertiser: event.target.value,
-                                }))
-                              }
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                              style={adsSelectStyle}
-                            >
-                              <option value="All Advertisers">All Advertisers</option>
-                              {adsAdvertiserOptions.map((item) => (
-                                <option key={item} value={item}>
-                                  {item}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                              Payment Status
-                            </label>
-                            <select
-                              value={adsFilters.payment}
-                              onChange={(event) =>
-                                setAdsFilters((current) => ({
-                                  ...current,
-                                  payment: event.target.value,
-                                }))
-                              }
-                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                              style={adsSelectStyle}
-                            >
-                              <option value="All Payment Status">All Payment Status</option>
-                              <option value="Paid">Paid</option>
-                              <option value="Pending">Pending</option>
-                              <option value="Refunded">Refunded</option>
-                            </select>
-                          </div>
-
-                          {adsActiveAdvancedFilterCount > 0 ? (
-                            <button
-                              onClick={clearAdsAdvancedFilters}
-                              className="w-full mt-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                              type="button"
-                            >
-                              <X size={16} />
-                              Clear Advanced Filters
-                            </button>
+                              {adsFilters.dateFrom || adsFilters.dateTo ? (
+                                <button
+                                  onClick={() =>
+                                    setAdsFilters((current) => ({
+                                      ...current,
+                                      dateFrom: "",
+                                      dateTo: "",
+                                    }))
+                                  }
+                                  className="w-full mt-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+                                  type="button"
+                                >
+                                  Clear Dates
+                                </button>
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                            Placement
+                          </label>
+                          <select
+                            value={adsFilters.placement}
+                            onChange={(event) =>
+                              setAdsFilters((current) => ({
+                                ...current,
+                                placement: event.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="All Placement">All Placement</option>
+                            {adsPlacementOptions.map((item) => (
+                              <option key={item} value={item}>
+                                {item}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                            Post Type
+                          </label>
+                          <select
+                            value={adsFilters.postType}
+                            onChange={(event) =>
+                              setAdsFilters((current) => ({
+                                ...current,
+                                postType: event.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="All post types">All post types</option>
+                            {adsPostTypeOptions.map((item) => (
+                              <option key={item} value={item}>
+                                {item}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                            Advertiser
+                          </label>
+                          <select
+                            value={adsFilters.advertiser}
+                            onChange={(event) =>
+                              setAdsFilters((current) => ({
+                                ...current,
+                                advertiser: event.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="All Advertisers">All Advertisers</option>
+                            {adsAdvertiserOptions.map((item) => (
+                              <option key={item} value={item}>
+                                {item}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                            Payment Status
+                          </label>
+                          <select
+                            value={adsFilters.payment}
+                            onChange={(event) =>
+                              setAdsFilters((current) => ({
+                                ...current,
+                                payment: event.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                            style={adsSelectStyle}
+                          >
+                            <option value="All Payment Status">All Payment Status</option>
+                            <option value="Paid">Paid</option>
+                            <option value="Pending">Pending</option>
+                            <option value="Refunded">Refunded</option>
+                          </select>
+                        </div>
+
+                        {adsActiveAdvancedFilterCount > 0 ? (
+                          <button
+                            onClick={clearAdsAdvancedFilters}
+                            className="w-full mt-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                            type="button"
+                          >
+                            <X size={16} />
+                            Clear Advanced Filters
+                          </button>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </div>
-                  <div className="relative flex-1 min-w-[170px]">
-                    <Search
-                      size={16}
-                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Search ads..."
-                      value={adsFilters.search}
-                      onChange={(event) =>
-                        setAdsFilters((current) => ({
-                          ...current,
-                          search: event.target.value,
-                        }))
-                      }
-                      className="h-11 w-full min-w-0 pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
-                    />
-                  </div>
-                  <button
-                    onClick={exportVisibleAdsCsv}
-                    className="h-11 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2 whitespace-nowrap shrink-0"
-                    type="button"
-                  >
-                    <Download size={16} />
-                    Export
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAd(blankAd);
-                      setView("createAd");
-                    }}
-                    className="h-11 min-w-[124px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center text-center whitespace-nowrap shrink-0"
-                    type="button"
-                  >
-                    Create new ad
-                  </button>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="relative flex-1 min-w-[170px]">
+                  <Search
+                    size={16}
+                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Search ads..."
+                    value={adsFilters.search}
+                    onChange={(event) =>
+                      setAdsFilters((current) => ({
+                        ...current,
+                        search: event.target.value,
+                      }))
+                    }
+                    className="h-11 w-full min-w-0 pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                  />
+                </div>
+                <button
+                  onClick={exportVisibleAdsCsv}
+                  className="h-11 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2 whitespace-nowrap shrink-0"
+                  type="button"
+                >
+                  <Download size={16} />
+                  Export
+                </button>
+                <button
+                  onClick={() => {
+                    setAd(blankAd);
+                    setView("createAd");
+                  }}
+                  className="h-11 min-w-[124px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center text-center whitespace-nowrap shrink-0"
+                  type="button"
+                >
+                  Create new ad
+                </button>
               </div>
 
               <div className="mb-4 text-sm text-gray-600">
@@ -5015,11 +5531,10 @@ export default function AdsPage() {
                         key={postType.value}
                         type="button"
                         onClick={() => setCreateAdPostType(postType.value)}
-                        className={`px-4 py-4 border rounded-xl text-left transition-all bg-white ${
-                          selectedCreateAdPostType === postType.value
-                            ? "border-gray-900 ring-2 ring-gray-900 ring-offset-0 shadow-sm"
-                            : "border-gray-200"
-                        }`}
+                        className={`px-4 py-4 border rounded-xl text-left transition-all bg-white ${selectedCreateAdPostType === postType.value
+                          ? "border-gray-900 ring-2 ring-gray-900 ring-offset-0 shadow-sm"
+                          : "border-gray-200"
+                          }`}
                       >
                         <span className="text-sm font-semibold text-gray-900 block mb-1">
                           {postType.title}
@@ -5421,15 +5936,13 @@ export default function AdsPage() {
                                   {openAdvertiserMenuId === item.id ? (
                                     <div
                                       ref={advertiserMenuRef}
-                                      className={`absolute ${
-                                        advertiserMenuPosition.vertical === "top"
-                                          ? "bottom-full mb-1"
-                                          : "top-full mt-1"
-                                      } ${
-                                        advertiserMenuPosition.horizontal === "left"
+                                      className={`absolute ${advertiserMenuPosition.vertical === "top"
+                                        ? "bottom-full mb-1"
+                                        : "top-full mt-1"
+                                        } ${advertiserMenuPosition.horizontal === "left"
                                           ? "right-0"
                                           : "left-auto"
-                                      } w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
+                                        } w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
                                     >
                                       <button
                                         type="button"
@@ -5575,13 +6088,12 @@ export default function AdsPage() {
                                       </p>
                                     </div>
                                     <span
-                                      className={`text-xs px-2 py-1 rounded-full ${
-                                        adStatus === "scheduled"
-                                          ? "bg-blue-100 text-blue-800"
-                                          : adStatus === "completed" || adStatus === "published"
-                                            ? "bg-green-100 text-green-800"
-                                            : "bg-gray-100 text-gray-600"
-                                      }`}
+                                      className={`text-xs px-2 py-1 rounded-full ${adStatus === "scheduled"
+                                        ? "bg-blue-100 text-blue-800"
+                                        : adStatus === "completed" || adStatus === "published"
+                                          ? "bg-green-100 text-green-800"
+                                          : "bg-gray-100 text-gray-600"
+                                        }`}
                                     >
                                       {adItem.status || "Draft"}
                                     </span>
@@ -5935,15 +6447,13 @@ export default function AdsPage() {
                             {openProductMenuId === item.id ? (
                               <div
                                 ref={productMenuRef}
-                                className={`absolute ${
-                                  productMenuPosition.vertical === "top"
-                                    ? "bottom-full mb-1"
-                                    : "top-full mt-1"
-                                } ${
-                                  productMenuPosition.horizontal === "left"
+                                className={`absolute ${productMenuPosition.vertical === "top"
+                                  ? "bottom-full mb-1"
+                                  : "top-full mt-1"
+                                  } ${productMenuPosition.horizontal === "left"
                                     ? "right-0"
                                     : "left-auto"
-                                } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+                                  } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
                               >
                                 <button
                                   type="button"
@@ -6373,15 +6883,13 @@ export default function AdsPage() {
                                 {openInvoiceMenuId === item.id ? (
                                   <div
                                     ref={invoiceMenuRef}
-                                    className={`absolute ${
-                                      invoiceMenuPosition.vertical === "top"
-                                        ? "bottom-full mb-1"
-                                        : "top-full mt-1"
-                                    } ${
-                                      invoiceMenuPosition.horizontal === "left"
+                                    className={`absolute ${invoiceMenuPosition.vertical === "top"
+                                      ? "bottom-full mb-1"
+                                      : "top-full mt-1"
+                                      } ${invoiceMenuPosition.horizontal === "left"
                                         ? "right-0"
                                         : "left-auto"
-                                    } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+                                      } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
                                   >
                                     <button
                                       type="button"
@@ -6467,7 +6975,7 @@ export default function AdsPage() {
                             <p className="font-medium text-gray-900">
                               {formatInvoiceListDate(
                                 invoicePreviewModal.due_date ||
-                                  invoicePreviewModal.created_at,
+                                invoicePreviewModal.created_at,
                               )}
                             </p>
                           </div>
@@ -6826,11 +7334,10 @@ export default function AdsPage() {
                       key={tab.id}
                       type="button"
                       onClick={() => setSettingsActiveTab(tab.id)}
-                      className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
-                        settingsActiveTab === tab.id
-                          ? "border-gray-900 text-gray-900"
-                          : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                      }`}
+                      className={`pb-3 px-1 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${settingsActiveTab === tab.id
+                        ? "border-gray-900 text-gray-900"
+                        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                        }`}
                     >
                       {tab.label}
                     </button>
@@ -6915,6 +7422,26 @@ export default function AdsPage() {
                       />
                       <p className="text-xs text-gray-500 mt-2">
                         Email address cannot be changed
+                      </p>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="settings-whatsapp-number"
+                        className="block text-sm font-medium text-gray-700 mb-2"
+                      >
+                        WhatsApp Number
+                      </label>
+                      <input
+                        id="settings-whatsapp-number"
+                        type="tel"
+                        value={settingsProfileWhatsapp}
+                        onChange={(event) => setSettingsProfileWhatsapp(event.target.value)}
+                        placeholder="+1234567890"
+                        className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                      />
+                      <p className="text-xs text-gray-500 mt-2">
+                        Use international format (e.g. +1234567890) for reminders.
                       </p>
                     </div>
 
@@ -7109,7 +7636,7 @@ export default function AdsPage() {
                   </div>
                 </div>
               )}
-              {settingsActiveTab === "general" && (
+              {settingsActiveTab === "notifications" && (
                 <div className="bg-white rounded-lg border border-gray-200">
                   <div className="p-6 border-b border-gray-200">
                     <div className="flex items-center gap-3 mb-2">
@@ -7220,6 +7747,198 @@ export default function AdsPage() {
                       <div className="flex items-start gap-3 mb-4">
                         <input
                           type="checkbox"
+                          id="settings-telegram-enabled"
+                          checked={Boolean(settingsNotification.telegram_enabled)}
+                          onChange={(event) =>
+                            setSettingsNotification((current) => ({
+                              ...current,
+                              telegram_enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Send size={16} className="text-gray-700" />
+                            <label
+                              htmlFor="settings-telegram-enabled"
+                              className="text-sm font-medium text-gray-900 cursor-pointer"
+                            >
+                              Telegram notifications
+                            </label>
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            Send reminders with media to Telegram
+                          </p>
+                        </div>
+                      </div>
+
+                      {settingsNotification.telegram_enabled && (
+                        <div className="ml-7 space-y-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Chat IDs{" "}
+                              <span className="text-gray-400 font-normal">
+                                ({settingsActiveTelegramCount} active)
+                              </span>
+                            </label>
+
+                            {settingsTelegramChatIds.length === 0 ? (
+                              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                                <p className="text-sm text-gray-500">
+                                  No Telegram chat IDs added yet
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="space-y-2 mb-4">
+                                {settingsTelegramChatIds.map((item) => (
+                                  <div
+                                    key={item.id || item.chat_id}
+                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${item.is_active === false
+                                      ? "bg-gray-50 border-gray-200 opacity-50"
+                                      : "bg-white border-gray-200"
+                                      }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSettingsToggleTelegramChatId(
+                                          item.id,
+                                          item.is_active === false,
+                                        )
+                                      }
+                                      className={`flex items-center justify-center w-5 h-5 rounded border-2 transition-colors ${item.is_active === false
+                                        ? "bg-white border-gray-300"
+                                        : "bg-gray-900 border-gray-900"
+                                        }`}
+                                    >
+                                      {item.is_active !== false && (
+                                        <Check size={14} className="text-white" />
+                                      )}
+                                    </button>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium text-gray-900 truncate">
+                                        {item.label}
+                                      </p>
+                                      <p className="text-xs text-gray-500 font-mono">
+                                        {item.chat_id}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSettingsTestTelegram(
+                                          item.chat_id,
+                                          item.label || item.chat_id,
+                                        )
+                                      }
+                                      disabled={settingsTelegramTesting === item.chat_id}
+                                      className="px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                                    >
+                                      {settingsTelegramTesting === item.chat_id
+                                        ? "Sending..."
+                                        : "Test"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleSettingsDeleteTelegramChatId(item.id)
+                                      }
+                                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex items-end gap-2">
+                              <div className="flex-1">
+                                <input
+                                  type="text"
+                                  placeholder="Label (e.g. Sales Team)"
+                                  value={settingsTelegramNewLabel}
+                                  onChange={(event) =>
+                                    setSettingsTelegramNewLabel(event.target.value)
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <input
+                                  type="text"
+                                  placeholder="Chat ID (e.g. 8751400670)"
+                                  value={settingsTelegramNewChatId}
+                                  onChange={(event) =>
+                                    setSettingsTelegramNewChatId(event.target.value)
+                                  }
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleSettingsAddTelegramChatId}
+                                disabled={
+                                  settingsTelegramAdding ||
+                                  !settingsTelegramNewLabel.trim() ||
+                                  !settingsTelegramNewChatId.trim()
+                                }
+                                className="px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                              >
+                                <Plus size={14} />
+                                {settingsTelegramAdding ? "Adding..." : "Add"}
+                              </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">
+                              Message <strong>@userinfobot</strong> on Telegram to find
+                              your chat ID.
+                            </p>
+
+                            <div className="mt-6 pt-4 border-t border-gray-200">
+                              <div className="flex items-center justify-between gap-4 flex-wrap">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <Link size={16} className="text-gray-600" />
+                                    <p className="text-sm font-medium text-gray-900">
+                                      Telegram Webhook
+                                    </p>
+                                  </div>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                    Required for Approve/Reject buttons to work in Telegram.
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={handleSettingsSetupTelegramWebhook}
+                                  disabled={settingsTelegramWebhookLoading}
+                                  className="px-3 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                >
+                                  {settingsTelegramWebhookLoading
+                                    ? "Setting up..."
+                                    : "Setup Webhook"}
+                                </button>
+                              </div>
+                              {settingsTelegramWebhookStatus && (
+                                <div
+                                  className={`mt-3 p-3 rounded-lg text-xs ${settingsTelegramWebhookStatus.type === "success"
+                                    ? "bg-green-50 text-green-800 border border-green-200"
+                                    : "bg-red-50 text-red-800 border border-red-200"
+                                    }`}
+                                >
+                                  {settingsTelegramWebhookStatus.text}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border-t border-gray-200 pt-6">
+                      <div className="flex items-start gap-3 mb-4">
+                        <input
+                          type="checkbox"
                           id="settings-sms-enabled"
                           checked={settingsNotification.sms_enabled}
                           onChange={(event) =>
@@ -7302,13 +8021,12 @@ export default function AdsPage() {
                   <div className="p-6 border-t border-gray-200 bg-gray-50">
                     {settingsNotificationMessage && (
                       <div
-                        className={`mb-4 p-3 rounded-lg text-sm ${
-                          settingsNotificationMessage.type === "success"
-                            ? "bg-green-50 text-green-800 border border-green-200"
-                            : settingsNotificationMessage.type === "info"
-                              ? "bg-blue-50 text-blue-800 border border-blue-200"
-                              : "bg-red-50 text-red-800 border border-red-200"
-                        }`}
+                        className={`mb-4 p-3 rounded-lg text-sm ${settingsNotificationMessage.type === "success"
+                          ? "bg-green-50 text-green-800 border border-green-200"
+                          : settingsNotificationMessage.type === "info"
+                            ? "bg-blue-50 text-blue-800 border border-blue-200"
+                            : "bg-red-50 text-red-800 border border-red-200"
+                          }`}
                       >
                         {settingsNotificationMessage.text}
                       </div>
@@ -7349,7 +8067,7 @@ export default function AdsPage() {
                         disabled={settingsNotificationSaving}
                         className="px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
-                        {settingsNotificationSaving ? "Saving..." : "Save preferences"}
+                        {settingsNotificationSaving ? "Saving..." : "Save Changes"}
                       </button>
                       {settingsNotification.email_enabled && (
                         <button
@@ -7361,24 +8079,20 @@ export default function AdsPage() {
                           }
                           className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
-                          {settingsNotificationTesting ? "Sending..." : "Send test email"}
+                          {settingsNotificationTesting ? "Sending..." : "Send Test Email"}
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={handleSettingsCheckReminders}
                         disabled={settingsNotificationChecking}
-                        className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {settingsNotificationChecking
                           ? "Checking..."
-                          : "Check for reminders now"}
+                          : "Check Reminders Now"}
                       </button>
                     </div>
-                    <p className="mt-3 text-xs text-gray-500">
-                      <strong>Tip:</strong> Open your browser console (F12) to see
-                      detailed logs when checking reminders.
-                    </p>
                   </div>
                 </div>
               )}
@@ -7451,26 +8165,26 @@ export default function AdsPage() {
                       </h3>
                       <p className="text-sm text-gray-500">
                         Recalculate total_spend for all advertisers based on their
-                        "Paid" invoices. This is useful if you notice any discrepancies
-                        in spending totals.
+                        paid invoices. Use this if you notice discrepancies in totals.
                       </p>
                     </div>
+
                     <button
                       type="button"
-                      onClick={handleSettingsSyncAdvertiserSpending}
-                      disabled={settingsSyncing}
+                      onClick={handleSettingsRunSync}
+                      disabled={syncing}
                       className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:bg-gray-400 disabled:cursor-not-allowed text-sm font-medium"
                     >
-                      {settingsSyncing ? "Syncing..." : "Run Sync Now"}
+                      {syncing ? "Syncing..." : "Run Sync Now"}
                     </button>
 
-                    {settingsSyncResult && (
+                    {settingsSystemSyncResult && (
                       <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
                         <p className="text-sm font-medium text-green-900 mb-2">
-                          {settingsSyncResult.message}
+                          {settingsSystemSyncResult.message}
                         </p>
-                        {settingsSyncResult.results &&
-                          settingsSyncResult.results.length > 0 && (
+                        {Array.isArray(settingsSystemSyncResult.results) &&
+                          settingsSystemSyncResult.results.length > 0 && (
                             <div className="mt-2 max-h-[200px] overflow-y-auto">
                               <table className="w-full text-xs">
                                 <thead className="bg-green-100">
@@ -7484,11 +8198,8 @@ export default function AdsPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {settingsSyncResult.results.map((result) => (
-                                    <tr
-                                      key={result.id}
-                                      className="border-t border-green-200"
-                                    >
+                                  {settingsSystemSyncResult.results.map((result) => (
+                                    <tr key={result.id} className="border-t border-green-200">
                                       <td className="px-2 py-1 text-green-800">
                                         {result.name}
                                       </td>
@@ -7504,9 +8215,9 @@ export default function AdsPage() {
                       </div>
                     )}
 
-                    {settingsSyncError && (
+                    {settingsSystemError && (
                       <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                        <p className="text-sm text-red-800">{settingsSyncError}</p>
+                        <p className="text-sm text-red-800">{settingsSystemError}</p>
                       </div>
                     )}
                   </div>
