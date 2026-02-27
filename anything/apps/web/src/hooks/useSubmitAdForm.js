@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { ensureDb, readDb, submitPendingAd } from "@/lib/localDb";
+﻿import { useState } from "react";
 
 const initialFormData = {
   advertiser_name: "",
@@ -11,7 +10,7 @@ const initialFormData = {
   post_date_from: "",
   post_date_to: "",
   custom_dates: [],
-  post_time: "09:00",
+  post_time: "",
   reminder_minutes: 15,
   ad_text: "",
   media: [],
@@ -19,268 +18,11 @@ const initialFormData = {
   notes: "",
 };
 
-const POST_TYPES = {
-  ONE_TIME: "one_time",
-  DAILY: "daily_run",
-  CUSTOM: "custom_schedule",
-};
-
-const normalizePostType = (value) => {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[-\s]+/g, "_");
-
-  if (text === "one_time_post" || text === "one_time") {
-    return POST_TYPES.ONE_TIME;
-  }
-  if (text === "daily_run" || text === "daily") {
-    return POST_TYPES.DAILY;
-  }
-  if (text === "custom_schedule" || text === "custom") {
-    return POST_TYPES.CUSTOM;
-  }
-  return POST_TYPES.ONE_TIME;
-};
-
-const toDateOnly = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const normalizeDateString = (value) => {
-  if (!value) {
-    return "";
-  }
-
-  if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return toDateOnly(value);
-  }
-
-  const asText = String(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asText)) {
-    return asText;
-  }
-
-  const parsed = new Date(asText);
-  if (Number.isNaN(parsed.valueOf())) {
-    return "";
-  }
-
-  return toDateOnly(parsed);
-};
-
-const normalizeTime = (value) => {
-  if (!value) {
-    return "";
-  }
-
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (/^\d{2}:\d{2}:\d{2}$/.test(trimmed)) {
-      return trimmed;
-    }
-    if (/^\d{2}:\d{2}$/.test(trimmed)) {
-      return `${trimmed}:00`;
-    }
-    return trimmed;
-  }
-
-  if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return value.toTimeString().slice(0, 8);
-  }
-
-  return String(value);
-};
-
-const getDatesInRange = (from, to) => {
-  const startString = normalizeDateString(from);
-  const endString = normalizeDateString(to);
-
-  if (!startString || !endString) {
-    return [];
-  }
-
-  const start = new Date(`${startString}T00:00:00`);
-  const end = new Date(`${endString}T00:00:00`);
-
-  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || start > end) {
-    return [];
-  }
-
-  const dates = [];
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    dates.push(toDateOnly(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dates;
-};
-
-const listRecordDates = (record) => {
-  const type = normalizePostType(record?.post_type);
-  const from = normalizeDateString(record?.post_date_from || record?.post_date);
-  const to = normalizeDateString(record?.post_date_to);
-
-  if (type === POST_TYPES.ONE_TIME) {
-    return from ? [from] : [];
-  }
-
-  if (type === POST_TYPES.DAILY) {
-    const effectiveTo = to || from;
-    return getDatesInRange(from, effectiveTo);
-  }
-
-  if (type === POST_TYPES.CUSTOM) {
-    if (!Array.isArray(record?.custom_dates)) {
-      return [];
-    }
-    return record.custom_dates
-      .map((value) => normalizeDateString(value))
-      .filter(Boolean);
-  }
-
-  return from ? [from] : [];
-};
-
-const getMaxAdsPerDay = (db) => {
-  const candidate =
-    Number(db?.admin_settings?.max_ads_per_day) ||
-    Number(db?.admin_settings?.max_ads_per_slot);
-  if (Number.isFinite(candidate) && candidate > 0) {
-    return candidate;
-  }
-  return 5;
-};
-
-const countAdsOnDate = (db, date) => {
-  const target = normalizeDateString(date);
-  if (!target) {
-    return 0;
-  }
-
-  return (db?.ads || []).reduce((count, ad) => {
-    const dates = listRecordDates(ad);
-    return dates.includes(target) ? count + 1 : count;
-  }, 0);
-};
-
-const isOneTimeTimeBlocked = (db, date, time) => {
-  const targetDate = normalizeDateString(date);
-  const targetTime = normalizeTime(time);
-
-  if (!targetDate || !targetTime) {
-    return false;
-  }
-
-  return (db?.ads || []).some((ad) => {
-    const adType = normalizePostType(ad?.post_type);
-    if (adType !== POST_TYPES.ONE_TIME) {
-      return false;
-    }
-
-    const adDate = normalizeDateString(ad?.post_date_from || ad?.post_date);
-    if (adDate !== targetDate) {
-      return false;
-    }
-
-    const adTime = normalizeTime(ad?.post_time);
-    return adTime === targetTime;
-  });
-};
-
-const getAvailabilityResult = (data) => {
-  const db = readDb();
-  const maxAdsPerDay = getMaxAdsPerDay(db);
-  const type = normalizePostType(data.post_type);
-
-  if (type === POST_TYPES.ONE_TIME) {
-    if (!data.post_date_from || !data.post_time) {
-      return { availabilityError: null, fullyBookedDates: [] };
-    }
-
-    const totalAdsOnDate = countAdsOnDate(db, data.post_date_from);
-    const isDayFull = totalAdsOnDate >= maxAdsPerDay;
-    const isTimeBlocked = isOneTimeTimeBlocked(
-      db,
-      data.post_date_from,
-      data.post_time,
-    );
-
-    if (isTimeBlocked) {
-      return {
-        availabilityError:
-          "This time slot is already taken. Please choose a different time.",
-        fullyBookedDates: [],
-      };
-    }
-
-    if (isDayFull) {
-      return {
-        availabilityError:
-          "This date is fully booked. Please choose a different date.",
-        fullyBookedDates: [],
-      };
-    }
-
-    return { availabilityError: null, fullyBookedDates: [] };
-  }
-
-  const datesToCheck =
-    type === POST_TYPES.DAILY
-      ? getDatesInRange(data.post_date_from, data.post_date_to)
-      : (data.custom_dates || [])
-          .map((value) => normalizeDateString(value))
-          .filter(Boolean);
-
-  if (datesToCheck.length === 0) {
-    return { availabilityError: null, fullyBookedDates: [] };
-  }
-
-  const fullyBookedDates = datesToCheck.filter(
-    (date) => countAdsOnDate(db, date) >= maxAdsPerDay,
-  );
-
-  if (fullyBookedDates.length > 0) {
-    const availabilityError =
-      type === POST_TYPES.CUSTOM
-        ? "Some of your selected dates are fully booked."
-        : "Some dates in your range are fully booked.";
-
-    return { availabilityError, fullyBookedDates };
-  }
-
-  return { availabilityError: null, fullyBookedDates: [] };
-};
-
-const getPrimaryPostDate = (data) => {
-  const type = normalizePostType(data.post_type);
-
-  if (type === POST_TYPES.ONE_TIME || type === POST_TYPES.DAILY) {
-    return normalizeDateString(data.post_date_from);
-  }
-
-  return normalizeDateString(data.custom_dates?.[0]);
-};
-
-const isPastDate = (value) => {
-  const dateString = normalizeDateString(value);
-  if (!dateString) {
-    return false;
-  }
-
-  const selected = new Date(`${dateString}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return selected < today;
-};
-
 export function useSubmitAdForm() {
   const [formData, setFormData] = useState(initialFormData);
+  const [submittedData, setSubmittedData] = useState(null);
   const [customDate, setCustomDate] = useState("");
+  const [customTime, setCustomTime] = useState("");
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -289,110 +31,145 @@ export function useSubmitAdForm() {
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
 
-  useEffect(() => {
-    void ensureDb();
-  }, []);
-
-  const validatePastDateTime = (nextData) => {
-    const type = normalizePostType(nextData.post_type);
-
-    if (type === POST_TYPES.ONE_TIME) {
-      if (!nextData.post_date_from || !nextData.post_time) {
-        setPastTimeError(null);
-        return;
-      }
-
-      const selectedDateTime = new Date(
-        `${normalizeDateString(nextData.post_date_from)}T${nextData.post_time}`,
-      );
-
-      if (!Number.isNaN(selectedDateTime.valueOf()) && selectedDateTime < new Date()) {
-        setPastTimeError(
-          "This date and time is in the past. Please choose a future time.",
-        );
-      } else {
-        setPastTimeError(null);
-      }
-      return;
-    }
-
-    if (isPastDate(nextData.post_date_from)) {
-      setPastTimeError("Start date cannot be in the past.");
-      return;
-    }
-
-    if (type === POST_TYPES.CUSTOM) {
-      const hasPastDate = (nextData.custom_dates || []).some((value) => isPastDate(value));
-      if (hasPastDate) {
-        setPastTimeError("Custom schedule cannot include past dates.");
-        return;
-      }
-    }
-
-    setPastTimeError(null);
-  };
-
   const handleChange = (field, value) => {
-    setFormData((previous) => {
-      const next = { ...previous, [field]: value };
-      validatePastDateTime(next);
-      return next;
+    setFormData((prev) => {
+      const updated = { ...prev, [field]: value };
+
+      if (["post_date_from", "post_time"].includes(field)) {
+        const dateVal = field === "post_date_from" ? value : prev.post_date_from;
+        const timeVal = field === "post_time" ? value : prev.post_time;
+
+        if (dateVal && timeVal) {
+          const now = new Date();
+          const selectedDateTime = new Date(`${dateVal}T${timeVal}`);
+
+          if (selectedDateTime < now) {
+            setPastTimeError("This date and time is in the past. Please choose a future time.");
+          } else {
+            setPastTimeError(null);
+          }
+        } else {
+          setPastTimeError(null);
+        }
+      }
+
+      return updated;
     });
 
-    if (
-      ["post_date_from", "post_date_to", "post_time", "post_type", "custom_dates"].includes(field)
-    ) {
+    if (["post_date_from", "post_date_to", "post_time", "post_type"].includes(field)) {
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
   };
 
   const addCustomDate = () => {
-    const dateToAdd = normalizeDateString(customDate);
-    if (!dateToAdd) {
+    if (!customDate) return;
+
+    const selectedDate = new Date(customDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (selectedDate < today) {
+      setError("Cannot select past dates");
       return;
     }
 
-    if (isPastDate(dateToAdd)) {
-      setError("Cannot select past dates.");
-      return;
-    }
+    const alreadyExists = formData.custom_dates.some((entry) => {
+      const existingDate =
+        typeof entry === "object" && entry !== null ? entry.date : entry;
+      return existingDate === customDate;
+    });
 
-    if (formData.custom_dates.includes(dateToAdd)) {
-      setError("This date is already selected.");
-      return;
-    }
+    if (!alreadyExists) {
+      const timeForDate = customTime || formData.post_time || "";
+      const timeWithSeconds =
+        timeForDate && timeForDate.length === 5 ? `${timeForDate}:00` : timeForDate;
 
-    const nextDates = [...formData.custom_dates, dateToAdd].sort();
-    handleChange("custom_dates", nextDates);
-    setCustomDate("");
-    setError(null);
+      const newEntry = {
+        date: customDate,
+        time: timeWithSeconds,
+        reminder_minutes: formData.reminder_minutes || 15,
+      };
+
+      handleChange("custom_dates", [...formData.custom_dates, newEntry]);
+      setCustomDate("");
+      setCustomTime("");
+      setError(null);
+      setAvailabilityError(null);
+      setFullyBookedDates([]);
+    }
   };
 
-  const removeCustomDate = (date) => {
-    const target = normalizeDateString(date);
+  const removeCustomDate = (dateToRemove) => {
     handleChange(
       "custom_dates",
-      formData.custom_dates.filter((entry) => normalizeDateString(entry) !== target),
+      formData.custom_dates.filter((entry) => {
+        const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
+        return dateStr !== dateToRemove;
+      }),
     );
+
+    setAvailabilityError(null);
+    setFullyBookedDates([]);
+  };
+
+  const updateCustomDateTime = (dateStr, newTime) => {
+    const timeWithSeconds =
+      newTime && newTime.length === 5 ? `${newTime}:00` : newTime;
+
+    const updated = formData.custom_dates.map((entry) => {
+      if (typeof entry === "object" && entry !== null && entry.date === dateStr) {
+        return { ...entry, time: timeWithSeconds };
+      }
+
+      if (typeof entry === "string" && entry === dateStr) {
+        return { date: entry, time: timeWithSeconds, reminder_minutes: 15 };
+      }
+
+      return entry;
+    });
+
+    handleChange("custom_dates", updated);
   };
 
   const addMedia = (mediaItem) => {
-    if (!mediaItem?.url) {
-      return;
-    }
-
-    setFormData((previous) => ({
-      ...previous,
-      media: [...previous.media, mediaItem],
+    setFormData((prev) => ({
+      ...prev,
+      media: [...prev.media, mediaItem],
     }));
   };
 
   const removeMedia = (index) => {
-    setFormData((previous) => ({
-      ...previous,
-      media: previous.media.filter((_, itemIndex) => itemIndex !== index),
+    setFormData((prev) => ({
+      ...prev,
+      media: prev.media.filter((_, i) => i !== index),
     }));
+  };
+
+  const getDatesInRange = (from, to) => {
+    const dates = [];
+    const start = new Date(`${from}T00:00:00`);
+    const end = new Date(`${to}T00:00:00`);
+    const current = new Date(start);
+
+    while (current <= end) {
+      const year = current.getFullYear();
+      const month = String(current.getMonth() + 1).padStart(2, "0");
+      const day = String(current.getDate()).padStart(2, "0");
+      dates.push(`${year}-${month}-${day}`);
+      current.setDate(current.getDate() + 1);
+    }
+
+    return dates;
+  };
+
+  const getDateStrings = (customDates) => {
+    return customDates
+      .map((entry) => {
+        if (typeof entry === "object" && entry !== null) return entry.date;
+        return entry;
+      })
+      .filter((date) => date && date.length > 0);
   };
 
   const checkAvailability = async () => {
@@ -401,73 +178,141 @@ export function useSubmitAdForm() {
     setFullyBookedDates([]);
 
     try {
-      await ensureDb();
-      const result = getAvailabilityResult(formData);
-      setAvailabilityError(result.availabilityError);
-      setFullyBookedDates(result.fullyBookedDates);
-    } catch (availabilityIssue) {
-      console.error("Error checking availability:", availabilityIssue);
+      if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
+        const timeWithSeconds =
+          formData.post_time.length === 5 ? `${formData.post_time}:00` : formData.post_time;
+
+        const response = await fetch("/api/ads/availability", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: formData.post_date_from,
+            post_type: formData.post_type,
+            post_time: timeWithSeconds,
+            exclude_ad_id: null,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Availability check failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.available) {
+          if (data.is_time_blocked) {
+            setAvailabilityError("This time slot is already taken. Please choose a different time.");
+          } else if (data.is_day_full) {
+            setAvailabilityError("This date is fully booked. Please choose a different date.");
+          } else {
+            setAvailabilityError("This time slot is not available.");
+          }
+        }
+      } else if (formData.post_type === "Daily Run" && formData.post_date_from && formData.post_date_to) {
+        const dates = getDatesInRange(formData.post_date_from, formData.post_date_to);
+        if (dates.length === 0 || dates.length > 365) return;
+
+        const response = await fetch("/api/ads/availability-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dates,
+            post_type: "Daily Run",
+            exclude_ad_id: null,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Availability check failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const booked = [];
+
+        for (const date of dates) {
+          const info = data.results[date];
+          if (info && info.is_full) booked.push(date);
+        }
+
+        if (booked.length > 0) {
+          setFullyBookedDates(booked);
+          setAvailabilityError("Some dates in your range are fully booked.");
+        }
+      } else if (formData.post_type === "Custom Schedule" && formData.custom_dates.length > 0) {
+        const validDates = getDateStrings(formData.custom_dates);
+        if (validDates.length === 0) return;
+
+        const response = await fetch("/api/ads/availability-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dates: validDates,
+            post_type: "Custom Schedule",
+            exclude_ad_id: null,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Availability check failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const booked = [];
+
+        for (const date of validDates) {
+          const info = data.results[date];
+          if (info && info.is_full) booked.push(date);
+        }
+
+        if (booked.length > 0) {
+          setFullyBookedDates(booked);
+          setAvailabilityError("Some of your selected dates are fully booked.");
+        }
+      }
+    } catch (err) {
+      console.error("Error checking availability:", err);
       setAvailabilityError("Could not check availability. Please try again.");
     } finally {
       setCheckingAvailability(false);
     }
   };
 
-  const validateForm = () => {
-    if (
-      !formData.advertiser_name ||
-      !formData.contact_name ||
-      !formData.email ||
-      !formData.phone_number ||
-      !formData.ad_name
-    ) {
-      setError("Please fill in all required fields.");
-      return false;
-    }
+  const validateDateTime = () => {
+    const now = new Date();
 
-    const type = normalizePostType(formData.post_type);
-
-    if (type === POST_TYPES.ONE_TIME) {
-      if (!formData.post_date_from || !formData.post_time) {
-        setError("Please choose a post date and time.");
-        return false;
-      }
-      if (pastTimeError) {
-        setError(pastTimeError);
+    if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
+      const selectedDateTime = new Date(`${formData.post_date_from}T${formData.post_time}`);
+      if (selectedDateTime < now) {
+        setError("Cannot select a past date and time");
+        setPastTimeError("This date and time is in the past. Please choose a future time.");
         return false;
       }
     }
 
-    if (type === POST_TYPES.DAILY) {
-      if (!formData.post_date_from || !formData.post_date_to) {
-        setError("Please choose a start date and end date.");
+    if (formData.post_type === "Daily Run") {
+      const startDate = new Date(formData.post_date_from);
+      startDate.setHours(0, 0, 0, 0);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (startDate < today) {
+        setError("Start date cannot be in the past");
+        setPastTimeError(null);
         return false;
       }
 
-      const range = getDatesInRange(formData.post_date_from, formData.post_date_to);
-      if (range.length === 0) {
-        setError("End date must be after start date.");
-        return false;
-      }
-
-      if (isPastDate(formData.post_date_from)) {
-        setError("Start date cannot be in the past.");
-        return false;
-      }
-    }
-
-    if (type === POST_TYPES.CUSTOM) {
-      if (!Array.isArray(formData.custom_dates) || formData.custom_dates.length === 0) {
-        setError("Please add at least one custom date.");
-        return false;
-      }
-
-      if (formData.custom_dates.some((value) => isPastDate(value))) {
-        setError("Custom schedule cannot include past dates.");
-        return false;
+      if (formData.post_date_to) {
+        const endDate = new Date(formData.post_date_to);
+        if (endDate < startDate) {
+          setError("End date must be after start date");
+          setPastTimeError(null);
+          return false;
+        }
       }
     }
 
+    setPastTimeError(null);
     return true;
   };
 
@@ -476,57 +321,163 @@ export function useSubmitAdForm() {
     setError(null);
     setLoading(true);
 
+    if (
+      !formData.advertiser_name ||
+      !formData.contact_name ||
+      !formData.email ||
+      !formData.phone_number ||
+      !formData.ad_name
+    ) {
+      setError("Please fill in all required fields");
+      setLoading(false);
+      return;
+    }
+
+    if (pastTimeError) {
+      setError(pastTimeError);
+      setLoading(false);
+      return;
+    }
+
+    if (!validateDateTime()) {
+      setLoading(false);
+      return;
+    }
+
+    if (fullyBookedDates.length > 0) {
+      setError("Please resolve fully booked dates before submitting.");
+      setLoading(false);
+      return;
+    }
+
+    if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
+      try {
+        const timeWithSeconds =
+          formData.post_time.length === 5 ? `${formData.post_time}:00` : formData.post_time;
+
+        const availResponse = await fetch("/api/ads/availability", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            date: formData.post_date_from,
+            post_type: formData.post_type,
+            post_time: timeWithSeconds,
+            exclude_ad_id: null,
+          }),
+        });
+
+        if (!availResponse.ok) {
+          throw new Error(`Availability check failed: ${availResponse.status}`);
+        }
+
+        const availData = await availResponse.json();
+
+        if (!availData.available) {
+          if (availData.is_time_blocked) {
+            setError("This time slot is already taken. Please choose a different time.");
+          } else if (availData.is_day_full) {
+            setError("This date is fully booked. Please choose a different date.");
+          } else {
+            setError("This time slot is not available. Please choose a different time.");
+          }
+
+          setLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error("Error checking availability:", err);
+      }
+    }
+
+    if (formData.post_type === "Daily Run" && formData.post_date_from && formData.post_date_to) {
+      try {
+        const dates = getDatesInRange(formData.post_date_from, formData.post_date_to);
+        if (dates.length > 0 && dates.length <= 365) {
+          const availResponse = await fetch("/api/ads/availability-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dates,
+              post_type: "Daily Run",
+              exclude_ad_id: null,
+            }),
+          });
+
+          if (availResponse.ok) {
+            const availData = await availResponse.json();
+            const booked = dates.filter((date) => availData.results[date]?.is_full);
+
+            if (booked.length > 0) {
+              setFullyBookedDates(booked);
+              setError("Some dates in your range are fully booked. Please choose different dates.");
+              setLoading(false);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error checking availability:", err);
+      }
+    }
+
+    if (formData.post_type === "Custom Schedule" && formData.custom_dates.length > 0) {
+      try {
+        const validDates = getDateStrings(formData.custom_dates);
+
+        if (validDates.length > 0) {
+          const availResponse = await fetch("/api/ads/availability-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              dates: validDates,
+              post_type: "Custom Schedule",
+              exclude_ad_id: null,
+            }),
+          });
+
+          if (availResponse.ok) {
+            const availData = await availResponse.json();
+            const booked = validDates.filter((date) => availData.results[date]?.is_full);
+
+            if (booked.length > 0) {
+              setFullyBookedDates(booked);
+              setError("Some of your selected dates are fully booked. Please choose different dates.");
+              setLoading(false);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error checking availability:", err);
+      }
+    }
+
     try {
-      await ensureDb();
-      if (!validateForm()) {
-        return;
-      }
+      const timeWithSeconds =
+        formData.post_time && formData.post_time.length === 5
+          ? `${formData.post_time}:00`
+          : formData.post_time;
 
-      const availability = getAvailabilityResult(formData);
-      setAvailabilityError(availability.availabilityError);
-      setFullyBookedDates(availability.fullyBookedDates);
-
-      if (availability.availabilityError || availability.fullyBookedDates.length > 0) {
-        setError(
-          availability.availabilityError ||
-            "Please resolve fully booked dates before submitting.",
-        );
-        return;
-      }
-
-      const primaryDate = getPrimaryPostDate(formData);
-      const normalizedTime = normalizeTime(formData.post_time);
-
-      await submitPendingAd({
-        advertiser_name: formData.advertiser_name,
-        contact_name: formData.contact_name,
-        email: formData.email,
-        phone_number: formData.phone_number,
-        phone: formData.phone_number,
-        business_name: "",
-        ad_name: formData.ad_name,
-        post_type: formData.post_type,
-        post_date: primaryDate,
-        post_date_from: normalizeDateString(formData.post_date_from),
-        post_date_to: normalizeDateString(formData.post_date_to),
-        custom_dates: (formData.custom_dates || []).map((value) => normalizeDateString(value)),
-        post_time: normalizedTime,
-        reminder_minutes: Number(formData.reminder_minutes) || 15,
-        ad_text: formData.ad_text,
-        media: formData.media,
-        placement: formData.placement,
-        notes: formData.notes,
+      const response = await fetch("/api/public/submit-ad", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...formData,
+          post_time: timeWithSeconds,
+        }),
       });
 
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to submit ad");
+      }
+
+      setSubmittedData({ ...formData, post_time: timeWithSeconds });
       setSuccess(true);
       setFormData(initialFormData);
-      setCustomDate("");
-      setPastTimeError(null);
-      setAvailabilityError(null);
-      setFullyBookedDates([]);
-    } catch (submitError) {
-      console.error("Error submitting ad:", submitError);
-      setError("Failed to submit ad request.");
+    } catch (err) {
+      console.error("Error submitting ad:", err);
+      setError(err.message || "Failed to submit ad request");
     } finally {
       setLoading(false);
     }
@@ -534,12 +485,16 @@ export function useSubmitAdForm() {
 
   const resetSuccess = () => {
     setSuccess(false);
+    setSubmittedData(null);
   };
 
   return {
     formData,
+    submittedData,
     customDate,
     setCustomDate,
+    customTime,
+    setCustomTime,
     error,
     success,
     loading,
@@ -550,6 +505,7 @@ export function useSubmitAdForm() {
     handleChange,
     addCustomDate,
     removeCustomDate,
+    updateCustomDateTime,
     addMedia,
     removeMedia,
     checkAvailability,

@@ -1,3 +1,5 @@
+﻿import { Clock } from "lucide-react";
+
 const getMinDate = () => {
   const today = new Date();
   const year = today.getFullYear();
@@ -6,13 +8,17 @@ const getMinDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const formatDateLong = (dateString) => {
-  const date = new Date(`${dateString}T00:00:00`);
-  return date.toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
+const formatDateLong = (dateStr) => {
+  if (!dateStr) return "";
+  const datePart = dateStr.split("T")[0].split(" ")[0];
+  const [year, month, day] = datePart.split("-");
+  if (!year || !month || !day) return "";
+  return `${month}/${day}/${year}`;
+};
+
+const timeForInput = (timeStr) => {
+  if (!timeStr) return "";
+  return timeStr.substring(0, 5);
 };
 
 export function ScheduleSection({
@@ -21,15 +27,18 @@ export function ScheduleSection({
   onChange,
   customDate,
   setCustomDate,
+  customTime,
+  setCustomTime,
   onAddCustomDate,
   onRemoveCustomDate,
+  onUpdateCustomDateTime,
   onCheckAvailability,
   checkingAvailability,
   availabilityError,
   pastTimeError,
   fullyBookedDates,
 }) {
-  const hasBookedDates = Array.isArray(fullyBookedDates) && fullyBookedDates.length > 0;
+  const hasBookedDates = fullyBookedDates && fullyBookedDates.length > 0;
 
   return (
     <div>
@@ -53,6 +62,7 @@ export function ScheduleSection({
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
             </div>
+
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Post Time (ET) <span className="text-red-500">*</span>
@@ -77,7 +87,9 @@ export function ScheduleSection({
           {availabilityError && !hasBookedDates && (
             <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg mt-4">
               <div className="flex items-start gap-2">
-                <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">!</span>
+                <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">
+                  {"\u274C"}
+                </span>
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-red-900">{availabilityError}</p>
                 </div>
@@ -104,6 +116,7 @@ export function ScheduleSection({
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
             </div>
+
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 End Date <span className="text-red-500">*</span>
@@ -119,6 +132,7 @@ export function ScheduleSection({
               />
             </div>
           </div>
+
           {checkingAvailability && (
             <p className="text-xs text-gray-500 mt-2">Checking availability...</p>
           )}
@@ -127,9 +141,9 @@ export function ScheduleSection({
 
       {postType === "Custom Schedule" && (
         <div>
-          <div className="grid grid-cols-[1fr_auto] gap-2 mb-3">
+          <div className="grid grid-cols-[1fr_140px_auto] gap-2 mb-3">
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Add Date</label>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Date</label>
               <input
                 type="date"
                 min={getMinDate()}
@@ -138,14 +152,23 @@ export function ScheduleSection({
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
             </div>
+
+            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
+              <input
+                type="time"
+                value={customTime}
+                onChange={(event) => setCustomTime(event.target.value)}
+                className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
+              />
+            </div>
+
             <button
               type="button"
               onClick={() => {
                 onAddCustomDate();
                 setTimeout(() => {
-                  if (onCheckAvailability) {
-                    onCheckAvailability();
-                  }
+                  if (onCheckAvailability) onCheckAvailability();
                 }, 100);
               }}
               className="self-end px-6 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
@@ -155,22 +178,41 @@ export function ScheduleSection({
           </div>
 
           {formData.custom_dates.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {formData.custom_dates.map((date) => (
-                <span
-                  key={date}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-900 rounded-lg text-sm"
-                >
-                  {date}
-                  <button
-                    type="button"
-                    onClick={() => onRemoveCustomDate(date)}
-                    className="hover:text-gray-600"
+            <div className="space-y-2 mt-3">
+              {formData.custom_dates.map((entry) => {
+                const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
+                const timeStr = typeof entry === "object" && entry !== null ? entry.time : "";
+
+                return (
+                  <div
+                    key={dateStr}
+                    className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3"
                   >
-                    x
-                  </button>
-                </span>
-              ))}
+                    <span className="text-sm text-gray-900 font-medium flex-1">
+                      {formatDateLong(dateStr)}
+                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <Clock size={14} className="text-gray-400" />
+                      <input
+                        type="time"
+                        value={timeForInput(timeStr)}
+                        onChange={(event) => onUpdateCustomDateTime(dateStr, event.target.value)}
+                        className="text-sm text-gray-700 bg-white border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      />
+                      {timeStr && <span className="text-xs text-gray-500">ET</span>}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onRemoveCustomDate(dateStr)}
+                      className="text-gray-400 hover:text-red-600 transition-colors text-lg leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -183,7 +225,9 @@ export function ScheduleSection({
       {hasBookedDates && (
         <div className="bg-red-50 border border-red-200 px-4 py-3 rounded-lg mt-4">
           <div className="flex items-start gap-2">
-            <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">!</span>
+            <span className="text-red-600 flex-shrink-0 mt-0.5 text-base">
+              {"\u274C"}
+            </span>
             <div className="flex-1">
               <p className="text-sm font-semibold text-red-900">
                 The following dates are fully booked:

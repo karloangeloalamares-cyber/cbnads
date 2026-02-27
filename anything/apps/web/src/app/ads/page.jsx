@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Bell,
   LogOut,
@@ -39,6 +40,7 @@ import {
   Check,
   Crown,
   Mail,
+  MessageCircle,
   MessageSquare,
   Send,
   Link,
@@ -268,6 +270,8 @@ const CREATE_AD_POST_TYPE_OPTIONS = [
   },
 ];
 
+const ADS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
 const normalizeAdsPayment = (value) => {
   const payment = String(value || "").trim();
   if (!payment) {
@@ -287,6 +291,86 @@ const getAdsStatusColor = (status) => {
     default:
       return "text-gray-700 bg-gray-50 border-gray-100";
   }
+};
+
+const ADS_NON_ACTION_STATUSES = new Set([
+  "published",
+  "posted",
+  "completed",
+  "archived",
+  "cancelled",
+  "rejected",
+  "failed",
+]);
+
+const ADS_STATUS_PRIORITY = new Map([
+  ["approved", 0],
+  ["scheduled", 1],
+  ["draft", 2],
+  ["pending", 3],
+  ["queued", 4],
+  ["in review", 5],
+  ["review", 5],
+  ["published", 10],
+  ["posted", 11],
+  ["completed", 12],
+  ["archived", 13],
+  ["cancelled", 14],
+  ["rejected", 15],
+  ["failed", 16],
+]);
+
+const normalizeAdsStatusForSort = (value) => String(value || "").trim().toLowerCase();
+
+const isAdsActionRequired = (status) => {
+  const normalizedStatus = normalizeAdsStatusForSort(status);
+  if (!normalizedStatus) {
+    return true;
+  }
+  return !ADS_NON_ACTION_STATUSES.has(normalizedStatus);
+};
+
+const getAdsStatusPriority = (status) => {
+  const normalizedStatus = normalizeAdsStatusForSort(status);
+  if (ADS_STATUS_PRIORITY.has(normalizedStatus)) {
+    return ADS_STATUS_PRIORITY.get(normalizedStatus);
+  }
+  return ADS_NON_ACTION_STATUSES.has(normalizedStatus) ? 80 : 40;
+};
+
+const parseAdsTimeToMinutes = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (Number.isNaN(hours) || Number.isNaN(minutes) || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  const meridiem = String(match[3] || "").toUpperCase();
+  if (meridiem) {
+    if (hours < 1 || hours > 12) {
+      return null;
+    }
+    if (hours === 12) {
+      hours = 0;
+    }
+    if (meridiem === "PM") {
+      hours += 12;
+    }
+  } else if (hours < 0 || hours > 23) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
 };
 
 const getAdsPaymentColor = (payment) => {
@@ -328,6 +412,52 @@ const formatAdsTime = (value) => {
   const ampm = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 || 12;
   return `${displayHour}:${minutes} ${ampm}`;
+};
+
+const formatAdsScheduleForShare = (ad) => {
+  const postType = String(ad?.post_type || "").toLowerCase();
+
+  if (postType.includes("daily")) {
+    const fromDate = formatAdsDate(ad?.post_date_from || ad?.schedule || ad?.post_date);
+    const toDate = formatAdsDate(ad?.post_date_to || "");
+    if (fromDate !== "N/A" && toDate !== "N/A") {
+      return `${fromDate} - ${toDate}`;
+    }
+    return fromDate !== "N/A" ? fromDate : "Not scheduled";
+  }
+
+  if (postType.includes("custom")) {
+    const customDates = toStringArray(ad?.custom_dates)
+      .map((item) => String(item).slice(0, 10))
+      .filter(Boolean);
+    if (customDates.length > 0) {
+      return `${customDates.length} custom dates`;
+    }
+    return "Custom schedule";
+  }
+
+  const oneTimeDate = formatAdsDate(ad?.schedule || ad?.post_date);
+  return oneTimeDate !== "N/A" ? oneTimeDate : "Not scheduled";
+};
+
+const buildAdsShareMessage = (ad) => {
+  const lines = [];
+  lines.push(`*${ad?.ad_name || "Ad"}*`);
+  lines.push("");
+  lines.push(`📢 *Advertiser:* ${ad?.advertiser || "N/A"}`);
+  lines.push(`📍 *Placement:* ${ad?.placement || "N/A"}`);
+  lines.push(`📅 *Schedule:* ${formatAdsScheduleForShare(ad)}`);
+  lines.push(`🕐 *Time:* ${formatAdsTime(ad?.post_time)} ET`);
+  lines.push(`💰 *Payment:* ${ad?.payment || "Pending"}`);
+  if (String(ad?.ad_text || "").trim()) {
+    lines.push("");
+    lines.push("*Ad Content:*");
+    lines.push(String(ad.ad_text));
+  }
+  lines.push("");
+  lines.push("---");
+  lines.push("Sent from CBN Ads Manager");
+  return lines.join("\n");
 };
 
 const truncateAdsWords = (text, maxWords = 3) => {
@@ -512,35 +642,72 @@ function AdsScheduleCell({ ad }) {
   );
 }
 
-function AdsTableRow({ ad, onPreview, onEdit, onMarkPublished, onDelete }) {
+function AdsTableRow({
+  ad,
+  onPreview,
+  onEdit,
+  onMarkPublished,
+  onDelete,
+  onSendToWhatsApp,
+  onSendToTelegram,
+}) {
   const [activeMenu, setActiveMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({
-    vertical: "bottom",
-    horizontal: "right",
-  });
+  const [menuCoordinates, setMenuCoordinates] = useState({ top: 0, left: 0 });
   const menuRef = useRef(null);
+  const menuButtonRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) {
-        setActiveMenu(false);
+      if (
+        menuRef.current?.contains(event.target) ||
+        menuButtonRef.current?.contains(event.target)
+      ) {
+        return;
       }
+      setActiveMenu(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (!activeMenu) {
+      return undefined;
+    }
+
+    const closeMenu = () => setActiveMenu(false);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [activeMenu]);
+
   const handleMenuClick = (event) => {
     const button = event.currentTarget;
     const rect = button.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.right;
-    const menuHeight = 350;
-    const menuWidth = 200;
-    setMenuPosition({
-      vertical: spaceBelow < menuHeight ? "top" : "bottom",
-      horizontal: spaceRight < menuWidth ? "left" : "right",
-    });
+    const menuWidth = 192;
+    const menuHeight = ad.status === "Published" ? 258 : 304;
+    const gap = 6;
+    const viewportPadding = 8;
+
+    let top = rect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      top = rect.top - menuHeight - gap;
+    }
+    top = Math.max(
+      viewportPadding,
+      Math.min(top, window.innerHeight - menuHeight - viewportPadding),
+    );
+
+    let left = rect.right - menuWidth;
+    left = Math.max(
+      viewportPadding,
+      Math.min(left, window.innerWidth - menuWidth - viewportPadding),
+    );
+
+    setMenuCoordinates({ top, left });
     setActiveMenu((current) => !current);
   };
 
@@ -586,67 +753,96 @@ function AdsTableRow({ ad, onPreview, onEdit, onMarkPublished, onDelete }) {
       </td>
       <td className="px-6 py-4 text-right relative" onClick={(event) => event.stopPropagation()}>
         <button
+          ref={menuButtonRef}
           onClick={handleMenuClick}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
           type="button"
         >
           <MoreVertical size={18} className="text-gray-500" />
         </button>
-        {activeMenu ? (
-          <div
-            ref={menuRef}
-            className={`absolute ${menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"
-              } ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
-          >
-            <button
-              onClick={() => {
-                setActiveMenu(false);
-                onPreview(ad);
+        {activeMenu && typeof document !== "undefined"
+          ? createPortal(
+            <div
+              ref={menuRef}
+              className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+              style={{
+                top: `${menuCoordinates.top}px`,
+                left: `${menuCoordinates.left}px`,
               }}
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-              type="button"
             >
-              <Eye size={16} className="text-gray-400" />
-              Preview
-            </button>
-            <button
-              onClick={() => {
-                setActiveMenu(false);
-                onEdit(ad);
-              }}
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-              type="button"
-            >
-              <Pencil size={16} className="text-gray-400" />
-              Edit
-            </button>
-            {ad.status !== "Published" ? (
               <button
                 onClick={() => {
                   setActiveMenu(false);
-                  onMarkPublished(ad.id);
+                  onPreview(ad);
                 }}
                 className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
                 type="button"
               >
-                <CheckCircle size={16} className="text-gray-400" />
-                Mark as Published
+                <Eye size={16} className="text-gray-400" />
+                Preview
               </button>
-            ) : null}
-            <div className="border-t border-gray-100 my-1" />
-            <button
-              onClick={() => {
-                setActiveMenu(false);
-                onDelete(ad.id);
-              }}
-              className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-              type="button"
-            >
-              <Trash2 size={16} className="text-red-500" />
-              Delete
-            </button>
-          </div>
-        ) : null}
+              <button
+                onClick={() => {
+                  setActiveMenu(false);
+                  onEdit(ad);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                type="button"
+              >
+                <Pencil size={16} className="text-gray-400" />
+                Edit
+              </button>
+              <button
+                onClick={() => {
+                  setActiveMenu(false);
+                  onSendToWhatsApp(ad);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                type="button"
+              >
+                <MessageCircle size={16} className="text-green-500" />
+                Send to my WhatsApp
+              </button>
+              <button
+                onClick={() => {
+                  setActiveMenu(false);
+                  onSendToTelegram(ad);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                type="button"
+              >
+                <Send size={16} className="text-blue-500" />
+                Send to my Telegram
+              </button>
+              {ad.status !== "Published" ? (
+                <button
+                  onClick={() => {
+                    setActiveMenu(false);
+                    onMarkPublished(ad.id);
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                  type="button"
+                >
+                  <CheckCircle size={16} className="text-gray-400" />
+                  Mark as Published
+                </button>
+              ) : null}
+              <div className="border-t border-gray-100 my-1" />
+              <button
+                onClick={() => {
+                  setActiveMenu(false);
+                  onDelete(ad.id);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                type="button"
+              >
+                <Trash2 size={16} className="text-red-500" />
+                Delete
+              </button>
+            </div>,
+            document.body,
+          )
+          : null}
       </td>
     </tr>
   );
@@ -1607,9 +1803,11 @@ export default function AdsPage() {
   const [adsShowDateRangePicker, setAdsShowDateRangePicker] = useState(false);
   const [adsShowAdvancedFilters, setAdsShowAdvancedFilters] = useState(false);
   const [adsSortConfig, setAdsSortConfig] = useState({
-    key: "schedule",
+    key: null,
     direction: "asc",
   });
+  const [adsPageSize, setAdsPageSize] = useState(10);
+  const [adsCurrentPage, setAdsCurrentPage] = useState(1);
   const [adsPreviewAd, setAdsPreviewAd] = useState(null);
   const [calendarSearch, setCalendarSearch] = useState("");
   const [calendarMode, setCalendarMode] = useState("month");
@@ -2402,7 +2600,65 @@ export default function AdsPage() {
 
   const sortedAds = useMemo(() => {
     if (!adsSortConfig.key) {
-      return filteredAds;
+      const todayKey = toDateKey(new Date());
+
+      return [...filteredAds].sort((left, right) => {
+        const leftScheduleDate = parseCalendarDate(left.schedule);
+        const rightScheduleDate = parseCalendarDate(right.schedule);
+        const leftNeedsAction = isAdsActionRequired(left.status);
+        const rightNeedsAction = isAdsActionRequired(right.status);
+        const leftIsToday =
+          leftScheduleDate && toDateKey(leftScheduleDate) === todayKey;
+        const rightIsToday =
+          rightScheduleDate && toDateKey(rightScheduleDate) === todayKey;
+
+        const leftPriorityGroup = leftIsToday && leftNeedsAction ? 0 : leftNeedsAction ? 1 : 2;
+        const rightPriorityGroup = rightIsToday && rightNeedsAction ? 0 : rightNeedsAction ? 1 : 2;
+
+        if (leftPriorityGroup !== rightPriorityGroup) {
+          return leftPriorityGroup - rightPriorityGroup;
+        }
+
+        if (leftPriorityGroup === 0) {
+          const leftTime = parseAdsTimeToMinutes(left.post_time);
+          const rightTime = parseAdsTimeToMinutes(right.post_time);
+          if (leftTime == null && rightTime != null) return 1;
+          if (rightTime == null && leftTime != null) return -1;
+          if (leftTime != null && rightTime != null && leftTime !== rightTime) {
+            return rightTime - leftTime;
+          }
+        }
+
+        const leftStatusPriority = getAdsStatusPriority(left.status);
+        const rightStatusPriority = getAdsStatusPriority(right.status);
+        if (leftStatusPriority !== rightStatusPriority) {
+          return leftStatusPriority - rightStatusPriority;
+        }
+
+        const leftScheduleValue = leftScheduleDate?.valueOf();
+        const rightScheduleValue = rightScheduleDate?.valueOf();
+        if (leftScheduleValue == null && rightScheduleValue != null) return 1;
+        if (rightScheduleValue == null && leftScheduleValue != null) return -1;
+        if (
+          leftScheduleValue != null &&
+          rightScheduleValue != null &&
+          leftScheduleValue !== rightScheduleValue
+        ) {
+          return leftPriorityGroup === 1
+            ? leftScheduleValue - rightScheduleValue
+            : rightScheduleValue - leftScheduleValue;
+        }
+
+        const leftTime = parseAdsTimeToMinutes(left.post_time);
+        const rightTime = parseAdsTimeToMinutes(right.post_time);
+        if (leftTime == null && rightTime != null) return 1;
+        if (rightTime == null && leftTime != null) return -1;
+        if (leftTime != null && rightTime != null && leftTime !== rightTime) {
+          return leftPriorityGroup === 2 ? rightTime - leftTime : leftTime - rightTime;
+        }
+
+        return String(left.ad_name || "").localeCompare(String(right.ad_name || ""));
+      });
     }
 
     return [...filteredAds].sort((left, right) => {
@@ -2416,13 +2672,8 @@ export default function AdsPage() {
         leftValue = parseCalendarDate(leftValue)?.valueOf() || 0;
         rightValue = parseCalendarDate(rightValue)?.valueOf() || 0;
       } else if (adsSortConfig.key === "post_time") {
-        const toMinutes = (timeValue) => {
-          if (!timeValue) return 0;
-          const [hoursText, minutesText] = String(timeValue).split(":");
-          return (Number(hoursText) || 0) * 60 + (Number(minutesText) || 0);
-        };
-        leftValue = toMinutes(leftValue);
-        rightValue = toMinutes(rightValue);
+        leftValue = parseAdsTimeToMinutes(leftValue) ?? -1;
+        rightValue = parseAdsTimeToMinutes(rightValue) ?? -1;
       } else if (typeof leftValue === "string") {
         leftValue = leftValue.toLowerCase();
         rightValue = String(rightValue || "").toLowerCase();
@@ -2437,6 +2688,28 @@ export default function AdsPage() {
       return 0;
     });
   }, [adsSortConfig, filteredAds]);
+
+  useEffect(() => {
+    setAdsCurrentPage(1);
+  }, [adsFilters, adsSortConfig]);
+
+  const adsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(sortedAds.length / adsPageSize)),
+    [adsPageSize, sortedAds.length],
+  );
+
+  useEffect(() => {
+    setAdsCurrentPage((current) => Math.min(Math.max(current, 1), adsTotalPages));
+  }, [adsTotalPages]);
+
+  const paginatedAds = useMemo(() => {
+    const startIndex = (adsCurrentPage - 1) * adsPageSize;
+    return sortedAds.slice(startIndex, startIndex + adsPageSize);
+  }, [adsCurrentPage, adsPageSize, sortedAds]);
+
+  const adsPageStartIndex =
+    sortedAds.length === 0 ? 0 : (adsCurrentPage - 1) * adsPageSize + 1;
+  const adsPageEndIndex = Math.min(adsCurrentPage * adsPageSize, sortedAds.length);
 
   const linkedPreviewInvoices = useMemo(() => {
     if (!adsPreviewAd?.id) {
@@ -3663,6 +3936,50 @@ export default function AdsPage() {
     ]);
     const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n");
     download(`cbnads-ads-${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
+  };
+
+  const handleSendAdToMyWhatsApp = async (adItem) => {
+    const target = String(settingsProfileWhatsapp || user?.whatsapp_number || "").trim();
+    if (!target) {
+      setMessage("Please add your WhatsApp number in Settings > Profile first.");
+      window.setTimeout(() => setMessage(""), 2200);
+      return;
+    }
+
+    const digits = target.replace(/[^\d]/g, "");
+    if (!digits) {
+      setMessage("WhatsApp number format is invalid. Use international format like +1234567890.");
+      window.setTimeout(() => setMessage(""), 2600);
+      return;
+    }
+
+    const messageText = buildAdsShareMessage(adItem);
+    const url = `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMessage("Opened WhatsApp with your ad message.");
+    window.setTimeout(() => setMessage(""), 1800);
+  };
+
+  const handleSendAdToMyTelegram = async (adItem) => {
+    if (settingsActiveTelegramCount === 0) {
+      setMessage("Please add at least one Telegram Chat ID in Settings > Notifications first.");
+      window.setTimeout(() => setMessage(""), 2600);
+      return;
+    }
+
+    const messageText = buildAdsShareMessage(adItem);
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(messageText);
+      } catch {
+        // Clipboard permission may be unavailable; continue with share link.
+      }
+    }
+
+    const shareUrl = `https://t.me/share/url?url=&text=${encodeURIComponent(messageText)}`;
+    window.open(shareUrl, "_blank", "noopener,noreferrer");
+    setMessage("Opened Telegram share and copied message.");
+    window.setTimeout(() => setMessage(""), 1800);
   };
 
   const markAdAsPublished = (adId) =>
@@ -4998,13 +5315,14 @@ export default function AdsPage() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 mb-6 min-w-0">
+              <div className="flex items-center mb-6 gap-3 min-w-0">
+                <div className="flex items-center gap-3 shrink-0">
                 <select
                   value={adsFilters.status}
                   onChange={(event) =>
                     setAdsFilters((current) => ({ ...current, status: event.target.value }))
                   }
-                  className="w-[118px] h-11 px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all shrink-0"
+                  className="w-[138px] px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all"
                   style={adsSelectStyle}
                 >
                   <option value="All Ads">All Ads</option>
@@ -5022,7 +5340,7 @@ export default function AdsPage() {
                       status: current.status === "Today" ? "All Ads" : "Today",
                     }))
                   }
-                  className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${adsFilters.status === "Today"
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "Today"
                     ? "bg-gray-900 text-white"
                     : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
                     }`}
@@ -5039,7 +5357,7 @@ export default function AdsPage() {
                       status: current.status === "This Week" ? "All Ads" : "This Week",
                     }))
                   }
-                  className={`h-11 px-3.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0 ${adsFilters.status === "This Week"
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "This Week"
                     ? "bg-gray-900 text-white"
                     : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
                     }`}
@@ -5056,7 +5374,7 @@ export default function AdsPage() {
                 <div className="relative" ref={adsAdvancedFiltersRef}>
                   <button
                     onClick={() => setAdsShowAdvancedFilters((current) => !current)}
-                    className="h-11 min-w-[150px] px-3.5 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center justify-center gap-2 text-center whitespace-nowrap shrink-0"
+                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
                     type="button"
                   >
                     <Filter size={16} />
@@ -5241,7 +5559,9 @@ export default function AdsPage() {
                     </div>
                   ) : null}
                 </div>
-                <div className="relative flex-1 min-w-[170px]">
+                </div>
+                <div className="ml-auto flex items-center gap-3 shrink-0">
+                <div className="relative w-[clamp(170px,18vw,230px)]">
                   <Search
                     size={16}
                     className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
@@ -5256,12 +5576,12 @@ export default function AdsPage() {
                         search: event.target.value,
                       }))
                     }
-                    className="h-11 w-full min-w-0 pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                   />
                 </div>
                 <button
                   onClick={exportVisibleAdsCsv}
-                  className="h-11 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2 whitespace-nowrap shrink-0"
+                  className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2"
                   type="button"
                 >
                   <Download size={16} />
@@ -5272,15 +5592,18 @@ export default function AdsPage() {
                     setAd(blankAd);
                     setView("createAd");
                   }}
-                  className="h-11 min-w-[124px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center text-center whitespace-nowrap shrink-0"
+                  className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
                   type="button"
                 >
                   Create new ad
                 </button>
+                </div>
               </div>
 
               <div className="mb-4 text-sm text-gray-600">
-                Showing {sortedAds.length} of {adsNormalized.length} ads
+                {sortedAds.length === 0
+                  ? "Showing 0 ads"
+                  : `Showing ${adsPageStartIndex}-${adsPageEndIndex} of ${sortedAds.length} ads`}
               </div>
 
               {sortedAds.length === 0 ? (
@@ -5298,77 +5621,125 @@ export default function AdsPage() {
                   </button>
                 </div>
               ) : (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50">
-                        <AdsSortableHeader
-                          label="Ad"
-                          sortKey="ad_name"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Advertiser"
-                          sortKey="advertiser"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Status"
-                          sortKey="status"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Post Type"
-                          sortKey="post_type"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Placement"
-                          sortKey="placement"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Schedule"
-                          sortKey="schedule"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Post Time"
-                          sortKey="post_time"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <AdsSortableHeader
-                          label="Payment"
-                          sortKey="payment"
-                          sortConfig={adsSortConfig}
-                          onSort={handleAdsSort}
-                        />
-                        <th className="text-right px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {sortedAds.map((item) => (
-                        <AdsTableRow
-                          key={item.id}
-                          ad={item}
-                          onPreview={setAdsPreviewAd}
-                          onEdit={openAdEditor}
-                          onMarkPublished={markAdAsPublished}
-                          onDelete={deleteAdRecord}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          <AdsSortableHeader
+                            label="Ad"
+                            sortKey="ad_name"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Advertiser"
+                            sortKey="advertiser"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Status"
+                            sortKey="status"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Post Type"
+                            sortKey="post_type"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Placement"
+                            sortKey="placement"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Schedule"
+                            sortKey="schedule"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Post Time"
+                            sortKey="post_time"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
+                            label="Payment"
+                            sortKey="payment"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <th className="text-right px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {paginatedAds.map((item) => (
+                          <AdsTableRow
+                            key={item.id}
+                            ad={item}
+                            onPreview={setAdsPreviewAd}
+                            onEdit={openAdEditor}
+                            onMarkPublished={markAdAsPublished}
+                            onDelete={deleteAdRecord}
+                            onSendToWhatsApp={handleSendAdToMyWhatsApp}
+                            onSendToTelegram={handleSendAdToMyTelegram}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <span>Rows per page</span>
+                      <select
+                        value={adsPageSize}
+                        onChange={(event) => {
+                          setAdsPageSize(Number(event.target.value) || 10);
+                          setAdsCurrentPage(1);
+                        }}
+                        className="h-9 min-w-[72px] rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                      >
+                        {ADS_PAGE_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>
+                            {size}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAdsCurrentPage((current) => Math.max(1, current - 1))}
+                        disabled={adsCurrentPage <= 1}
+                        className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600 min-w-[90px] text-center">
+                        Page {adsCurrentPage} of {adsTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAdsCurrentPage((current) => Math.min(adsTotalPages, current + 1))
+                        }
+                        disabled={adsCurrentPage >= adsTotalPages}
+                        className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
 
               <AdsPreviewModal
