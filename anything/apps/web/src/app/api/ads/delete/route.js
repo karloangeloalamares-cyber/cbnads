@@ -4,7 +4,7 @@ import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-a
 
 export async function DELETE(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }

@@ -40,14 +40,14 @@ async function findPreferenceRow(supabase, userId, email) {
   return null;
 }
 
-export async function GET() {
+export async function GET(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    const user = await getSessionUser();
+    const user = await getSessionUser(request);
     const email = String(user?.email || "").trim();
     const userId = UUID_REGEX.test(String(user?.id || "")) ? String(user.id) : null;
     const supabase = db();
@@ -64,12 +64,12 @@ export async function GET() {
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }
 
-    const user = await getSessionUser();
+    const user = await getSessionUser(request);
     const email = String(user?.email || "").trim();
     const userId = UUID_REGEX.test(String(user?.id || "")) ? String(user.id) : null;
     const body = await request.json();
@@ -132,4 +132,3 @@ export async function POST(request) {
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
-

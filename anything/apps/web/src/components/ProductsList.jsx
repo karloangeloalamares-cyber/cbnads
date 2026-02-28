@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Plus, MoreVertical, Edit, Trash2 } from "lucide-react";
+import { appToast } from "@/lib/toast";
 import NewProductForm from "./NewProductForm";
 
 // Helper to format date without timezone shift
@@ -47,6 +48,17 @@ export default function ProductsList({ refresh }) {
   useEffect(() => {
     fetchProducts();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to load products",
+      description: error,
+    });
+  }, [error]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -106,6 +118,10 @@ export default function ProductsList({ refresh }) {
       if (!response.ok) throw new Error("Failed to update product");
 
       setEditingProduct(null);
+      appToast.success({
+        title: "Product updated",
+        description: `${editingProduct.product_name} was saved successfully.`,
+      });
       fetchProducts();
     } catch (err) {
       console.error(err);
@@ -121,6 +137,10 @@ export default function ProductsList({ refresh }) {
 
       if (!response.ok) throw new Error("Failed to delete product");
 
+      appToast.success({
+        title: "Product deleted",
+        description: `${deletingProduct.product_name} was removed.`,
+      });
       setDeletingProduct(null);
       fetchProducts();
     } catch (err) {
@@ -194,8 +214,17 @@ export default function ProductsList({ refresh }) {
           </div>
         )}
 
-        <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg">
-          {error}
+        <div className="bg-white border border-gray-200 rounded-lg p-8 text-center space-y-4">
+          <p className="text-gray-600">
+            We could not load products right now.
+          </p>
+          <button
+            type="button"
+            onClick={fetchProducts}
+            className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );

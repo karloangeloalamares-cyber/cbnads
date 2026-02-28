@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Globe, Calendar, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import { appToast } from "@/lib/toast";
 
 export default function BillingForm({
   adData,
@@ -34,6 +35,17 @@ export default function BillingForm({
     fetchAdvertiserData();
     buildLineItems();
   }, []);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to save billing details",
+      description: error,
+    });
+  }, [error]);
 
   const fetchAllProducts = async () => {
     try {
@@ -392,11 +404,6 @@ export default function BillingForm({
 
       {/* Main Content */}
       <div className="max-w-[1600px] mx-auto py-10 px-6">
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-            {error}
-          </div>
-        )}
         <div className="grid grid-cols-[1fr_520px] gap-8">
           {/* Left Column - Edit Invoice Form */}
           <div>

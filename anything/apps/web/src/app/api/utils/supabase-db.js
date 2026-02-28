@@ -63,7 +63,14 @@ export const adDatesForDayCheck = (ad) => {
 
   if (type === "custom_schedule") {
     if (!Array.isArray(ad?.custom_dates)) return [];
-    return ad.custom_dates.map(dateOnly).filter(Boolean);
+    return ad.custom_dates
+      .map((entry) => {
+        if (entry && typeof entry === "object") {
+          return dateOnly(entry.date);
+        }
+        return dateOnly(entry);
+      })
+      .filter(Boolean);
   }
 
   return from ? [from] : [];
@@ -75,4 +82,3 @@ export const advertiserResponse = (row) => ({
   total_spend: row?.total_spend ?? row?.ad_spend ?? 0,
   status: row?.status ?? "active",
 });
-

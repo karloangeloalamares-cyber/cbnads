@@ -1,5 +1,12 @@
 import { db, table, toNumber } from "../utils/supabase-db.js";
-import { requireAdmin } from "../utils/auth-check.js";
+import {
+  getRequestStatusForError,
+  isAdvertiserUser,
+  matchesAdvertiserScope,
+  requireAdmin,
+  requireAdminOrAdvertiser,
+  resolveAdvertiserScope,
+} from "../utils/auth-check.js";
 import { recalculateAdvertiserSpend } from "../utils/recalculate-advertiser-spend.js";
 
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
@@ -11,9 +18,12 @@ const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
 
 export async function GET(request) {
   try {
-    const admin = await requireAdmin();
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requireAdminOrAdvertiser(request);
+    if (!auth.authorized) {
+      return Response.json(
+        { error: auth.error },
+        { status: auth.status || getRequestStatusForError(auth.error) },
+      );
     }
 
     const supabase = db();
@@ -22,6 +32,9 @@ export async function GET(request) {
     const search = searchParams.get("search");
     const advertiser_id = searchParams.get("advertiser_id");
     const invoiceId = searchParams.get("id");
+    const advertiserScope = isAdvertiserUser(auth.user)
+      ? await resolveAdvertiserScope(auth.user)
+      : null;
 
     if (invoiceId) {
       const { data: invoice, error: invoiceError } = await supabase
@@ -32,6 +45,10 @@ export async function GET(request) {
         .maybeSingle();
       if (invoiceError) throw invoiceError;
       if (!invoice) {
+        return Response.json({ error: "Invoice not found" }, { status: 404 });
+      }
+
+      if (advertiserScope && !matchesAdvertiserScope(invoice, advertiserScope)) {
         return Response.json({ error: "Invoice not found" }, { status: 404 });
       }
 
@@ -54,14 +71,16 @@ export async function GET(request) {
     if (status && status !== "All") {
       query = query.eq("status", status);
     }
-    if (advertiser_id) {
+    if (!advertiserScope && advertiser_id) {
       query = query.eq("advertiser_id", advertiser_id);
     }
 
     const { data: invoices, error: invoicesError } = await query;
     if (invoicesError) throw invoicesError;
 
-    let filtered = invoices || [];
+    let filtered = advertiserScope
+      ? (invoices || []).filter((invoice) => matchesAdvertiserScope(invoice, advertiserScope))
+      : invoices || [];
     if (search) {
       const needle = String(search).toLowerCase();
       filtered = filtered.filter((invoice) => {
@@ -107,7 +126,7 @@ export async function GET(request) {
 
 export async function PUT(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }
@@ -246,7 +265,7 @@ export async function PUT(request) {
 
 export async function DELETE(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }

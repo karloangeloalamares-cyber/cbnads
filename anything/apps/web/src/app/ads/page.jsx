@@ -53,7 +53,9 @@ import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
+import { checkAdAvailability } from "@/lib/adAvailabilityClient";
 import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
+import { appToast } from "@/lib/toast";
 import {
   approvePendingAd,
   createId,
@@ -61,16 +63,19 @@ import {
   deleteAdvertiser,
   deleteInvoice,
   deletePendingAd,
+  deleteTeamMember,
   deleteProduct,
   ensureDb,
   getReconciliationReport,
   readDb,
   rejectPendingAd,
+  resolveSupabaseSessionUser,
   saveAdminSettings,
   saveNotificationPreferences,
   subscribeDb,
   updateDb,
   updateAdStatus,
+  upsertTeamMember,
   upsertAd,
   upsertAdvertiser,
   upsertInvoice,
@@ -89,6 +94,42 @@ const sections = [
   "Reconciliation",
   "Settings",
 ];
+
+const advertiserSections = [
+  "Dashboard",
+  "Calendar",
+  "Submissions",
+  "Ads",
+  "Billing",
+];
+
+const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
+const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
+
+const matchesAdvertiserScope = (item, scope) => {
+  if (!item || !scope) {
+    return false;
+  }
+
+  const itemAdvertiserId = String(item.advertiser_id || "").trim();
+  if (scope.id && itemAdvertiserId && itemAdvertiserId === scope.id) {
+    return true;
+  }
+
+  const itemAdvertiserName = normalizeComparableText(
+    item.advertiser_name || item.advertiser || "",
+  );
+  if (scope.name && itemAdvertiserName && itemAdvertiserName === scope.name) {
+    return true;
+  }
+
+  const itemEmail = normalizeEmailAddress(item.email || item.contact_email || "");
+  if (scope.email && itemEmail && itemEmail === scope.email) {
+    return true;
+  }
+
+  return false;
+};
 
 const settingsTabs = [
   { id: "profile", label: "Profile" },
@@ -662,6 +703,7 @@ function AdsTableRow({
   onDelete,
   onSendToWhatsApp,
   onSendToTelegram,
+  readOnly = false,
 }) {
   const [activeMenu, setActiveMenu] = useState(false);
   const [menuCoordinates, setMenuCoordinates] = useState({ top: 0, left: 0 });
@@ -764,103 +806,116 @@ function AdsTableRow({
         </span>
       </td>
       <td className="px-6 py-4 text-right relative" onClick={(event) => event.stopPropagation()}>
-        <button
-          ref={menuButtonRef}
-          onClick={handleMenuClick}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          type="button"
-        >
-          <MoreVertical size={18} className="text-gray-500" />
-        </button>
-        {activeMenu && typeof document !== "undefined"
-          ? createPortal(
-            <div
-              ref={menuRef}
-              className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
-              style={{
-                top: `${menuCoordinates.top}px`,
-                left: `${menuCoordinates.left}px`,
-              }}
+        {readOnly ? (
+          <button
+            onClick={() => onPreview(ad)}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            type="button"
+          >
+            <Eye size={14} className="text-gray-400" />
+            View
+          </button>
+        ) : (
+          <>
+            <button
+              ref={menuButtonRef}
+              onClick={handleMenuClick}
+              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              type="button"
             >
-              <button
-                onClick={() => {
-                  setActiveMenu(false);
-                  onPreview(ad);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                type="button"
-              >
-                <Eye size={16} className="text-gray-400" />
-                Preview
-              </button>
-              <button
-                onClick={() => {
-                  setActiveMenu(false);
-                  onEdit(ad);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                type="button"
-              >
-                <Pencil size={16} className="text-gray-400" />
-                Edit
-              </button>
-              <button
-                onClick={() => {
-                  setActiveMenu(false);
-                  onSendToWhatsApp(ad);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                type="button"
-              >
-                <MessageCircle size={16} className="text-green-500" />
-                Send to my WhatsApp
-              </button>
-              <button
-                onClick={() => {
-                  setActiveMenu(false);
-                  onSendToTelegram(ad);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                type="button"
-              >
-                <Send size={16} className="text-blue-500" />
-                Send to my Telegram
-              </button>
-              {ad.status !== "Published" ? (
-                <button
-                  onClick={() => {
-                    setActiveMenu(false);
-                    onMarkPublished(ad.id);
+              <MoreVertical size={18} className="text-gray-500" />
+            </button>
+            {activeMenu && typeof document !== "undefined"
+              ? createPortal(
+                <div
+                  ref={menuRef}
+                  className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+                  style={{
+                    top: `${menuCoordinates.top}px`,
+                    left: `${menuCoordinates.left}px`,
                   }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                  type="button"
                 >
-                  <CheckCircle size={16} className="text-gray-400" />
-                  Mark as Published
-                </button>
-              ) : null}
-              <div className="border-t border-gray-100 my-1" />
-              <button
-                onClick={() => {
-                  setActiveMenu(false);
-                  onDelete(ad.id);
-                }}
-                className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                type="button"
-              >
-                <Trash2 size={16} className="text-red-500" />
-                Delete
-              </button>
-            </div>,
-            document.body,
-          )
-          : null}
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onPreview(ad);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Eye size={16} className="text-gray-400" />
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onEdit(ad);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Pencil size={16} className="text-gray-400" />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onSendToWhatsApp(ad);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <MessageCircle size={16} className="text-green-500" />
+                    Send to my WhatsApp
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onSendToTelegram(ad);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Send size={16} className="text-blue-500" />
+                    Send to my Telegram
+                  </button>
+                  {ad.status !== "Published" ? (
+                    <button
+                      onClick={() => {
+                        setActiveMenu(false);
+                        onMarkPublished(ad.id);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                      type="button"
+                    >
+                      <CheckCircle size={16} className="text-gray-400" />
+                      Mark as Published
+                    </button>
+                  ) : null}
+                  <div className="border-t border-gray-100 my-1" />
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onDelete(ad.id);
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Trash2 size={16} className="text-red-500" />
+                    Delete
+                  </button>
+                </div>,
+                document.body,
+              )
+              : null}
+          </>
+        )}
       </td>
     </tr>
   );
 }
 
-function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices }) {
+function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }) {
   if (!ad) {
     return null;
   }
@@ -889,17 +944,19 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices }) {
               <p className="text-sm text-gray-500 mt-1">{ad.advertiser || "Unknown advertiser"}</p>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  onClose();
-                  onEdit(ad);
-                }}
-                className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
-                type="button"
-              >
-                <Pencil size={16} />
-                Edit
-              </button>
+              {canEdit ? (
+                <button
+                  onClick={() => {
+                    onClose();
+                    onEdit(ad);
+                  }}
+                  className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  type="button"
+                >
+                  <Pencil size={16} />
+                  Edit
+                </button>
+              ) : null}
               <button
                 onClick={onClose}
                 className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1720,7 +1777,7 @@ function CalendarFilters({
   );
 }
 
-function CalendarAdPreviewModal({ ad, onClose, onEdit }) {
+function CalendarAdPreviewModal({ ad, onClose, onEdit, canEdit = true }) {
   if (!ad) {
     return null;
   }
@@ -1769,15 +1826,17 @@ function CalendarAdPreviewModal({ ad, onClose, onEdit }) {
             </span>
           </div>
         </div>
-        <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            Edit Ad
-          </button>
-        </div>
+        {canEdit ? (
+          <div className="flex justify-end gap-2 border-t border-gray-200 px-5 py-4">
+            <button
+              type="button"
+              onClick={onEdit}
+              className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+            >
+              Edit Ad
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -1883,7 +1942,6 @@ export default function AdsPage() {
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
-  const [message, setMessage] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const dropdownRef = useRef(null);
@@ -1896,6 +1954,9 @@ export default function AdsPage() {
   const [ad, setAd] = useState(blankAd);
   const [createAdCustomDate, setCreateAdCustomDate] = useState("");
   const [createAdCustomTime, setCreateAdCustomTime] = useState("");
+  const [createAdAvailabilityError, setCreateAdAvailabilityError] = useState(null);
+  const [createAdCheckingAvailability, setCreateAdCheckingAvailability] = useState(false);
+  const [createAdFullyBookedDates, setCreateAdFullyBookedDates] = useState([]);
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
@@ -1946,6 +2007,93 @@ export default function AdsPage() {
   const [whatsAppSearchTerm, setWhatsAppSearchTerm] = useState("");
   const [whatsAppSelectedMessageId, setWhatsAppSelectedMessageId] = useState(null);
 
+  const userRole = normalizeComparableText(user?.role);
+  const isAdmin = userRole === "admin";
+  const isAdvertiser = userRole === "advertiser";
+  const allowedSections = isAdvertiser ? advertiserSections : sections;
+
+  useEffect(() => {
+    if (!settingsProfileMessage) {
+      return;
+    }
+
+    const payload = {
+      title:
+        settingsProfileMessage.type === "success"
+          ? "Profile updated"
+          : "Unable to save profile",
+      description: settingsProfileMessage.text,
+    };
+
+    if (settingsProfileMessage.type === "success") {
+      appToast.success(payload);
+      return;
+    }
+
+    appToast.error(payload);
+  }, [settingsProfileMessage]);
+
+  useEffect(() => {
+    if (!settingsNotificationMessage) {
+      return;
+    }
+
+    const payload = {
+      title:
+        settingsNotificationMessage.type === "success"
+          ? "Notifications updated"
+          : settingsNotificationMessage.type === "info"
+            ? "Notification check complete"
+            : "Unable to update notifications",
+      description: settingsNotificationMessage.text,
+    };
+
+    if (settingsNotificationMessage.type === "success") {
+      appToast.success(payload);
+      return;
+    }
+
+    if (settingsNotificationMessage.type === "info") {
+      appToast.info(payload);
+      return;
+    }
+
+    appToast.error(payload);
+  }, [settingsNotificationMessage]);
+
+  useEffect(() => {
+    if (!settingsSchedulingError) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to save scheduling settings",
+      description: settingsSchedulingError,
+    });
+  }, [settingsSchedulingError]);
+
+  useEffect(() => {
+    if (!settingsSchedulingSuccess) {
+      return;
+    }
+
+    appToast.success({
+      title: "Scheduling settings updated",
+      description: "Maximum ads per day was saved successfully.",
+    });
+  }, [settingsSchedulingSuccess]);
+
+  useEffect(() => {
+    if (!settingsTeamError) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to update team",
+      description: settingsTeamError,
+    });
+  }, [settingsTeamError]);
+
 
   useEffect(() => {
     let cancelled = false;
@@ -1975,8 +2123,53 @@ export default function AdsPage() {
     if (!ready || user) {
       return;
     }
-    window.location.href = "/account/signin";
+
+    let cancelled = false;
+    const recoverSession = async () => {
+      try {
+        const recoveredUser = await resolveSupabaseSessionUser();
+        if (cancelled) {
+          return;
+        }
+        if (recoveredUser) {
+          setUser(recoveredUser);
+          setDb(readDb());
+          return;
+        }
+      } catch (error) {
+        console.error("Failed to recover Supabase session:", error);
+      }
+
+      if (!cancelled) {
+        window.location.href = "/account/signin";
+      }
+    };
+
+    void recoverSession();
+    return () => {
+      cancelled = true;
+    };
   }, [ready, user]);
+
+  useEffect(() => {
+    if (!ready || !user || !isAdvertiser) {
+      return;
+    }
+
+    if (!allowedSections.includes(activeSection)) {
+      setActiveSection("Dashboard");
+      setView("list");
+      return;
+    }
+
+    if (view === "createAd" || view === "newInvoice") {
+      setView("list");
+      setAd(blankAd);
+      setInvoice(blankInvoice);
+      setShowInvoiceCreateMenu(false);
+      setOpenInvoiceMenuId(null);
+    }
+  }, [activeSection, allowedSections, isAdvertiser, ready, user, view]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -2069,14 +2262,115 @@ export default function AdsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [adsShowAdvancedFilters]);
 
-  const advertisers = db.advertisers || [];
+  const allAdvertisers = db.advertisers || [];
   const products = db.products || [];
-  const ads = db.ads || [];
-  const pending = db.pending_ads || [];
-  const invoices = db.invoices || [];
+  const allAds = db.ads || [];
+  const allPending = db.pending_ads || [];
+  const allInvoices = db.invoices || [];
   const teamMembers = db.team_members || [];
   const adminSettings = db.admin_settings || {};
   const notificationPreferences = db.notification_preferences || {};
+  const currentAdvertiser = useMemo(() => {
+    if (!isAdvertiser) {
+      return null;
+    }
+
+    const advertiserId = String(user?.advertiser_id || "").trim();
+    if (advertiserId) {
+      const byId = allAdvertisers.find((item) => String(item.id || "").trim() === advertiserId);
+      if (byId) {
+        return byId;
+      }
+    }
+
+    const email = normalizeEmailAddress(user?.email);
+    if (email) {
+      const byEmail = allAdvertisers.find(
+        (item) => normalizeEmailAddress(item.email) === email,
+      );
+      if (byEmail) {
+        return byEmail;
+      }
+    }
+
+    const advertiserName = normalizeComparableText(user?.advertiser_name);
+    if (advertiserName) {
+      return (
+        allAdvertisers.find(
+          (item) => normalizeComparableText(item.advertiser_name) === advertiserName,
+        ) || null
+      );
+    }
+
+    return null;
+  }, [
+    allAdvertisers,
+    isAdvertiser,
+    user?.advertiser_id,
+    user?.advertiser_name,
+    user?.email,
+  ]);
+  const advertiserScope = useMemo(() => {
+    if (!isAdvertiser) {
+      return null;
+    }
+
+    const id = String(currentAdvertiser?.id || user?.advertiser_id || "").trim();
+    const name = normalizeComparableText(
+      currentAdvertiser?.advertiser_name || user?.advertiser_name,
+    );
+    const email = normalizeEmailAddress(currentAdvertiser?.email || user?.email);
+
+    if (!id && !name && !email) {
+      return null;
+    }
+
+    return { id, name, email };
+  }, [
+    currentAdvertiser?.advertiser_name,
+    currentAdvertiser?.email,
+    currentAdvertiser?.id,
+    isAdvertiser,
+    user?.advertiser_id,
+    user?.advertiser_name,
+    user?.email,
+  ]);
+  const advertisers = useMemo(() => {
+    if (!isAdvertiser) {
+      return allAdvertisers;
+    }
+    if (!advertiserScope) {
+      return [];
+    }
+    return allAdvertisers.filter((item) => matchesAdvertiserScope(item, advertiserScope));
+  }, [advertiserScope, allAdvertisers, isAdvertiser]);
+  const ads = useMemo(() => {
+    if (!isAdvertiser) {
+      return allAds;
+    }
+    if (!advertiserScope) {
+      return [];
+    }
+    return allAds.filter((item) => matchesAdvertiserScope(item, advertiserScope));
+  }, [advertiserScope, allAds, isAdvertiser]);
+  const pending = useMemo(() => {
+    if (!isAdvertiser) {
+      return allPending;
+    }
+    if (!advertiserScope) {
+      return [];
+    }
+    return allPending.filter((item) => matchesAdvertiserScope(item, advertiserScope));
+  }, [advertiserScope, allPending, isAdvertiser]);
+  const invoices = useMemo(() => {
+    if (!isAdvertiser) {
+      return allInvoices;
+    }
+    if (!advertiserScope) {
+      return [];
+    }
+    return allInvoices.filter((item) => matchesAdvertiserScope(item, advertiserScope));
+  }, [advertiserScope, allInvoices, isAdvertiser]);
   const settingsTelegramChatIds = Array.isArray(db.telegram_chat_ids)
     ? db.telegram_chat_ids
     : [];
@@ -3061,10 +3355,13 @@ export default function AdsPage() {
     try {
       await fn();
       setDb(readDb());
-      setMessage(successText);
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({
+        title: successText,
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Action failed");
+      appToast.error({
+        title: error instanceof Error ? error.message : "Action failed",
+      });
     }
   };
 
@@ -3153,14 +3450,9 @@ export default function AdsPage() {
     event.preventDefault();
     const name = settingsTeamName.trim();
     const email = settingsTeamEmail.trim().toLowerCase();
-    const password = settingsTeamPassword;
 
-    if (!name || !email || !password) {
-      setSettingsTeamError("Name, email, and password are required.");
-      return;
-    }
-    if (password.length < 6) {
-      setSettingsTeamError("Password must be at least 6 characters.");
+    if (!name || !email) {
+      setSettingsTeamError("Name and email are required.");
       return;
     }
 
@@ -3168,48 +3460,19 @@ export default function AdsPage() {
     setSettingsTeamError("");
 
     try {
-      await updateDb((currentDb) => {
-        if (
-          (currentDb.users || []).some(
-            (item) => String(item.email || "").toLowerCase() === email,
-          )
-        ) {
-          throw new Error("A user with this email already exists.");
-        }
-        if (
-          (currentDb.team_members || []).some(
-            (item) => String(item.email || "").toLowerCase() === email,
-          )
-        ) {
-          throw new Error("A team member with this email already exists.");
-        }
+      if (
+        (teamMembers || []).some(
+          (item) => String(item.email || "").toLowerCase() === email,
+        )
+      ) {
+        throw new Error("A team member with this email already exists.");
+      }
 
-        const now = new Date().toISOString();
-        currentDb.users = [
-          {
-            id: createId("user"),
-            name,
-            email,
-            password,
-            role: "admin",
-            image: "",
-            created_at: now,
-            updated_at: now,
-          },
-          ...(currentDb.users || []),
-        ];
-        currentDb.team_members = [
-          {
-            id: createId("member"),
-            name,
-            email,
-            role: "admin",
-            created_at: now,
-            updated_at: now,
-          },
-          ...(currentDb.team_members || []),
-        ];
-        return currentDb;
+      await upsertTeamMember({
+        id: createId("member"),
+        name,
+        email,
+        role: "admin",
       });
 
       setDb(readDb());
@@ -3239,15 +3502,7 @@ export default function AdsPage() {
     }
 
     try {
-      await updateDb((currentDb) => {
-        currentDb.team_members = (currentDb.team_members || []).filter(
-          (item) => item.id !== member.id,
-        );
-        currentDb.users = (currentDb.users || []).filter(
-          (item) => String(item.email || "").toLowerCase() !== memberEmail,
-        );
-        return currentDb;
-      });
+      await deleteTeamMember(member.id);
       setDb(readDb());
       setSettingsTeamError("");
     } catch (error) {
@@ -3725,6 +3980,9 @@ export default function AdsPage() {
   };
 
   const openInvoiceEditor = (item) => {
+    if (!isAdmin) {
+      return;
+    }
     setInvoice({
       ...blankInvoice,
       ...item,
@@ -3749,8 +4007,11 @@ export default function AdsPage() {
     setOpenInvoiceMenuId(null);
   };
 
-  const markInvoiceAsPaid = (item) =>
-    run(async () => {
+  const markInvoiceAsPaid = (item) => {
+    if (!isAdmin) {
+      return;
+    }
+    return run(async () => {
       await upsertInvoice({
         ...item,
         status: "Paid",
@@ -3763,18 +4024,26 @@ export default function AdsPage() {
         );
       }
     }, "Invoice marked as paid.");
+  };
 
-  const deleteInvoiceRecord = (invoiceId) =>
-    run(async () => {
+  const deleteInvoiceRecord = (invoiceId) => {
+    if (!isAdmin) {
+      return;
+    }
+    return run(async () => {
       await deleteInvoice(invoiceId);
       setOpenInvoiceMenuId(null);
       if (invoicePreviewModal?.id === invoiceId) {
         setInvoicePreviewModal(null);
       }
     }, "Invoice deleted.");
+  };
 
-  const saveInvoiceForm = () =>
-    run(async () => {
+  const saveInvoiceForm = () => {
+    if (!isAdmin) {
+      return;
+    }
+    return run(async () => {
       if (!invoice.advertiser_id) {
         throw new Error("Advertiser required");
       }
@@ -3788,6 +4057,7 @@ export default function AdsPage() {
       setInvoice(blankInvoice);
       setView("list");
     }, "Invoice saved.");
+  };
 
   const clearAdsAdvancedFilters = () => {
     setAdsFilters((current) => ({
@@ -3803,6 +4073,9 @@ export default function AdsPage() {
   };
 
   const openAdEditor = (item) => {
+    if (!isAdmin) {
+      return;
+    }
     const advertiserId =
       item.advertiser_id ||
       advertisers.find(
@@ -3844,6 +4117,8 @@ export default function AdsPage() {
     });
     setCreateAdCustomDate("");
     setCreateAdCustomTime("");
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
     setView("createAd");
   };
 
@@ -3852,9 +4127,13 @@ export default function AdsPage() {
     setAd(blankAd);
     setCreateAdCustomDate("");
     setCreateAdCustomTime("");
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
   };
 
   const setCreateAdPostType = (postType) => {
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
     setAd((current) => {
       const next = {
         ...current,
@@ -3883,7 +4162,42 @@ export default function AdsPage() {
       return;
     }
 
+    if (["post_date", "post_date_from", "post_date_to", "post_time"].includes(field)) {
+      setCreateAdAvailabilityError(null);
+      setCreateAdFullyBookedDates([]);
+    }
+
     setAd((current) => ({ ...current, [field]: value }));
+  };
+
+  const checkCreateAdAvailability = async () => {
+    setCreateAdCheckingAvailability(true);
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
+
+    try {
+      const result = await checkAdAvailability({
+        postType: normalizeCreateAdPostType(ad.post_type),
+        postDateFrom: ad.post_date_from || ad.post_date || "",
+        postDateTo: ad.post_date_to || "",
+        customDates: ad.custom_dates,
+        postTime: ad.post_time,
+        excludeAdId: ad.id || null,
+      });
+
+      if (!result.available) {
+        setCreateAdAvailabilityError(result.availabilityError);
+        setCreateAdFullyBookedDates(result.fullyBookedDates);
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error checking create-ad availability:", error);
+      setCreateAdAvailabilityError("Could not check availability. Please try again.");
+      throw error;
+    } finally {
+      setCreateAdCheckingAvailability(false);
+    }
   };
 
   const handleCreateAdAddCustomDate = () => {
@@ -3920,6 +4234,8 @@ export default function AdsPage() {
 
     setCreateAdCustomDate("");
     setCreateAdCustomTime("");
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
   };
 
   const handleCreateAdRemoveCustomDate = (dateToRemove) => {
@@ -3933,6 +4249,8 @@ export default function AdsPage() {
         }),
       };
     });
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
   };
 
   const handleCreateAdUpdateCustomDateTime = (dateToUpdate, nextTime) => {
@@ -3962,6 +4280,8 @@ export default function AdsPage() {
         }),
       };
     });
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
   };
 
   const handleCreateAdAddMedia = (mediaItem) => {
@@ -3981,8 +4301,10 @@ export default function AdsPage() {
   };
 
   const showCreateAdAlert = async ({ title, message: alertMessage }) => {
-    const body = [title, alertMessage].filter(Boolean).join("\n\n");
-    window.alert(body || "Action required.");
+    appToast.warning({
+      title: title || "Action required",
+      description: alertMessage || "",
+    });
   };
 
   const saveCreateAd = (mode = "save") =>
@@ -4030,6 +4352,21 @@ export default function AdsPage() {
         payload.post_date_from = payload.post_date;
         payload.post_date_to = "";
         payload.custom_dates = [];
+      }
+
+      const availability = await checkAdAvailability({
+        postType: selectedPostType,
+        postDateFrom: payload.post_date_from || payload.post_date || "",
+        postDateTo: payload.post_date_to || "",
+        customDates: payload.custom_dates,
+        postTime: payload.post_time,
+        excludeAdId: payload.id || null,
+      });
+
+      if (!availability.available) {
+        setCreateAdAvailabilityError(availability.availabilityError);
+        setCreateAdFullyBookedDates(availability.fullyBookedDates);
+        throw new Error(availability.availabilityError || "Selected dates are unavailable.");
       }
 
       await upsertAd(payload);
@@ -4104,29 +4441,36 @@ export default function AdsPage() {
   const handleSendAdToMyWhatsApp = async (adItem) => {
     const target = String(settingsProfileWhatsapp || user?.whatsapp_number || "").trim();
     if (!target) {
-      setMessage("Please add your WhatsApp number in Settings > Profile first.");
-      window.setTimeout(() => setMessage(""), 2200);
+      appToast.warning({
+        title: "WhatsApp number missing",
+        description: "Please add your WhatsApp number in Settings > Profile first.",
+      });
       return;
     }
 
     const digits = target.replace(/[^\d]/g, "");
     if (!digits) {
-      setMessage("WhatsApp number format is invalid. Use international format like +1234567890.");
-      window.setTimeout(() => setMessage(""), 2600);
+      appToast.warning({
+        title: "WhatsApp number format is invalid",
+        description: "Use international format like +1234567890.",
+      });
       return;
     }
 
     const messageText = buildAdsShareMessage(adItem);
     const url = `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
     window.open(url, "_blank", "noopener,noreferrer");
-    setMessage("Opened WhatsApp with your ad message.");
-    window.setTimeout(() => setMessage(""), 1800);
+    appToast.info({
+      title: "Opened WhatsApp with your ad message.",
+    });
   };
 
   const handleSendAdToMyTelegram = async (adItem) => {
     if (settingsActiveTelegramCount === 0) {
-      setMessage("Please add at least one Telegram Chat ID in Settings > Notifications first.");
-      window.setTimeout(() => setMessage(""), 2600);
+      appToast.warning({
+        title: "Telegram Chat ID missing",
+        description: "Please add at least one Telegram Chat ID in Settings > Notifications first.",
+      });
       return;
     }
 
@@ -4141,17 +4485,27 @@ export default function AdsPage() {
 
     const shareUrl = `https://t.me/share/url?url=&text=${encodeURIComponent(messageText)}`;
     window.open(shareUrl, "_blank", "noopener,noreferrer");
-    setMessage("Opened Telegram share and copied message.");
-    window.setTimeout(() => setMessage(""), 1800);
+    appToast.info({
+      title: "Opened Telegram share and copied message.",
+    });
   };
 
-  const markAdAsPublished = (adId) =>
-    run(() => updateAdStatus(adId, "Published"), "Ad marked as published.");
+  const markAdAsPublished = (adId) => {
+    if (!isAdmin) {
+      return;
+    }
+    return run(() => updateAdStatus(adId, "Published"), "Ad marked as published.");
+  };
 
-  const deleteAdRecord = (adId) => run(() => deleteAd(adId), "Ad deleted.");
+  const deleteAdRecord = (adId) => {
+    if (!isAdmin) {
+      return;
+    }
+    return run(() => deleteAd(adId), "Ad deleted.");
+  };
 
   const handleNavigate = (section) => {
-    if (!sections.includes(section)) {
+    if (!allowedSections.includes(section)) {
       return;
     }
     setActiveSection(section);
@@ -4254,12 +4608,12 @@ export default function AdsPage() {
           String(advertiserEditModal.phone_number || advertiserEditModal.phone || "").trim(),
       });
       setDb(readDb());
-      setMessage("Advertiser saved.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Advertiser saved." });
       setAdvertiserEditModal(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to save advertiser");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to save advertiser",
+      });
     } finally {
       setAdvertiserActionLoading(false);
     }
@@ -4273,12 +4627,12 @@ export default function AdsPage() {
     try {
       await deleteAdvertiser(advertiserDeleteModal.id);
       setDb(readDb());
-      setMessage("Advertiser deleted.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Advertiser deleted." });
       setAdvertiserDeleteModal(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete advertiser");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to delete advertiser",
+      });
     } finally {
       setAdvertiserActionLoading(false);
     }
@@ -4305,12 +4659,12 @@ export default function AdsPage() {
         phone_number: String(advertiserCreateForm.phone_number || "").trim(),
       });
       setDb(readDb());
-      setMessage("Advertiser saved.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Advertiser saved." });
       setAdvertiserCreateOpen(false);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create advertiser");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to create advertiser",
+      });
     } finally {
       setAdvertiserCreateLoading(false);
     }
@@ -4356,13 +4710,13 @@ export default function AdsPage() {
         placement: String(product.placement || "WhatsApp").trim() || "WhatsApp",
       });
       setDb(readDb());
-      setMessage("Product saved.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Product saved." });
       setProduct(blankProduct);
       setProductCreateOpen(false);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to create product");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to create product",
+      });
     } finally {
       setProductActionLoading(false);
     }
@@ -4397,12 +4751,12 @@ export default function AdsPage() {
           String(productEditModal.placement || "WhatsApp").trim() || "WhatsApp",
       });
       setDb(readDb());
-      setMessage("Product updated.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Product updated." });
       setProductEditModal(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to update product");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to update product",
+      });
     } finally {
       setProductActionLoading(false);
     }
@@ -4422,12 +4776,12 @@ export default function AdsPage() {
     try {
       await deleteProduct(productDeleteModal.id);
       setDb(readDb());
-      setMessage("Product deleted.");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.success({ title: "Product deleted." });
       setProductDeleteModal(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Failed to delete product");
-      window.setTimeout(() => setMessage(""), 1800);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to delete product",
+      });
     } finally {
       setProductActionLoading(false);
     }
@@ -4461,7 +4815,7 @@ export default function AdsPage() {
     );
   }
 
-  if (user.role !== "admin") {
+  if (!isAdmin && !isAdvertiser) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <div className="text-center max-w-md">
@@ -4469,7 +4823,7 @@ export default function AdsPage() {
             Access Denied
           </h1>
           <p className="text-gray-600 mb-6">
-            You do not have admin access to this page.
+            You do not have access to this page.
           </p>
           <a
             href="/account/logout"
@@ -4484,7 +4838,7 @@ export default function AdsPage() {
 
   return (
     <div className="flex h-screen bg-white">
-      <Sidebar activeItem={activeSection} onNavigate={handleNavigate} />
+      <Sidebar activeItem={activeSection} onNavigate={handleNavigate} userRole={userRole} />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {view === "list" && (
@@ -4520,15 +4874,19 @@ export default function AdsPage() {
 
               {showProfileDropdown && (
                 <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                  <button
-                    type="button"
-                    onClick={() => handleNavigate("Settings")}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
-                  >
-                    <Settings size={16} />
-                    Profile Settings
-                  </button>
-                  <div className="border-t border-gray-100 my-1" />
+                  {isAdmin ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleNavigate("Settings")}
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
+                      >
+                        <Settings size={16} />
+                        Profile Settings
+                      </button>
+                      <div className="border-t border-gray-100 my-1" />
+                    </>
+                  ) : null}
                   <a
                     href="/account/logout"
                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
@@ -4546,17 +4904,16 @@ export default function AdsPage() {
           className={`flex-1 overflow-auto bg-gray-50 ${activeSection === "Calendar" ? "p-0" : "p-8"
             }`}
         >
-          {message ? (
-            <div className="mb-4 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
-              {message}
-            </div>
-          ) : null}
           {activeSection === "Dashboard" && (
             <div className="max-w-7xl mx-auto">
               <div className="mb-8 flex items-center justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-                  <p className="text-gray-600 mt-1">Overview of your ad management</p>
+                  <p className="text-gray-600 mt-1">
+                    {isAdvertiser
+                      ? "Overview of your advertiser account activity"
+                      : "Overview of your ad management"}
+                  </p>
                 </div>
               </div>
 
@@ -4610,7 +4967,7 @@ export default function AdsPage() {
                 </div>
               </div>
 
-              {capacityWarnings.length > 0 && (
+              {isAdmin && capacityWarnings.length > 0 && (
                 <div className="bg-white border border-gray-200 rounded-lg mb-6">
                   <div className="px-5 py-4 border-b border-gray-200">
                     <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
@@ -4726,86 +5083,88 @@ export default function AdsPage() {
                 </div>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-2 mb-6">
-                <div className="bg-white border border-gray-200 rounded-lg">
-                  <div className="px-5 py-4 border-b border-gray-200">
-                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
-                      Revenue Trend (6 Months)
-                    </h2>
-                  </div>
-                  <div className="p-5">
-                    {revenueTrend.length > 0 ? (
-                      <div className="space-y-2">
-                        {revenueTrend.map((item) => (
-                          <div
-                            key={item.month}
-                            className="flex items-center justify-between"
-                          >
-                            <span className="w-20 text-xs text-gray-600">
-                              {new Date(`${item.month}-01`).toLocaleDateString("en-US", {
-                                month: "short",
-                                year: "numeric",
-                              })}
-                            </span>
-                            <div className="flex-1 mx-3">
-                              <div className="bg-gray-100 rounded-full h-2">
-                                <div
-                                  className="bg-gray-900 h-2 rounded-full"
-                                  style={{
-                                    width: `${Math.min(
-                                      ((Number(item.revenue) || 0) / maxRevenueValue) * 100,
-                                      100,
-                                    )}%`,
-                                  }}
-                                />
+              {isAdmin ? (
+                <div className="grid gap-6 lg:grid-cols-2 mb-6">
+                  <div className="bg-white border border-gray-200 rounded-lg">
+                    <div className="px-5 py-4 border-b border-gray-200">
+                      <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                        Revenue Trend (6 Months)
+                      </h2>
+                    </div>
+                    <div className="p-5">
+                      {revenueTrend.length > 0 ? (
+                        <div className="space-y-2">
+                          {revenueTrend.map((item) => (
+                            <div
+                              key={item.month}
+                              className="flex items-center justify-between"
+                            >
+                              <span className="w-20 text-xs text-gray-600">
+                                {new Date(`${item.month}-01`).toLocaleDateString("en-US", {
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </span>
+                              <div className="flex-1 mx-3">
+                                <div className="bg-gray-100 rounded-full h-2">
+                                  <div
+                                    className="bg-gray-900 h-2 rounded-full"
+                                    style={{
+                                      width: `${Math.min(
+                                        ((Number(item.revenue) || 0) / maxRevenueValue) * 100,
+                                        100,
+                                      )}%`,
+                                    }}
+                                  />
+                                </div>
                               </div>
+                              <span className="w-20 text-right text-xs font-semibold text-gray-900">
+                                {formatCurrency(item.revenue)}
+                              </span>
                             </div>
-                            <span className="w-20 text-right text-xs font-semibold text-gray-900">
-                              {formatCurrency(item.revenue)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500">No revenue data.</p>
-                    )}
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">No revenue data.</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="bg-white border border-gray-200 rounded-lg">
-                  <div className="px-5 py-4 border-b border-gray-200">
-                    <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
-                      Top Advertisers
-                    </h2>
-                  </div>
-                  <div className="p-5">
-                    {topAdvertisers.length > 0 ? (
-                      <div className="space-y-3">
-                        {topAdvertisers.map((item, index) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="w-4 text-xs font-bold text-gray-400">
-                                {index + 1}
-                              </span>
-                              <span className="text-sm text-gray-900">
-                                {item.advertiser_name}
+                  <div className="bg-white border border-gray-200 rounded-lg">
+                    <div className="px-5 py-4 border-b border-gray-200">
+                      <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                        Top Advertisers
+                      </h2>
+                    </div>
+                    <div className="p-5">
+                      {topAdvertisers.length > 0 ? (
+                        <div className="space-y-3">
+                          {topAdvertisers.map((item, index) => (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between pb-3 border-b border-gray-100 last:border-0 last:pb-0"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="w-4 text-xs font-bold text-gray-400">
+                                  {index + 1}
+                                </span>
+                                <span className="text-sm text-gray-900">
+                                  {item.advertiser_name}
+                                </span>
+                              </div>
+                              <span className="text-sm font-semibold text-gray-900">
+                                {formatCurrency(item.total_spent)}
                               </span>
                             </div>
-                            <span className="text-sm font-semibold text-gray-900">
-                              {formatCurrency(item.total_spent)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500">No advertiser data.</p>
-                    )}
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500">No advertiser data.</p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : null}
 
               <div className="grid gap-6 lg:grid-cols-2">
                 <div className="bg-white border border-gray-200 rounded-lg">
@@ -5077,6 +5436,7 @@ export default function AdsPage() {
                     setView("createAd");
                     setCalendarSelectedAd(null);
                   }}
+                  canEdit={isAdmin}
                 />
               ) : null}
             </div>
@@ -5087,7 +5447,9 @@ export default function AdsPage() {
               <div className="mb-6">
                 <h1 className="text-2xl font-semibold text-gray-900 mb-1">Submissions</h1>
                 <p className="text-sm text-gray-500">
-                  Review and approve advertising requests from clients
+                  {isAdvertiser
+                    ? "Track the ad requests submitted under your advertiser account."
+                    : "Review and approve advertising requests from clients"}
                 </p>
               </div>
 
@@ -5156,16 +5518,15 @@ export default function AdsPage() {
                                   className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
                                   title="View Details"
                                   onClick={() => {
-                                    setMessage(
-                                      `${item.ad_name || "Submission"} by ${item.advertiser_name || "unknown advertiser"
-                                      }`,
-                                    );
-                                    window.setTimeout(() => setMessage(""), 1800);
+                                    appToast.info({
+                                      title: item.ad_name || "Submission",
+                                      description: `Submitted by ${item.advertiser_name || "unknown advertiser"}`,
+                                    });
                                   }}
                                 >
                                   <Eye size={16} />
                                 </button>
-                                {item.status === "pending" ? (
+                                {isAdmin && item.status === "pending" ? (
                                   <>
                                     <button
                                       type="button"
@@ -5213,7 +5574,7 @@ export default function AdsPage() {
                                     </button>
                                   </>
                                 ) : null}
-                                {item.status === "not_approved" ? (
+                                {isAdmin && item.status === "not_approved" ? (
                                   <button
                                     type="button"
                                     className="px-2.5 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors disabled:bg-gray-400 text-xs"
@@ -5473,8 +5834,9 @@ export default function AdsPage() {
               <div className="mb-8">
                 <h1 className="text-3xl font-semibold text-gray-900 mb-2">Ads</h1>
                 <p className="text-sm text-gray-500">
-                  Monitor active campaigns, review creative content, and track deployment
-                  statuses.
+                  {isAdvertiser
+                    ? "Review the ads linked to your advertiser account."
+                    : "Monitor active campaigns, review creative content, and track deployment statuses."}
                 </p>
               </div>
 
@@ -5750,16 +6112,18 @@ export default function AdsPage() {
                   <Download size={16} />
                   Export
                 </button>
-                <button
-                  onClick={() => {
-                    setAd(blankAd);
-                    setView("createAd");
-                  }}
-                  className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
-                  type="button"
-                >
-                  Create new ad
-                </button>
+                {isAdmin ? (
+                  <button
+                    onClick={() => {
+                      setAd(blankAd);
+                      setView("createAd");
+                    }}
+                    className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
+                    type="button"
+                  >
+                    Create new ad
+                  </button>
+                ) : null}
                 </div>
               </div>
 
@@ -5772,16 +6136,22 @@ export default function AdsPage() {
               {sortedAds.length === 0 ? (
                 <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
                   <p className="text-gray-500">No ads found</p>
-                  <button
-                    onClick={() => {
-                      setAd(blankAd);
-                      setView("createAd");
-                    }}
-                    className="mt-4 px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
-                    type="button"
-                  >
-                    Create your first ad
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      onClick={() => {
+                        setAd(blankAd);
+                        setView("createAd");
+                      }}
+                      className="mt-4 px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
+                      type="button"
+                    >
+                      Create your first ad
+                    </button>
+                  ) : (
+                    <p className="mt-2 text-sm text-gray-400">
+                      Ads submitted under your account will appear here.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
@@ -5853,6 +6223,7 @@ export default function AdsPage() {
                             onDelete={deleteAdRecord}
                             onSendToWhatsApp={handleSendAdToMyWhatsApp}
                             onSendToTelegram={handleSendAdToMyTelegram}
+                            readOnly={isAdvertiser}
                           />
                         ))}
                       </tbody>
@@ -5910,10 +6281,11 @@ export default function AdsPage() {
                 onClose={() => setAdsPreviewAd(null)}
                 onEdit={openAdEditor}
                 linkedInvoices={linkedPreviewInvoices}
+                canEdit={isAdmin}
               />
             </div>
           )}
-          {activeSection === "Ads" && view === "createAd" && (
+          {activeSection === "Ads" && view === "createAd" && isAdmin && (
             <div className="flex-1 overflow-auto bg-white -m-8">
               <div className="flex max-w-none mx-auto">
                 <div className="flex-1 bg-white p-12">
@@ -6095,11 +6467,12 @@ export default function AdsPage() {
                         onAddCustomDate={handleCreateAdAddCustomDate}
                         onRemoveCustomDate={handleCreateAdRemoveCustomDate}
                         onUpdateCustomDateTime={handleCreateAdUpdateCustomDateTime}
-                        onCheckAvailability={undefined}
-                        checkingAvailability={false}
-                        availabilityError={null}
+                        onCheckAvailability={checkCreateAdAvailability}
+                        checkingAvailability={createAdCheckingAvailability}
+                        availabilityError={createAdAvailabilityError}
                         pastTimeError={null}
-                        fullyBookedDates={[]}
+                        fullyBookedDates={createAdFullyBookedDates}
+                        excludeAdId={ad.id || null}
                       />
 
                       <div>
@@ -7130,69 +7503,75 @@ export default function AdsPage() {
                 <div>
                   <h1 className="text-3xl font-semibold text-gray-900 mb-2">Billing</h1>
                   <p className="text-sm text-gray-500">
-                    Manage invoices, track payments, and view billing history.
+                    {isAdvertiser
+                      ? "View your invoices, balances, and payment status."
+                      : "Manage invoices, track payments, and view billing history."}
                   </p>
                 </div>
-                <div className="relative" ref={invoiceCreateMenuRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowInvoiceCreateMenu((current) => !current)}
-                    className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
-                  >
-                    <Plus size={16} />
-                    Create Invoice
-                    <ChevronDown size={16} />
-                  </button>
-                  {showInvoiceCreateMenu ? (
-                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setInvoice(blankInvoice);
-                          setView("newInvoice");
-                          setShowInvoiceCreateMenu(false);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                      >
-                        <Plus size={16} />
-                        <div>
-                          <div className="font-medium">New Invoice</div>
-                          <div className="text-xs text-gray-500">Create a single invoice</div>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowInvoiceCreateMenu(false);
-                          setMessage("Batch Invoice is coming soon.");
-                          window.setTimeout(() => setMessage(""), 1800);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                      >
-                        <Receipt size={16} />
-                        <div>
-                          <div className="font-medium">Batch Invoice</div>
-                          <div className="text-xs text-gray-500">Invoice by date range</div>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowInvoiceCreateMenu(false);
-                          setMessage("Recurring Invoice is coming soon.");
-                          window.setTimeout(() => setMessage(""), 1800);
-                        }}
-                        className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                      >
-                        <RefreshCw size={16} />
-                        <div>
-                          <div className="font-medium">Recurring Invoice</div>
-                          <div className="text-xs text-gray-500">Generate for period</div>
-                        </div>
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
+                {isAdmin ? (
+                  <div className="relative" ref={invoiceCreateMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowInvoiceCreateMenu((current) => !current)}
+                      className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
+                    >
+                      <Plus size={16} />
+                      Create Invoice
+                      <ChevronDown size={16} />
+                    </button>
+                    {showInvoiceCreateMenu ? (
+                      <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInvoice(blankInvoice);
+                            setView("newInvoice");
+                            setShowInvoiceCreateMenu(false);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                        >
+                          <Plus size={16} />
+                          <div>
+                            <div className="font-medium">New Invoice</div>
+                            <div className="text-xs text-gray-500">Create a single invoice</div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowInvoiceCreateMenu(false);
+                            appToast.info({
+                              title: "Batch Invoice is coming soon.",
+                            });
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                        >
+                          <Receipt size={16} />
+                          <div>
+                            <div className="font-medium">Batch Invoice</div>
+                            <div className="text-xs text-gray-500">Invoice by date range</div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowInvoiceCreateMenu(false);
+                            appToast.info({
+                              title: "Recurring Invoice is coming soon.",
+                            });
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                        >
+                          <RefreshCw size={16} />
+                          <div>
+                            <div className="font-medium">Recurring Invoice</div>
+                            <div className="text-xs text-gray-500">Generate for period</div>
+                          </div>
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -7274,18 +7653,22 @@ export default function AdsPage() {
                   <FileText size={48} className="mx-auto text-gray-300 mb-4" />
                   <p className="text-gray-500 mb-2">No invoices found</p>
                   <p className="text-sm text-gray-400 mb-4">
-                    Create your first invoice to get started
+                    {isAdvertiser
+                      ? "Invoices linked to your account will appear here."
+                      : "Create your first invoice to get started"}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setInvoice(blankInvoice);
-                      setView("newInvoice");
-                    }}
-                    className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
-                  >
-                    Create Invoice
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInvoice(blankInvoice);
+                        setView("newInvoice");
+                      }}
+                      className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
+                    >
+                      Create Invoice
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
@@ -7377,61 +7760,74 @@ export default function AdsPage() {
                                 className="px-6 py-4 text-right relative"
                                 onClick={(event) => event.stopPropagation()}
                               >
-                                <button
-                                  type="button"
-                                  onClick={(event) => openInvoiceMenu(item.id, event)}
-                                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                                >
-                                  <MoreVertical size={18} className="text-gray-500" />
-                                </button>
-                                {openInvoiceMenuId === item.id ? (
-                                  <div
-                                    ref={invoiceMenuRef}
-                                    className={`absolute ${invoiceMenuPosition.vertical === "top"
-                                      ? "bottom-full mb-1"
-                                      : "top-full mt-1"
-                                      } ${invoiceMenuPosition.horizontal === "left"
-                                        ? "right-0"
-                                        : "left-auto"
-                                      } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
+                                {isAdvertiser ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openInvoicePreview(item)}
+                                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                                   >
+                                    <Eye size={14} className="text-gray-400" />
+                                    View
+                                  </button>
+                                ) : (
+                                  <>
                                     <button
                                       type="button"
-                                      onClick={() => openInvoicePreview(item)}
-                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                      onClick={(event) => openInvoiceMenu(item.id, event)}
+                                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                                     >
-                                      <Eye size={16} className="text-gray-400" />
-                                      View Invoice
+                                      <MoreVertical size={18} className="text-gray-500" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => openInvoiceEditor(item)}
-                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                    >
-                                      <Edit2 size={16} className="text-gray-400" />
-                                      Edit Invoice
-                                    </button>
-                                    {status !== "Paid" ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => markInvoiceAsPaid(item)}
-                                        className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                    {openInvoiceMenuId === item.id ? (
+                                      <div
+                                        ref={invoiceMenuRef}
+                                        className={`absolute ${invoiceMenuPosition.vertical === "top"
+                                          ? "bottom-full mb-1"
+                                          : "top-full mt-1"
+                                          } ${invoiceMenuPosition.horizontal === "left"
+                                            ? "right-0"
+                                            : "left-auto"
+                                          } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
                                       >
-                                        <CheckCircle size={16} className="text-gray-400" />
-                                        Mark as Paid
-                                      </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => openInvoicePreview(item)}
+                                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                        >
+                                          <Eye size={16} className="text-gray-400" />
+                                          View Invoice
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => openInvoiceEditor(item)}
+                                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                        >
+                                          <Edit2 size={16} className="text-gray-400" />
+                                          Edit Invoice
+                                        </button>
+                                        {status !== "Paid" ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => markInvoiceAsPaid(item)}
+                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                          >
+                                            <CheckCircle size={16} className="text-gray-400" />
+                                            Mark as Paid
+                                          </button>
+                                        ) : null}
+                                        <div className="border-t border-gray-100 my-1" />
+                                        <button
+                                          type="button"
+                                          onClick={() => deleteInvoiceRecord(item.id)}
+                                          className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                        >
+                                          <Trash2 size={16} className="text-red-500" />
+                                          Delete
+                                        </button>
+                                      </div>
                                     ) : null}
-                                    <div className="border-t border-gray-100 my-1" />
-                                    <button
-                                      type="button"
-                                      onClick={() => deleteInvoiceRecord(item.id)}
-                                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                    >
-                                      <Trash2 size={16} className="text-red-500" />
-                                      Delete
-                                    </button>
-                                  </div>
-                                ) : null}
+                                  </>
+                                )}
                               </td>
                             </tr>
                           );
@@ -7523,22 +7919,26 @@ export default function AdsPage() {
                           </div>
                         </div>
                         <div className="flex justify-end gap-2 border-t border-gray-200 pt-4">
-                          {normalizeInvoiceStatus(invoicePreviewModal.status) !== "Paid" ? (
-                            <button
-                              type="button"
-                              onClick={() => markInvoiceAsPaid(invoicePreviewModal)}
-                              className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                              Mark as Paid
-                            </button>
+                          {isAdmin ? (
+                            <>
+                              {normalizeInvoiceStatus(invoicePreviewModal.status) !== "Paid" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => markInvoiceAsPaid(invoicePreviewModal)}
+                                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                                >
+                                  Mark as Paid
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => openInvoiceEditor(invoicePreviewModal)}
+                                className="px-4 py-2 rounded-lg bg-black text-sm text-white hover:bg-gray-800"
+                              >
+                                Edit Invoice
+                              </button>
+                            </>
                           ) : null}
-                          <button
-                            type="button"
-                            onClick={() => openInvoiceEditor(invoicePreviewModal)}
-                            className="px-4 py-2 rounded-lg bg-black text-sm text-white hover:bg-gray-800"
-                          >
-                            Edit Invoice
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -7548,7 +7948,7 @@ export default function AdsPage() {
             </div>
           )}
 
-          {activeSection === "Billing" && view === "newInvoice" && (
+          {activeSection === "Billing" && view === "newInvoice" && isAdmin && (
             <div className="max-w-[1400px] mx-auto">
               <button
                 type="button"
@@ -7949,18 +8349,6 @@ export default function AdsPage() {
                       </p>
                     </div>
 
-                    {settingsProfileMessage?.type === "error" && (
-                      <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
-                        {settingsProfileMessage.text}
-                      </div>
-                    )}
-                    {settingsProfileMessage?.type === "success" && (
-                      <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-600 flex items-center gap-2">
-                        <Check size={16} />
-                        {settingsProfileMessage.text}
-                      </div>
-                    )}
-
                     <div className="flex items-center gap-3 pt-4">
                       <button
                         type="submit"
@@ -8001,11 +8389,6 @@ export default function AdsPage() {
                       Add Member
                     </button>
                   </div>
-                  {settingsTeamError && (
-                    <div className="mx-6 mt-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
-                      {settingsTeamError}
-                    </div>
-                  )}
                   <div className="divide-y divide-gray-200">
                     {teamMembers.length === 0 ? (
                       <div className="p-6 text-center text-gray-500">
@@ -8092,28 +8475,10 @@ export default function AdsPage() {
                           required
                         />
                       </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Password
-                        </label>
-                        <input
-                          type="password"
-                          value={settingsTeamPassword}
-                          onChange={(event) => setSettingsTeamPassword(event.target.value)}
-                          placeholder="Create a secure password"
-                          className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
-                          minLength={6}
-                          required
-                        />
-                        <p className="text-xs text-gray-500 mt-2">
-                          This will create a new admin account with these credentials.
-                        </p>
+                      <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600">
+                        This adds the email to the admin members list stored in Supabase.
+                        Authentication for that email must already exist in Supabase Auth.
                       </div>
-                      {settingsTeamError && (
-                        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-600">
-                          {settingsTeamError}
-                        </div>
-                      )}
                       <div className="flex gap-3">
                         <button
                           type="button"
@@ -8523,19 +8888,6 @@ export default function AdsPage() {
                   </div>
 
                   <div className="p-6 border-t border-gray-200 bg-gray-50">
-                    {settingsNotificationMessage && (
-                      <div
-                        className={`mb-4 p-3 rounded-lg text-sm ${settingsNotificationMessage.type === "success"
-                          ? "bg-green-50 text-green-800 border border-green-200"
-                          : settingsNotificationMessage.type === "info"
-                            ? "bg-blue-50 text-blue-800 border border-blue-200"
-                            : "bg-red-50 text-red-800 border border-red-200"
-                          }`}
-                      >
-                        {settingsNotificationMessage.text}
-                      </div>
-                    )}
-
                     {settingsReminderResults && (
                       <div className="mb-4 p-4 bg-gray-100 rounded-lg border border-gray-300">
                         <h3 className="text-sm font-semibold text-gray-900 mb-2">
@@ -8610,17 +8962,6 @@ export default function AdsPage() {
                       Configure scheduling limits for ad submissions
                     </p>
                   </div>
-
-                  {settingsSchedulingError && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-                      {settingsSchedulingError}
-                    </div>
-                  )}
-                  {settingsSchedulingSuccess && (
-                    <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded mb-4">
-                      Settings saved successfully!
-                    </div>
-                  )}
 
                   <div className="space-y-6">
                     <div>

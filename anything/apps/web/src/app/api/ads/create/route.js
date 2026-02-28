@@ -1,12 +1,17 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
+import {
+  checkBatchAvailability,
+  checkSingleDateAvailability,
+  expandDateRange,
+} from "../../utils/ad-availability.js";
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }
@@ -100,6 +105,70 @@ export async function POST(request) {
     const dateFrom = oneTime ? scheduleDate : daily ? dateOnly(post_date_from) : null;
     const dateTo = daily ? dateOnly(post_date_to) : null;
     const customDates = custom && Array.isArray(custom_dates) ? custom_dates : [];
+
+    if (oneTime && scheduleDate) {
+      const availability = await checkSingleDateAvailability({
+        supabase,
+        date: scheduleDate,
+        postType: post_type,
+        postTime: post_time,
+      });
+
+      if (!availability.available) {
+        return Response.json(
+          {
+            error: availability.is_day_full
+              ? "Ad limit reached for this date. Please choose the next available day."
+              : "This time slot is already booked. Please choose a different time.",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (daily && dateFrom && dateTo) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: expandDateRange(dateFrom, dateTo),
+      });
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Ad limit reached on one or more dates in this range. Please choose different dates.",
+            fully_booked_dates: blockedDates,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (custom && customDates.length > 0) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: customDates.map((entry) =>
+          entry && typeof entry === "object" ? entry.date : entry,
+        ),
+      });
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Ad limit reached on one or more selected dates. Please choose different dates.",
+            fully_booked_dates: blockedDates,
+          },
+          { status: 400 },
+        );
+      }
+    }
 
     const { data: createdAd, error: createError } = await supabase
       .from(table("ads"))

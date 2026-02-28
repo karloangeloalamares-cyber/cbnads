@@ -5,8 +5,12 @@ import { signOut } from "@/lib/localAuth";
 
 export default function LogoutPage() {
   useEffect(() => {
-    signOut();
-    window.location.href = "/account/signin";
+    const run = async () => {
+      await signOut();
+      window.location.href = "/account/signin";
+    };
+
+    void run();
   }, []);
 
   return (

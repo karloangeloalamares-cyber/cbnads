@@ -11,24 +11,7 @@ const LEGACY_LOCAL_USERS_KEY = 'cbnads.local.users.v1';
 
 const DB_VERSION = 3;
 
-const REQUIRED_LOCAL_USERS = [
-  {
-    id: 'user_admin',
-    name: 'Zach Schwartz',
-    email: 'zach@cbnads.com',
-    password: 'admin123!',
-    role: 'admin',
-    image: '',
-  },
-  {
-    id: 'user_advertiser',
-    name: 'CBN Advertiser',
-    email: 'ads@cbn.com',
-    password: 'ads123!',
-    role: 'advertiser',
-    image: '',
-  },
-];
+const REQUIRED_LOCAL_USERS = [];
 
 const LEGACY_TEST_USER_EMAILS = new Set(['admin@cbnads.local']);
 
@@ -180,11 +163,197 @@ const isMissingColumnError = (error) => {
   return code === '42703' || /column .* does not exist/i.test(message);
 };
 
+const isPermissionDeniedError = (error) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  const status = Number(error?.status || error?.statusCode || 0);
+  return (
+    code === '42501' ||
+    status === 401 ||
+    status === 403 ||
+    /permission denied/i.test(message) ||
+    /row-level security/i.test(message) ||
+    /not allowed/i.test(message)
+  );
+};
+
 const throwIfSupabaseError = (label, error) => {
   if (!error) {
     return;
   }
   throw new Error(`${label}: ${error.message || 'Unknown Supabase error'}`);
+};
+
+const normalizeRole = (value) => String(value || '').trim().toLowerCase();
+
+const normalizeAppRole = (value) => {
+  const role = normalizeRole(value);
+  if (role === 'advertiser') {
+    return 'advertiser';
+  }
+  if (['owner', 'admin', 'manager', 'assistant', 'staff'].includes(role)) {
+    return 'admin';
+  }
+  return role;
+};
+
+const loadTeamMemberRoleByEmail = async (supabase, email) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    return '';
+  }
+
+  const { data, error } = await supabase
+    .from(tableName('team_members'))
+    .select('role')
+    .ilike('email', normalizedEmail)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingRelationError(error) || isPermissionDeniedError(error)) {
+      return '';
+    }
+    throwIfSupabaseError('select team member role', error);
+  }
+
+  return normalizeAppRole(data?.role);
+};
+
+const loadAdvertiserIdentity = async (
+  supabase,
+  { advertiserId = '', email = '', advertiserName = '' } = {},
+) => {
+  const normalizedAdvertiserId = String(advertiserId || '').trim();
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedName = String(advertiserName || '').trim();
+
+  if (normalizedAdvertiserId) {
+    const { data, error } = await supabase
+      .from(tableName('advertisers'))
+      .select('id, advertiser_name, email')
+      .eq('id', normalizedAdvertiserId)
+      .maybeSingle();
+    if (error && !isPermissionDeniedError(error)) {
+      throwIfSupabaseError('select advertiser by id', error);
+    }
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  if (normalizedEmail) {
+    const { data, error } = await supabase
+      .from(tableName('advertisers'))
+      .select('id, advertiser_name, email')
+      .ilike('email', normalizedEmail)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error && !isPermissionDeniedError(error)) {
+      throwIfSupabaseError('select advertiser by email', error);
+    }
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  if (normalizedName) {
+    const { data, error } = await supabase
+      .from(tableName('advertisers'))
+      .select('id, advertiser_name, email')
+      .eq('advertiser_name', normalizedName)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error && !isPermissionDeniedError(error)) {
+      throwIfSupabaseError('select advertiser by name', error);
+    }
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  return null;
+};
+
+export const resolveSupabaseSessionUser = async (supabaseOverride = null) => {
+  if (!canUseSupabase()) {
+    return null;
+  }
+
+  const supabase = supabaseOverride || getSupabaseClient();
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throwIfSupabaseError('get auth session', sessionError);
+  }
+
+  const authUser = sessionData?.session?.user || null;
+  if (!authUser?.id) {
+    setSessionUserId(null);
+    return null;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', authUser.id)
+    .maybeSingle();
+  if (profileError && !isPermissionDeniedError(profileError)) {
+    throwIfSupabaseError('select profile', profileError);
+  }
+
+  const email = String(authUser.email || profile?.email || '').trim().toLowerCase();
+  const explicitRole =
+    authUser?.user_metadata?.role || authUser?.app_metadata?.role || profile?.role || '';
+  const teamRole = explicitRole ? '' : await loadTeamMemberRoleByEmail(supabase, email);
+  const role = normalizeAppRole(explicitRole || teamRole || 'user');
+
+  const advertiser = await loadAdvertiserIdentity(supabase, {
+    advertiserId:
+      authUser?.user_metadata?.advertiser_id ||
+      authUser?.app_metadata?.advertiser_id ||
+      profile?.advertiser_id ||
+      '',
+    email,
+    advertiserName:
+      authUser?.user_metadata?.advertiser_name ||
+      profile?.full_name ||
+      authUser?.user_metadata?.full_name ||
+      '',
+  });
+
+  const resolvedUser = {
+    id: authUser.id,
+    email,
+    name:
+      String(
+        authUser?.user_metadata?.full_name ||
+          authUser?.user_metadata?.advertiser_name ||
+          profile?.full_name ||
+          authUser.email ||
+          '',
+      ).trim() || email,
+    image:
+      String(
+        authUser?.user_metadata?.avatar_url ||
+          authUser?.user_metadata?.image ||
+          profile?.avatar_url ||
+          '',
+      ).trim() || '',
+    role,
+    advertiser_id: advertiser?.id || profile?.advertiser_id || null,
+    advertiser_name:
+      advertiser?.advertiser_name ||
+      String(authUser?.user_metadata?.advertiser_name || '').trim() ||
+      '',
+    whatsapp_number: String(profile?.whatsapp_number || '').trim(),
+    account_verified: authUser?.user_metadata?.account_verified === true,
+  };
+
+  setSessionUserId(resolvedUser.id);
+  return resolvedUser;
 };
 
 const normalizeUsers = (rawUsers) => {
@@ -215,32 +384,10 @@ const normalizeUsers = (rawUsers) => {
     });
   }
 
-  for (const requiredUser of REQUIRED_LOCAL_USERS) {
-    const requiredEmail = requiredUser.email.toLowerCase();
-    const index = deduped.findIndex(
-      (item) =>
-        String(item.email || '').toLowerCase() === requiredEmail ||
-        String(item.id || '') === requiredUser.id,
-    );
-    const existing = index >= 0 ? deduped[index] : null;
-    const next = {
-      ...(existing || {}),
-      ...requiredUser,
-      created_at: existing?.created_at || now,
-      updated_at: now,
-    };
-
-    if (index >= 0) {
-      deduped[index] = next;
-    } else {
-      deduped.push(next);
-    }
-  }
-
   return deduped;
 };
 
-const baseDb = (users = REQUIRED_LOCAL_USERS) => {
+const baseDb = (users = []) => {
   const now = nowIso();
   return {
     version: DB_VERSION,
@@ -269,6 +416,7 @@ const baseDb = (users = REQUIRED_LOCAL_USERS) => {
       sound_enabled: true,
       reminder_email: '',
     },
+    telegram_chat_ids: [],
     team_members: [],
   };
 };
@@ -302,8 +450,7 @@ const readLocalUsers = () => {
     return normalizeUsers(parsed);
   }
 
-  const fallbackUsers = readLegacyUsersFromDbStorage();
-  const normalized = normalizeUsers(fallbackUsers);
+  const normalized = normalizeUsers([]);
   s.setItem(LOCAL_USERS_KEY, JSON.stringify(normalized));
   return normalized;
 };
@@ -341,6 +488,7 @@ const normalizeDb = (rawValue) => {
       ...seed.notification_preferences,
       ...(raw.notification_preferences ?? {}),
     },
+    telegram_chat_ids: Array.isArray(raw.telegram_chat_ids) ? raw.telegram_chat_ids : [],
     team_members: Array.isArray(raw.team_members) ? raw.team_members : [],
   };
 };
@@ -395,34 +543,23 @@ const emitDbChanged = () => {
   window.dispatchEvent(new CustomEvent('cbn:db-changed'));
 };
 
-const persistDbSnapshot = (db) => {
+const clearLegacyDbSnapshots = () => {
   const s = storage();
   if (!s) {
     return;
   }
-  s.setItem(DB_KEY, JSON.stringify(db));
+  s.removeItem(DB_KEY);
   s.removeItem(LEGACY_DB_KEY);
 };
 
 const readLegacyDbFromStorage = () => {
-  const s = storage();
-  const fallback = normalizeDb(baseDb());
-  if (!s) {
-    return fallback;
-  }
-
-  migrateLegacyKey(s, DB_KEY, LEGACY_DB_KEY);
-  const raw = readStorageKey(s, DB_KEY, LEGACY_DB_KEY);
-  if (!raw) {
-    return fallback;
-  }
-  const parsed = parseJson(raw, fallback);
-  return refreshDerivedFields(normalizeDb(parsed));
+  clearLegacyDbSnapshots();
+  return refreshDerivedFields(normalizeDb(baseDb(readLocalUsers())));
 };
 
 const writeLegacyDbToStorage = (value) => {
   const normalized = refreshDerivedFields(normalizeDb(value));
-  persistDbSnapshot(normalized);
+  clearLegacyDbSnapshots();
   persistLocalUsers(normalized.users);
   dbCache = normalized;
   emitDbChanged();
@@ -706,6 +843,7 @@ const fromNotificationRows = (notificationRow, adminNotificationRow) => ({
   sound_enabled: adminNotificationRow?.sound_enabled ?? true,
   reminder_email:
     notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
+  telegram_chat_ids: toArray(adminNotificationRow?.telegram_chat_ids),
   created_at: notificationRow?.created_at || adminNotificationRow?.created_at || nowIso(),
   updated_at: notificationRow?.updated_at || adminNotificationRow?.updated_at || nowIso(),
 });
@@ -724,6 +862,7 @@ const toAdminNotificationRow = (input) => ({
   email_address: String(input?.email_address || input?.reminder_email || ''),
   phone_number: String(input?.phone_number || ''),
   sound_enabled: input?.sound_enabled !== false,
+  telegram_chat_ids: toArray(input?.telegram_chat_ids),
   updated_at: nowIso(),
 });
 
@@ -737,13 +876,12 @@ const primeCacheFromLocal = () => {
     return;
   }
   hasPrimedCache = true;
-  // Always start from local snapshot to avoid blank UI while remote data hydrates.
-  dbCache = readLegacyDbFromStorage();
+  dbCache = refreshDerivedFields(normalizeDb(baseDb()));
 };
 
 const setDbCache = (value, { emit = true } = {}) => {
   const normalized = refreshDerivedFields(normalizeDb(value));
-  persistDbSnapshot(normalized);
+  clearLegacyDbSnapshots();
   persistLocalUsers(normalized.users);
   dbCache = normalized;
   if (emit) {
@@ -752,10 +890,21 @@ const setDbCache = (value, { emit = true } = {}) => {
   return clone(dbCache);
 };
 
-const fetchRows = async (supabase, baseName, { optional = false } = {}) => {
+const fetchRows = async (
+  supabase,
+  baseName,
+  {
+    optional = false,
+    allowPermissionDenied = false,
+  } = {},
+) => {
   const result = await supabase.from(tableName(baseName)).select('*');
   if (result.error) {
-    if (optional && isMissingRelationError(result.error)) {
+    if (
+      optional &&
+      (isMissingRelationError(result.error) ||
+        (allowPermissionDenied && isPermissionDeniedError(result.error)))
+    ) {
       return [];
     }
     throwIfSupabaseError(`select ${baseName}`, result.error);
@@ -763,10 +912,21 @@ const fetchRows = async (supabase, baseName, { optional = false } = {}) => {
   return result.data || [];
 };
 
-const fetchSingleton = async (supabase, baseName, { optional = false } = {}) => {
+const fetchSingleton = async (
+  supabase,
+  baseName,
+  {
+    optional = false,
+    allowPermissionDenied = false,
+  } = {},
+) => {
   const result = await supabase.from(tableName(baseName)).select('*').order('id', { ascending: true }).limit(1);
   if (result.error) {
-    if (optional && isMissingRelationError(result.error)) {
+    if (
+      optional &&
+      (isMissingRelationError(result.error) ||
+        (allowPermissionDenied && isPermissionDeniedError(result.error)))
+    ) {
       return null;
     }
     throwIfSupabaseError(`select ${baseName}`, result.error);
@@ -776,6 +936,7 @@ const fetchSingleton = async (supabase, baseName, { optional = false } = {}) => 
 
 const fetchDbFromSupabase = async () => {
   const supabase = getSupabaseClient();
+  const currentUser = await resolveSupabaseSessionUser(supabase);
   const [
     advertiserRows,
     productRows,
@@ -788,17 +949,47 @@ const fetchDbFromSupabase = async () => {
     adminNotificationRow,
   ] = await Promise.all([
     fetchRows(supabase, 'advertisers'),
-    fetchRows(supabase, 'products'),
+    fetchRows(supabase, 'products', { optional: true, allowPermissionDenied: true }),
     fetchRows(supabase, 'ads'),
     fetchRows(supabase, 'pending_ads'),
     fetchRows(supabase, 'invoices'),
-    fetchSingleton(supabase, 'admin_settings'),
-    fetchSingleton(supabase, 'notification_preferences'),
-    fetchRows(supabase, 'team_members'),
-    fetchSingleton(supabase, 'admin_notification_preferences', { optional: true }),
+    fetchSingleton(supabase, 'admin_settings', { optional: true, allowPermissionDenied: true }),
+    fetchSingleton(supabase, 'notification_preferences', {
+      optional: true,
+      allowPermissionDenied: true,
+    }),
+    fetchRows(supabase, 'team_members', { optional: true, allowPermissionDenied: true }),
+    fetchSingleton(supabase, 'admin_notification_preferences', {
+      optional: true,
+      allowPermissionDenied: true,
+    }),
   ]);
 
-  const users = readLocalUsers();
+  const notificationPreferences = fromNotificationRows(
+    notificationRow,
+    adminNotificationRow,
+  );
+  const teamMembers = teamMemberRows.map(fromTeamMemberRow);
+  if (
+    currentUser?.id &&
+    currentUser.role === 'admin' &&
+    !teamMembers.some(
+      (member) =>
+        String(member.email || '').trim().toLowerCase() ===
+        String(currentUser.email || '').trim().toLowerCase(),
+    )
+  ) {
+    teamMembers.unshift({
+      id: currentUser.id,
+      name: currentUser.name || currentUser.email || 'Current User',
+      email: currentUser.email || '',
+      role: 'admin',
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    });
+  }
+
+  const users = currentUser ? normalizeUsers([currentUser]) : [];
   return refreshDerivedFields(
     normalizeDb({
       ...baseDb(users),
@@ -809,8 +1000,9 @@ const fetchDbFromSupabase = async () => {
       pending_ads: pendingRows.map(fromPendingAdRow),
       invoices: invoiceRows.map(fromInvoiceRow),
       admin_settings: fromAdminSettingsRow(adminSettingsRow),
-      notification_preferences: fromNotificationRows(notificationRow, adminNotificationRow),
-      team_members: teamMemberRows.map(fromTeamMemberRow),
+      notification_preferences: notificationPreferences,
+      telegram_chat_ids: notificationPreferences.telegram_chat_ids,
+      team_members: teamMembers,
     }),
   );
 };
@@ -926,7 +1118,10 @@ const persistDbToSupabase = async (value) => {
   await syncSingletonTable(
     supabase,
     'admin_notification_preferences',
-    toAdminNotificationRow(db.notification_preferences),
+    toAdminNotificationRow({
+      ...db.notification_preferences,
+      telegram_chat_ids: db.telegram_chat_ids,
+    }),
     { optional: true },
   );
 };
@@ -934,8 +1129,8 @@ const persistDbToSupabase = async (value) => {
 const hydrateCache = async () => {
   primeCacheFromLocal();
   if (!canUseSupabase()) {
-    const localDb = readLegacyDbFromStorage();
-    setDbCache(localDb, { emit: false });
+    const emptyDb = refreshDerivedFields(normalizeDb(baseDb(readLocalUsers())));
+    setDbCache(emptyDb, { emit: false });
     hasLoadedInitialState = true;
     return clone(dbCache);
   }
@@ -956,8 +1151,8 @@ export const ensureDb = async () => {
   if (!ensurePromise) {
     ensurePromise = hydrateCache()
       .catch((error) => {
-        console.error('[localDb] Failed to load Supabase data; using local fallback.', error);
-        const fallback = readLegacyDbFromStorage();
+        console.error('[localDb] Failed to load Supabase data; using empty remote cache.', error);
+        const fallback = refreshDerivedFields(normalizeDb(baseDb()));
         setDbCache(fallback, { emit: false });
         hasLoadedInitialState = true;
         return clone(dbCache);
@@ -982,7 +1177,7 @@ export const writeDb = async (value) => {
   persistLocalUsers(normalized.users);
 
   if (!canUseSupabase()) {
-    return writeLegacyDbToStorage(normalized);
+    throw new Error('Supabase configuration is required to persist app data.');
   }
 
   await persistDbToSupabase(normalized);
@@ -1003,10 +1198,8 @@ export const subscribeDb = (listener) => {
   }
 
   const trackedKeys = new Set([
-    DB_KEY,
     SESSION_KEY,
     LOCAL_USERS_KEY,
-    LEGACY_DB_KEY,
     LEGACY_SESSION_KEY,
     LEGACY_LOCAL_USERS_KEY,
   ]);
@@ -1051,6 +1244,49 @@ export const setSessionUserId = (userId) => {
 };
 
 export const clearSession = () => setSessionUserId(null);
+
+export const resetDbCache = ({ emit = true } = {}) => {
+  const emptyDb = refreshDerivedFields(normalizeDb(baseDb()));
+  clearLegacyDbSnapshots();
+  persistLocalUsers([]);
+  dbCache = emptyDb;
+  hasPrimedCache = true;
+  hasLoadedInitialState = false;
+  ensurePromise = null;
+  if (emit) {
+    emitDbChanged();
+  }
+  return clone(dbCache);
+};
+
+export const upsertLocalUser = async (input) => {
+  primeCacheFromLocal();
+  const current = clone(dbCache);
+  const now = nowIso();
+  const email = String(input?.email || '')
+    .trim()
+    .toLowerCase();
+  const existingIndex = current.users.findIndex(
+    (item) => item.id === input?.id || String(item.email || '').trim().toLowerCase() === email,
+  );
+  const existing = existingIndex >= 0 ? current.users[existingIndex] : null;
+  const payload = {
+    ...(existing || {}),
+    ...(input || {}),
+    email,
+    created_at: existing?.created_at || input?.created_at || now,
+    updated_at: now,
+  };
+
+  if (existingIndex >= 0) {
+    current.users[existingIndex] = payload;
+  } else {
+    current.users.unshift(payload);
+  }
+
+  setDbCache(current, { emit: true });
+  return clone(payload);
+};
 
 export const upsertAdvertiser = async (input) => {
   let saved = null;

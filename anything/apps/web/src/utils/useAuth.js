@@ -24,7 +24,7 @@ function useAuth() {
   }, []);
 
   const handleSignOut = useCallback(async (options = {}) => {
-    signOut();
+    await signOut();
     if (options.redirect !== false) {
       window.location.href = options.callbackUrl || '/account/signin';
     }

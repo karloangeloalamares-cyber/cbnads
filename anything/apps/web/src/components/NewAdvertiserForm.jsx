@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ArrowLeft } from "lucide-react";
+import { appToast } from "@/lib/toast";
 
 export default function NewAdvertiserForm({ onCancel, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -14,6 +15,17 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
 
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to create advertiser",
+      description: error,
+    });
+  }, [error]);
 
   const handleSubmit = async (type) => {
     if (type === "cancel") {
@@ -43,6 +55,10 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
 
       const data = await response.json();
       console.log("Created advertiser:", data);
+      appToast.success({
+        title: "Advertiser created",
+        description: `${formData.advertiser_name} is ready to use.`,
+      });
       onSuccess();
     } catch (err) {
       console.error(err);
@@ -95,12 +111,6 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
         <h2 className="text-xl font-semibold text-gray-900 mb-8">
           Add a new advertiser
         </h2>
-
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-            {error}
-          </div>
-        )}
 
         {/* Basic Information */}
         <div className="mb-10">

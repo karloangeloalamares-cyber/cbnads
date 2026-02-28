@@ -1,5 +1,6 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 import './global.css';
+import AppToaster from "@/components/AppToaster";
 
 export const links = () => [];
 
@@ -19,6 +20,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
+        <AppToaster />
         <ScrollRestoration />
         <Scripts />
       </body>

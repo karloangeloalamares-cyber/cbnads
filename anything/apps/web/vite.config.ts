@@ -6,6 +6,7 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 import { addRenderIds } from './plugins/addRenderIds';
 import { aliases } from './plugins/aliases';
 import consoleToParent from './plugins/console-to-parent';
+import { devApiRoutes } from './plugins/devApiRoutes';
 import { layoutWrapperPlugin } from './plugins/layouts';
 import { loadFontsFromTailwindSource } from './plugins/loadFontsFromTailwindSource';
 import { nextPublicProcessEnv } from './plugins/nextPublicProcessEnv';
@@ -47,6 +48,7 @@ export default defineConfig({
     consoleToParent(),
     loadFontsFromTailwindSource(),
     addRenderIds(),
+    devApiRoutes(),
     reactRouter(),
     tsconfigPaths(),
     aliases(),

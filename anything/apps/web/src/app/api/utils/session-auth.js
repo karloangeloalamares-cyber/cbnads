@@ -1,8 +1,8 @@
 import { getToken } from "@auth/core/jwt";
 import { getCurrentRequest } from "./request-context.js";
 
-export const getSessionFromRequestContext = async () => {
-  const request = getCurrentRequest();
+export const getSessionFromRequestContext = async (requestOverride = null) => {
+  const request = requestOverride || getCurrentRequest();
   if (!request) return null;
 
   const authUrl = String(process.env.AUTH_URL || "").trim();
@@ -29,4 +29,3 @@ export const getSessionFromRequestContext = async () => {
     expires: token.exp ? new Date(token.exp * 1000).toISOString() : null,
   };
 };
-

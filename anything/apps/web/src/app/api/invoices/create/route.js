@@ -18,7 +18,7 @@ function generateInvoiceNumber() {
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireAdmin(request);
     if (!admin.authorized) {
       return Response.json({ error: admin.error }, { status: 401 });
     }

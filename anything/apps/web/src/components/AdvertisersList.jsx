@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { appToast } from "@/lib/toast";
 
 export default function AdvertisersList({ onCreateNew }) {
   const [advertisers, setAdvertisers] = useState([]);
@@ -107,15 +108,25 @@ export default function AdvertisersList({ onCreateNew }) {
       if (!response.ok) {
         const error = await response.json();
         console.error("Delete failed:", error);
-        alert(`Failed to delete advertiser: ${error.error || "Unknown error"}`);
+        appToast.error({
+          title: "Failed to delete advertiser",
+          description: error.error || "Unknown error",
+        });
         return;
       }
 
       await fetchAdvertisers();
       setDeleteModal(null);
+      appToast.success({
+        title: "Advertiser deleted",
+        description: `${deleteModal.advertiser_name} was removed successfully.`,
+      });
     } catch (error) {
       console.error("Error deleting advertiser:", error);
-      alert(`Error deleting advertiser: ${error.message}`);
+      appToast.error({
+        title: "Error deleting advertiser",
+        description: error.message,
+      });
     } finally {
       setActionLoading(false);
     }
@@ -134,9 +145,17 @@ export default function AdvertisersList({ onCreateNew }) {
       if (response.ok) {
         await fetchAdvertisers();
         setEditModal(null);
+        appToast.success({
+          title: "Advertiser updated",
+          description: "Changes saved successfully.",
+        });
       }
     } catch (error) {
       console.error("Error updating advertiser:", error);
+      appToast.error({
+        title: "Failed to update advertiser",
+        description: error.message,
+      });
     } finally {
       setActionLoading(false);
     }

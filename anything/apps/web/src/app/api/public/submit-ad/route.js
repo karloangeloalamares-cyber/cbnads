@@ -1,5 +1,10 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { sendEmail } from "../../utils/send-email.js";
+import {
+  checkBatchAvailability,
+  checkSingleDateAvailability,
+  expandDateRange,
+} from "../../utils/ad-availability.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
@@ -163,34 +168,66 @@ export async function POST(request) {
       ? new URL("/pending-submissions", safeAppUrl).toString()
       : null;
 
-    // Additional validation for One-Time Post
     if (post_type === "One-Time Post" && post_date_from && post_time) {
-      const [adsSlot, pendingSlot] = await Promise.all([
-        supabase
-          .from(table("ads"))
-          .select("id", { count: "exact" })
-          .eq("post_type", "One-Time Post")
-          .eq("post_date_from", post_date_from)
-          .eq("post_time", post_time),
-        supabase
-          .from(table("pending_ads"))
-          .select("id", { count: "exact" })
-          .eq("post_type", "One-Time Post")
-          .eq("post_date_from", post_date_from)
-          .eq("post_time", post_time)
-          .eq("status", "pending"),
-      ]);
+      const availability = await checkSingleDateAvailability({
+        supabase,
+        date: post_date_from,
+        postType: post_type,
+        postTime: post_time,
+      });
 
-      if (adsSlot.error) throw adsSlot.error;
-      if (pendingSlot.error) throw pendingSlot.error;
+      if (!availability.available) {
+        return Response.json(
+          {
+            error: availability.is_day_full
+              ? "Ad limit reached for this date. Please choose the next available day."
+              : "This time slot is already booked. Please choose a different time.",
+          },
+          { status: 400 },
+        );
+      }
+    }
 
-      const bookedCount = (adsSlot.count || 0) + (pendingSlot.count || 0);
+    if (post_type === "Daily Run" && post_date_from && post_date_to) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: expandDateRange(post_date_from, post_date_to),
+      });
 
-      if (bookedCount > 0) {
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
         return Response.json(
           {
             error:
-              "This time slot is already booked. Please choose a different time.",
+              "Ad limit reached on one or more dates in this range. Please choose different dates.",
+            fully_booked_dates: blockedDates,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (post_type === "Custom Schedule" && Array.isArray(custom_dates) && custom_dates.length > 0) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: custom_dates.map((entry) =>
+          entry && typeof entry === "object" ? entry.date : entry,
+        ),
+      });
+
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Ad limit reached on one or more selected dates. Please choose different dates.",
+            fully_booked_dates: blockedDates,
           },
           { status: 400 },
         );

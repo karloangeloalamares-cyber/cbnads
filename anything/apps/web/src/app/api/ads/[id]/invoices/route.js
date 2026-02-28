@@ -1,11 +1,20 @@
 import { db, table } from "../../../utils/supabase-db.js";
-import { requireAdmin } from "../../../utils/auth-check.js";
+import {
+  getRequestStatusForError,
+  isAdvertiserUser,
+  matchesAdvertiserScope,
+  requireAdminOrAdvertiser,
+  resolveAdvertiserScope,
+} from "../../../utils/auth-check.js";
 
 export async function GET(request, { params }) {
   try {
-    const admin = await requireAdmin();
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requireAdminOrAdvertiser(request);
+    if (!auth.authorized) {
+      return Response.json(
+        { error: auth.error },
+        { status: auth.status || getRequestStatusForError(auth.error) },
+      );
     }
 
     const { id } = params;
@@ -14,6 +23,27 @@ export async function GET(request, { params }) {
     }
 
     const supabase = db();
+    const advertiserScope = isAdvertiserUser(auth.user)
+      ? await resolveAdvertiserScope(auth.user)
+      : null;
+
+    if (advertiserScope) {
+      const { data: ad, error: adError } = await supabase
+        .from(table("ads"))
+        .select("id, advertiser_id, advertiser")
+        .eq("id", id)
+        .maybeSingle();
+      if (adError) throw adError;
+      if (
+        !ad ||
+        !matchesAdvertiserScope(ad, advertiserScope, {
+          advertiserNameFields: ["advertiser", "advertiser_name"],
+        })
+      ) {
+        return Response.json({ invoices: [] });
+      }
+    }
+
     const { data: invoiceItems, error: invoiceItemsError } = await supabase
       .from(table("invoice_items"))
       .select("invoice_id")
@@ -33,7 +63,11 @@ export async function GET(request, { params }) {
       .order("created_at", { ascending: false });
     if (invoicesError) throw invoicesError;
 
-    return Response.json({ invoices: invoices || [] });
+    const filteredInvoices = advertiserScope
+      ? (invoices || []).filter((item) => matchesAdvertiserScope(item, advertiserScope))
+      : invoices || [];
+
+    return Response.json({ invoices: filteredInvoices });
   } catch (error) {
     console.error("Error fetching ad invoices:", error);
     return Response.json(

@@ -1,4 +1,8 @@
-﻿import { useState } from "react";
+import { useState } from "react";
+import {
+  checkAdAvailability,
+  normalizeCustomDateEntries,
+} from "@/lib/adAvailabilityClient";
 
 const initialFormData = {
   advertiser_name: "",
@@ -18,13 +22,26 @@ const initialFormData = {
   notes: "",
 };
 
+const initialAccountData = (email = "") => ({
+  email,
+  password: "",
+  confirmPassword: "",
+});
+
 export function useSubmitAdForm() {
   const [formData, setFormData] = useState(initialFormData);
   const [submittedData, setSubmittedData] = useState(null);
+  const [pendingAdId, setPendingAdId] = useState("");
+  const [phase, setPhase] = useState("form");
+  const [accountData, setAccountData] = useState(initialAccountData());
+  const [accountError, setAccountError] = useState(null);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendError, setResendError] = useState(null);
+  const [resendMessage, setResendMessage] = useState(null);
   const [customDate, setCustomDate] = useState("");
   const [customTime, setCustomTime] = useState("");
   const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
@@ -60,6 +77,13 @@ export function useSubmitAdForm() {
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
+  };
+
+  const handleAccountChange = (field, value) => {
+    setAccountData((prev) => ({ ...prev, [field]: value }));
+    setAccountError(null);
+    setResendError(null);
+    setResendMessage(null);
   };
 
   const addCustomDate = () => {
@@ -146,128 +170,23 @@ export function useSubmitAdForm() {
     }));
   };
 
-  const getDatesInRange = (from, to) => {
-    const dates = [];
-    const start = new Date(`${from}T00:00:00`);
-    const end = new Date(`${to}T00:00:00`);
-    const current = new Date(start);
-
-    while (current <= end) {
-      const year = current.getFullYear();
-      const month = String(current.getMonth() + 1).padStart(2, "0");
-      const day = String(current.getDate()).padStart(2, "0");
-      dates.push(`${year}-${month}-${day}`);
-      current.setDate(current.getDate() + 1);
-    }
-
-    return dates;
-  };
-
-  const getDateStrings = (customDates) => {
-    return customDates
-      .map((entry) => {
-        if (typeof entry === "object" && entry !== null) return entry.date;
-        return entry;
-      })
-      .filter((date) => date && date.length > 0);
-  };
-
   const checkAvailability = async () => {
     setCheckingAvailability(true);
     setAvailabilityError(null);
     setFullyBookedDates([]);
 
     try {
-      if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
-        const timeWithSeconds =
-          formData.post_time.length === 5 ? `${formData.post_time}:00` : formData.post_time;
+      const result = await checkAdAvailability({
+        postType: formData.post_type,
+        postDateFrom: formData.post_date_from,
+        postDateTo: formData.post_date_to,
+        customDates: formData.custom_dates,
+        postTime: formData.post_time,
+      });
 
-        const response = await fetch("/api/ads/availability", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: formData.post_date_from,
-            post_type: formData.post_type,
-            post_time: timeWithSeconds,
-            exclude_ad_id: null,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Availability check failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        if (!data.available) {
-          if (data.is_time_blocked) {
-            setAvailabilityError("This time slot is already taken. Please choose a different time.");
-          } else if (data.is_day_full) {
-            setAvailabilityError("This date is fully booked. Please choose a different date.");
-          } else {
-            setAvailabilityError("This time slot is not available.");
-          }
-        }
-      } else if (formData.post_type === "Daily Run" && formData.post_date_from && formData.post_date_to) {
-        const dates = getDatesInRange(formData.post_date_from, formData.post_date_to);
-        if (dates.length === 0 || dates.length > 365) return;
-
-        const response = await fetch("/api/ads/availability-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dates,
-            post_type: "Daily Run",
-            exclude_ad_id: null,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Availability check failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const booked = [];
-
-        for (const date of dates) {
-          const info = data.results[date];
-          if (info && info.is_full) booked.push(date);
-        }
-
-        if (booked.length > 0) {
-          setFullyBookedDates(booked);
-          setAvailabilityError("Some dates in your range are fully booked.");
-        }
-      } else if (formData.post_type === "Custom Schedule" && formData.custom_dates.length > 0) {
-        const validDates = getDateStrings(formData.custom_dates);
-        if (validDates.length === 0) return;
-
-        const response = await fetch("/api/ads/availability-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dates: validDates,
-            post_type: "Custom Schedule",
-            exclude_ad_id: null,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Availability check failed: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const booked = [];
-
-        for (const date of validDates) {
-          const info = data.results[date];
-          if (info && info.is_full) booked.push(date);
-        }
-
-        if (booked.length > 0) {
-          setFullyBookedDates(booked);
-          setAvailabilityError("Some of your selected dates are fully booked.");
-        }
+      if (!result.available) {
+        setAvailabilityError(result.availabilityError);
+        setFullyBookedDates(result.fullyBookedDates);
       }
     } catch (err) {
       console.error("Error checking availability:", err);
@@ -350,106 +269,26 @@ export function useSubmitAdForm() {
       return;
     }
 
-    if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
-      try {
-        const timeWithSeconds =
-          formData.post_time.length === 5 ? `${formData.post_time}:00` : formData.post_time;
+    try {
+      const availability = await checkAdAvailability({
+        postType: formData.post_type,
+        postDateFrom: formData.post_date_from,
+        postDateTo: formData.post_date_to,
+        customDates: normalizeCustomDateEntries(formData.custom_dates),
+        postTime: formData.post_time,
+      });
 
-        const availResponse = await fetch("/api/ads/availability", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: formData.post_date_from,
-            post_type: formData.post_type,
-            post_time: timeWithSeconds,
-            exclude_ad_id: null,
-          }),
-        });
-
-        if (!availResponse.ok) {
-          throw new Error(`Availability check failed: ${availResponse.status}`);
-        }
-
-        const availData = await availResponse.json();
-
-        if (!availData.available) {
-          if (availData.is_time_blocked) {
-            setError("This time slot is already taken. Please choose a different time.");
-          } else if (availData.is_day_full) {
-            setError("This date is fully booked. Please choose a different date.");
-          } else {
-            setError("This time slot is not available. Please choose a different time.");
-          }
-
-          setLoading(false);
-          return;
-        }
-      } catch (err) {
-        console.error("Error checking availability:", err);
+      if (!availability.available) {
+        setFullyBookedDates(availability.fullyBookedDates);
+        setError(availability.availabilityError || "Selected dates are unavailable.");
+        setLoading(false);
+        return;
       }
-    }
-
-    if (formData.post_type === "Daily Run" && formData.post_date_from && formData.post_date_to) {
-      try {
-        const dates = getDatesInRange(formData.post_date_from, formData.post_date_to);
-        if (dates.length > 0 && dates.length <= 365) {
-          const availResponse = await fetch("/api/ads/availability-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              dates,
-              post_type: "Daily Run",
-              exclude_ad_id: null,
-            }),
-          });
-
-          if (availResponse.ok) {
-            const availData = await availResponse.json();
-            const booked = dates.filter((date) => availData.results[date]?.is_full);
-
-            if (booked.length > 0) {
-              setFullyBookedDates(booked);
-              setError("Some dates in your range are fully booked. Please choose different dates.");
-              setLoading(false);
-              return;
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error checking availability:", err);
-      }
-    }
-
-    if (formData.post_type === "Custom Schedule" && formData.custom_dates.length > 0) {
-      try {
-        const validDates = getDateStrings(formData.custom_dates);
-
-        if (validDates.length > 0) {
-          const availResponse = await fetch("/api/ads/availability-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              dates: validDates,
-              post_type: "Custom Schedule",
-              exclude_ad_id: null,
-            }),
-          });
-
-          if (availResponse.ok) {
-            const availData = await availResponse.json();
-            const booked = validDates.filter((date) => availData.results[date]?.is_full);
-
-            if (booked.length > 0) {
-              setFullyBookedDates(booked);
-              setError("Some of your selected dates are fully booked. Please choose different dates.");
-              setLoading(false);
-              return;
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error checking availability:", err);
-      }
+    } catch (err) {
+      console.error("Error checking availability:", err);
+      setError("Could not check availability. Please try again.");
+      setLoading(false);
+      return;
     }
 
     try {
@@ -472,9 +311,16 @@ export function useSubmitAdForm() {
         throw new Error(data.error || "Failed to submit ad");
       }
 
-      setSubmittedData({ ...formData, post_time: timeWithSeconds });
-      setSuccess(true);
+      const data = await response.json();
+      const nextSubmittedData = { ...formData, post_time: timeWithSeconds };
+
+      setSubmittedData(nextSubmittedData);
+      setPendingAdId(data?.pending_ad?.id || "");
+      setAccountData(initialAccountData(formData.email));
+      setPhase("account");
       setFormData(initialFormData);
+      setResendError(null);
+      setResendMessage(null);
     } catch (err) {
       console.error("Error submitting ad:", err);
       setError(err.message || "Failed to submit ad request");
@@ -483,26 +329,143 @@ export function useSubmitAdForm() {
     }
   };
 
+  const submitAccountSetup = async (event) => {
+    event.preventDefault();
+    setAccountError(null);
+    setResendError(null);
+    setResendMessage(null);
+
+    if (!submittedData) {
+      setAccountError("Your submission could not be found. Please submit the ad again.");
+      return;
+    }
+
+    if (!accountData.email || !accountData.password || !accountData.confirmPassword) {
+      setAccountError("Please complete all account fields.");
+      return;
+    }
+
+    if (accountData.password.length < 8) {
+      setAccountError("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (accountData.password !== accountData.confirmPassword) {
+      setAccountError("Passwords do not match.");
+      return;
+    }
+
+    setAccountLoading(true);
+
+    try {
+      const response = await fetch("/api/public/submit-ad/account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pendingAdId,
+          advertiserName: submittedData.advertiser_name,
+          contactName: submittedData.contact_name,
+          phoneNumber: submittedData.phone_number,
+          email: accountData.email,
+          password: accountData.password,
+          confirmPassword: accountData.confirmPassword,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to create advertiser account.");
+      }
+
+      setAccountData((prev) => ({
+        ...initialAccountData(data.email || prev.email),
+      }));
+      setPhase("verify");
+    } catch (err) {
+      console.error("Error creating advertiser account:", err);
+      setAccountError(err.message || "Failed to create advertiser account.");
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setResendLoading(true);
+    setResendError(null);
+    setResendMessage(null);
+
+    try {
+      const response = await fetch("/api/public/submit-ad/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: accountData.email || submittedData?.email || "",
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to resend verification email.");
+      }
+
+      setResendMessage(`Verification email sent to ${data.email}.`);
+    } catch (err) {
+      console.error("Error resending verification email:", err);
+      setResendError(err.message || "Failed to resend verification email.");
+    } finally {
+      setResendLoading(false);
+    }
+  };
+
+  const goToSignIn = () => {
+    const params = new URLSearchParams();
+    const email = accountData.email || submittedData?.email || "";
+    if (email) {
+      params.set("email", email);
+    }
+    params.set("forceLogin", "1");
+    params.set("audience", "advertiser");
+    params.set("callbackUrl", "/ads");
+    window.location.href = `/account/signin?${params.toString()}`;
+  };
+
   const resetSuccess = () => {
-    setSuccess(false);
+    setPhase("form");
     setSubmittedData(null);
+    setPendingAdId("");
+    setAccountData(initialAccountData());
+    setAccountError(null);
+    setError(null);
+    setAvailabilityError(null);
+    setPastTimeError(null);
+    setFullyBookedDates([]);
+    setResendError(null);
+    setResendMessage(null);
   };
 
   return {
     formData,
     submittedData,
+    pendingAdId,
+    phase,
+    accountData,
+    accountError,
+    accountLoading,
+    resendLoading,
+    resendError,
+    resendMessage,
     customDate,
     setCustomDate,
     customTime,
     setCustomTime,
     error,
-    success,
     loading,
     availabilityError,
     checkingAvailability,
     pastTimeError,
     fullyBookedDates,
     handleChange,
+    handleAccountChange,
     addCustomDate,
     removeCustomDate,
     updateCustomDateTime,
@@ -510,6 +473,9 @@ export function useSubmitAdForm() {
     removeMedia,
     checkAvailability,
     handleSubmit,
+    submitAccountSetup,
+    resendVerification,
+    goToSignIn,
     resetSuccess,
   };
 }

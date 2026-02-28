@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePendingAds } from "@/hooks/usePendingAds";
+import { appToast } from "@/lib/toast";
 import { PageHeader } from "./PendingSubmissionsList/PageHeader";
 import { LoadingState } from "./PendingSubmissionsList/LoadingState";
 import { SubmissionsTable } from "./PendingSubmissionsList/SubmissionsTable";
@@ -30,6 +31,17 @@ export default function PendingSubmissionsList() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editFormData, setEditFormData] = useState(null);
   const [duplicateAdvertiser, setDuplicateAdvertiser] = useState(null);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to load submissions",
+      description: error,
+    });
+  }, [error]);
 
   const handleViewClick = (ad) => {
     setSelectedAd(ad);
@@ -113,12 +125,6 @@ export default function PendingSubmissionsList() {
   return (
     <div className="p-8">
       <PageHeader />
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-          {error}
-        </div>
-      )}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <SubmissionsTable

@@ -1,10 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
 import { ChevronLeft } from "lucide-react";
-import { useModal } from "@/hooks/useModal";
 import { useInvoiceForm } from "@/hooks/useInvoiceForm";
 import { useNewAdvertiser } from "@/hooks/useNewAdvertiser";
-import { AlertModal, ConfirmModal } from "./Modal";
 import { TopNavBar } from "./NewInvoiceForm/TopNavBar";
 import { AdvertiserSelector } from "./NewInvoiceForm/AdvertiserSelector";
 import { NewAdvertiserForm } from "./NewInvoiceForm/NewAdvertiserForm";
@@ -12,9 +11,33 @@ import { AdvertiserInfo } from "./NewInvoiceForm/AdvertiserInfo";
 import { LineItems } from "./NewInvoiceForm/LineItems";
 import { InvoicePreview } from "./NewInvoiceForm/InvoicePreview";
 import { formatCurrency } from "@/utils/invoiceFormatters";
+import { appToast } from "@/lib/toast";
 
 export default function NewInvoiceForm({ onCancel, onSuccess }) {
-  const { modalState, showAlert } = useModal();
+  const showToastAlert = async ({ title, message, variant = "info" }) => {
+    const payload = {
+      title: title || "Notice",
+      description: message || "",
+    };
+
+    if (variant === "danger") {
+      appToast.error(payload);
+      return true;
+    }
+
+    if (variant === "warning") {
+      appToast.warning(payload);
+      return true;
+    }
+
+    if (variant === "success") {
+      appToast.success(payload);
+      return true;
+    }
+
+    appToast.info(payload);
+    return true;
+  };
 
   const {
     advertisers,
@@ -52,7 +75,7 @@ export default function NewInvoiceForm({ onCancel, onSuccess }) {
   };
 
   const handleCreateAdvertiser = async () => {
-    await handleCreateNewAdvertiser(showAlert, async (created) => {
+    await handleCreateNewAdvertiser(showToastAlert, async (created) => {
       await fetchAdvertisers();
       setFormData((prev) => ({
         ...prev,
@@ -68,16 +91,19 @@ export default function NewInvoiceForm({ onCancel, onSuccess }) {
   const subtotal = calculateSubtotal();
   const total = calculateTotal();
 
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to save invoice",
+      description: error,
+    });
+  }, [error]);
+
   return (
     <>
-      {/* Modals */}
-      {modalState.type === "alert" && (
-        <AlertModal {...modalState.props} isOpen={modalState.isOpen} />
-      )}
-      {modalState.type === "confirm" && (
-        <ConfirmModal {...modalState.props} isOpen={modalState.isOpen} />
-      )}
-
       <div className="min-h-screen bg-gray-50">
         {/* Top Navigation Bar */}
         <TopNavBar
@@ -88,12 +114,6 @@ export default function NewInvoiceForm({ onCancel, onSuccess }) {
 
         {/* Main Content */}
         <div className="max-w-[1600px] mx-auto py-10 px-6">
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">
-              {error}
-            </div>
-          )}
-
           <div className="grid grid-cols-[1fr_520px] gap-8">
             {/* Left Column - Form */}
             <div>

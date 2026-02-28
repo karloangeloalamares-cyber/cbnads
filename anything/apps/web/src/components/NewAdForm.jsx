@@ -4,7 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useUpload } from "@/utils/useUpload";
 import { useAdFormData } from "@/hooks/useAdFormData";
 import { useModal } from "@/hooks/useModal";
-import { AlertModal, ConfirmModal } from "./Modal";
+import { ConfirmModal } from "./Modal";
+import { appToast } from "@/lib/toast";
 import { FormHeader } from "./NewAdForm/FormHeader";
 import { DetailsSection } from "./NewAdForm/DetailsSection";
 import { PostTypeSection } from "./NewAdForm/PostTypeSection";
@@ -36,7 +37,31 @@ export default function NewAdForm({
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const initialFormDataRef = useRef(null);
-  const { modalState, showAlert, showConfirm } = useModal();
+  const { modalState, showConfirm } = useModal();
+  const showToastAlert = async ({ title, message, variant = "info" }) => {
+    const payload = {
+      title: title || "Notice",
+      description: message || "",
+    };
+
+    if (variant === "danger") {
+      appToast.error(payload);
+      return true;
+    }
+
+    if (variant === "warning") {
+      appToast.warning(payload);
+      return true;
+    }
+
+    if (variant === "success") {
+      appToast.success(payload);
+      return true;
+    }
+
+    appToast.info(payload);
+    return true;
+  };
 
   // Track initial form data to detect changes
   useEffect(() => {
@@ -77,7 +102,7 @@ export default function NewAdForm({
         const maxSize = 200 * 1024 * 1024; // 200 MB in bytes
 
         if (isVideo && file.size > maxSize) {
-          await showAlert({
+          await showToastAlert({
             title: "File Too Large",
             message: `${file.name} is too large. Videos must be under 200 MB. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
             variant: "warning",
@@ -88,7 +113,7 @@ export default function NewAdForm({
         const result = await upload({ file });
         if (result.error) {
           console.error("Failed to upload media:", result.error);
-          await showAlert({
+          await showToastAlert({
             title: "Upload Failed",
             message: `Failed to upload ${file.name}: ${result.error}`,
             variant: "danger",
@@ -105,7 +130,7 @@ export default function NewAdForm({
         }));
       } catch (error) {
         console.error("Failed to upload media:", error);
-        await showAlert({
+        await showToastAlert({
           title: "Upload Failed",
           message: `Failed to upload ${file.name}`,
           variant: "danger",
@@ -120,7 +145,7 @@ export default function NewAdForm({
   const validateForm = async () => {
     // Required fields
     if (!formData.adName?.trim()) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please enter an ad name",
         variant: "warning",
@@ -128,7 +153,7 @@ export default function NewAdForm({
       return false;
     }
     if (!formData.advertiser) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please select an advertiser",
         variant: "warning",
@@ -136,7 +161,7 @@ export default function NewAdForm({
       return false;
     }
     if (!formData.postType) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please select a post type",
         variant: "warning",
@@ -144,7 +169,7 @@ export default function NewAdForm({
       return false;
     }
     if (!formData.placement) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please select a placement",
         variant: "warning",
@@ -154,7 +179,7 @@ export default function NewAdForm({
 
     // Schedule validation
     if (formData.postType === "One-Time Post" && !formData.postDate) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please select a date for the one-time post",
         variant: "warning",
@@ -163,7 +188,7 @@ export default function NewAdForm({
     }
     if (formData.postType === "Daily Run") {
       if (!formData.postDateFrom || !formData.postDateTo) {
-        await showAlert({
+        await showToastAlert({
           title: "Validation Error",
           message: "Please select start and end dates for the daily run",
           variant: "warning",
@@ -175,7 +200,7 @@ export default function NewAdForm({
       formData.postType === "Custom Schedule" &&
       (!formData.customDates || formData.customDates.length === 0)
     ) {
-      await showAlert({
+      await showToastAlert({
         title: "Validation Error",
         message: "Please add at least one custom date",
         variant: "warning",
@@ -335,7 +360,7 @@ export default function NewAdForm({
       if (onSuccess) onSuccess();
     } catch (error) {
       console.error("Failed to save ad:", error);
-      await showAlert({
+      await showToastAlert({
         title: "Save Failed",
         message: `Failed to save ad: ${error.message}`,
         variant: "danger",
@@ -374,7 +399,7 @@ export default function NewAdForm({
       if (onSuccess) onSuccess();
     } catch (error) {
       console.error("Failed to save draft:", error);
-      await showAlert({
+      await showToastAlert({
         title: "Save Failed",
         message: `Failed to save draft: ${error.message}`,
         variant: "danger",
@@ -413,9 +438,6 @@ export default function NewAdForm({
   return (
     <div className="flex-1 overflow-auto bg-gray-50">
       {/* Modals */}
-      {modalState.type === "alert" && (
-        <AlertModal {...modalState.props} isOpen={modalState.isOpen} />
-      )}
       {modalState.type === "confirm" && (
         <ConfirmModal {...modalState.props} isOpen={modalState.isOpen} />
       )}

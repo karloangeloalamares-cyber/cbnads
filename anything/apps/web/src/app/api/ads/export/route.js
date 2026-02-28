@@ -1,5 +1,11 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import {
+  getRequestStatusForError,
+  isAdvertiserUser,
+  matchesAdvertiserScope,
+  requireAdminOrAdvertiser,
+  resolveAdvertiserScope,
+} from "../../utils/auth-check.js";
 
 const adPrimaryDate = (ad) => dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
 
@@ -13,9 +19,12 @@ const toLegacyPostType = (value) => {
 
 export async function GET(request) {
   try {
-    const admin = await requireAdmin();
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requireAdminOrAdvertiser(request);
+    if (!auth.authorized) {
+      return Response.json(
+        { error: auth.error },
+        { status: auth.status || getRequestStatusForError(auth.error) },
+      );
     }
 
     const supabase = db();
@@ -36,7 +45,22 @@ export async function GET(request) {
     if (error) throw error;
 
     const today = dateOnly(new Date());
-    let ads = (data || []).filter((ad) => !ad.archived);
+    const advertiserScope = isAdvertiserUser(auth.user)
+      ? await resolveAdvertiserScope(auth.user)
+      : null;
+    let ads = (data || []).filter((ad) => {
+      if (ad.archived) {
+        return false;
+      }
+
+      if (!advertiserScope) {
+        return true;
+      }
+
+      return matchesAdvertiserScope(ad, advertiserScope, {
+        advertiserNameFields: ["advertiser", "advertiser_name"],
+      });
+    });
 
     if (status === "Upcoming Ads") {
       ads = ads.filter(

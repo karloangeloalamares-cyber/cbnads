@@ -1,6 +1,7 @@
-﻿import { useState } from "react";
+import { useState } from "react";
 import { Play, Plus, Trash2 } from "lucide-react";
 import useUpload from "@/utils/useUpload";
+import { appToast } from "@/lib/toast";
 
 export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert }) {
   const [playingVideo, setPlayingVideo] = useState(null);
@@ -16,7 +17,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
         const maxSize = 250 * 1024 * 1024;
 
         if (isVideo && file.size > maxSize) {
-          await showAlert({
+          await notifyUploadResult({
             title: "File Too Large",
             message: `${file.name} is too large. Videos must be under 250 MB. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
             variant: "warning",
@@ -28,7 +29,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
 
         if (result.error) {
           console.error("Failed to upload media:", result.error);
-          await showAlert({
+          await notifyUploadResult({
             title: "Upload Failed",
             message: `Failed to upload ${file.name}: ${result.error}`,
             variant: "danger",
@@ -40,7 +41,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
         onAddMedia({ url: result.url, type: mediaType, name: file.name });
       } catch (error) {
         console.error("Failed to upload media:", error);
-        await showAlert({
+        await notifyUploadResult({
           title: "Upload Failed",
           message: `Failed to upload ${file.name}`,
           variant: "danger",
@@ -145,4 +146,29 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
       )}
     </>
   );
+}
+
+async function notifyUploadResult({ title, message, variant = "info" }) {
+  const payload = {
+    title: title || "Notice",
+    description: message || "",
+  };
+
+  if (variant === "danger") {
+    appToast.error(payload);
+    return true;
+  }
+
+  if (variant === "warning") {
+    appToast.warning(payload);
+    return true;
+  }
+
+  if (variant === "success") {
+    appToast.success(payload);
+    return true;
+  }
+
+  appToast.info(payload);
+  return true;
 }

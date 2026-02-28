@@ -4,23 +4,78 @@ import { useEffect, useState } from "react";
 import {
   getSignedInUser,
   signIn,
+  signOut,
 } from "@/lib/localAuth";
 import { ensureDb } from "@/lib/localDb";
+import { appToast } from "@/lib/toast";
+
+const getDefaultRedirectForUser = (user) => {
+  const role = String(user?.role || "").trim().toLowerCase();
+  return role === "advertiser" ? "/ads" : "/ads";
+};
+
+const resolveRedirectTarget = (user, params) => {
+  const callbackUrl = String(params.get("callbackUrl") || "").trim();
+  return callbackUrl || getDefaultRedirectForUser(user);
+};
 
 export default function SignInPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!notice) {
+      return;
+    }
+
+    appToast.success({
+      title: "Account ready",
+      description: notice,
+    });
+  }, [notice]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to sign in",
+      description: error,
+    });
+  }, [error]);
 
   useEffect(() => {
     let cancelled = false;
     const initialize = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const prefilledEmail = params.get("email");
+      const verified = params.get("verified");
+      const forceLogin =
+        params.get("forceLogin") === "1" ||
+        params.get("audience") === "advertiser" ||
+        verified === "1";
+
+      if (!cancelled && prefilledEmail) {
+        setEmail(prefilledEmail);
+      }
+      if (!cancelled && verified === "1") {
+        setNotice("Account verified. You can now sign in as Advertiser.");
+      }
+
+      if (forceLogin) {
+        await signOut();
+        return;
+      }
+
       await ensureDb();
-      if (!cancelled && getSignedInUser()) {
-        const params = new URLSearchParams(window.location.search);
-        const callbackUrl = params.get("callbackUrl") || "/ads";
-        window.location.href = callbackUrl;
+
+      const currentUser = getSignedInUser();
+      if (!cancelled && currentUser) {
+        window.location.href = resolveRedirectTarget(currentUser, params);
       }
     };
     void initialize();
@@ -43,14 +98,15 @@ export default function SignInPage() {
     try {
       const result = await signIn({ email, password });
       if (!result.ok) {
-        setError("Incorrect email or password.");
+        setError(result.error || "Incorrect email or password.");
         setLoading(false);
         return;
       }
 
       const params = new URLSearchParams(window.location.search);
-      const callbackUrl = params.get("callbackUrl") || "/ads";
-      window.location.href = callbackUrl;
+      await ensureDb();
+      const currentUser = getSignedInUser() || result.user;
+      window.location.replace(resolveRedirectTarget(currentUser, params));
     } catch (err) {
       console.error("Sign in error:", err);
       setError("Something went wrong. Please try again.");
@@ -106,12 +162,6 @@ export default function SignInPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
-            {error ? (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            ) : null}
-
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address

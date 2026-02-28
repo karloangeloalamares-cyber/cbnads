@@ -1,6 +1,11 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
+import {
+  checkBatchAvailability,
+  checkSingleDateAvailability,
+  expandDateRange,
+} from "../../../utils/ad-availability.js";
 
 export async function POST(request) {
   try {
@@ -117,6 +122,73 @@ export async function POST(request) {
 
     const adStatus = advertiserInactive ? "Draft" : "Scheduled";
     const nowIso = new Date().toISOString();
+
+    if (ad.post_type === "One-Time Post" && ad.post_date_from) {
+      const availability = await checkSingleDateAvailability({
+        supabase,
+        date: ad.post_date_from,
+        postType: ad.post_type,
+        postTime: ad.post_time,
+        excludeId: pending_ad_id,
+      });
+
+      if (!availability.available) {
+        return Response.json(
+          {
+            error: availability.is_day_full
+              ? "Ad limit reached for this date. Please choose the next available day."
+              : "This time slot is already booked. Please choose a different time.",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (ad.post_type === "Daily Run" && ad.post_date_from && ad.post_date_to) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: expandDateRange(ad.post_date_from, ad.post_date_to),
+        excludeId: pending_ad_id,
+      });
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Ad limit reached on one or more dates in this range. Please choose different dates.",
+            fully_booked_dates: blockedDates,
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (ad.post_type === "Custom Schedule" && Array.isArray(ad.custom_dates) && ad.custom_dates.length > 0) {
+      const availability = await checkBatchAvailability({
+        supabase,
+        dates: ad.custom_dates.map((entry) =>
+          entry && typeof entry === "object" ? entry.date : entry,
+        ),
+        excludeId: pending_ad_id,
+      });
+      const blockedDates = Object.entries(availability.results || {})
+        .filter(([, info]) => info?.is_full)
+        .map(([dateValue]) => dateValue);
+
+      if (blockedDates.length > 0) {
+        return Response.json(
+          {
+            error:
+              "Ad limit reached on one or more selected dates. Please choose different dates.",
+            fully_booked_dates: blockedDates,
+          },
+          { status: 400 },
+        );
+      }
+    }
 
     const { data: newAd, error: createAdError } = await supabase
       .from(table("ads"))

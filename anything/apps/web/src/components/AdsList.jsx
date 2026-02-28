@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useAdsData } from "@/hooks/useAdsData";
 import { useAdvertisersAndProducts } from "@/hooks/useAdvertisersAndProducts";
 import { useAdActions } from "@/hooks/useAdActions";
 import { useAdSort } from "@/hooks/useAdSort";
 import { useModal } from "@/hooks/useModal";
+import { appToast } from "@/lib/toast";
 import { AlertModal, ConfirmModal } from "./Modal";
 import { PageHeader } from "./AdsList/PageHeader";
 import { FilterBar } from "./AdsList/FilterBar";
@@ -57,6 +58,17 @@ export default function AdsList({ onCreateNew, onEditAd }) {
     Boolean,
   );
 
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+
+    appToast.error({
+      title: "Unable to load ads",
+      description: error,
+    });
+  }, [error]);
+
   return (
     <>
       {/* Modals */}
@@ -94,12 +106,6 @@ export default function AdsList({ onCreateNew, onEditAd }) {
         </div>
 
         {/* Table */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
-            {error}
-          </div>
-        )}
-
         {loading ? (
           <LoadingState />
         ) : sortedAds.length === 0 ? (

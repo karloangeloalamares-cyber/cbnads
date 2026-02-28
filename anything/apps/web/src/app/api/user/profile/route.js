@@ -4,7 +4,7 @@ import { getSessionUser, requireAuth } from "../../utils/auth-check.js";
 // Update user profile
 export async function PUT(request) {
   try {
-    const authState = await requireAuth();
+    const authState = await requireAuth(request);
     if (!authState.authorized) {
       return Response.json({ error: authState.error }, { status: 401 });
     }
@@ -16,11 +16,18 @@ export async function PUT(request) {
       return Response.json({ error: "No fields to update" }, { status: 400 });
     }
 
-    const currentUser = await getSessionUser();
+    const currentUser = await getSessionUser(request);
     if (!currentUser?.email) {
       return Response.json(
         { error: "User session is missing email" },
         { status: 400 },
+      );
+    }
+
+    if (String(currentUser.role || "").toLowerCase() === "advertiser") {
+      return Response.json(
+        { error: "Advertiser profile updates are not supported by this endpoint." },
+        { status: 403 },
       );
     }
 
