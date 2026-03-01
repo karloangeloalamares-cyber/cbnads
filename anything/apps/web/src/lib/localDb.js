@@ -1,6 +1,11 @@
 import { withNamespace } from '@/lib/appNamespace';
 import { getSupabaseClient, hasSupabaseConfig, tableName } from '@/lib/supabase';
-import { formatDateKeyFromDate, getTodayInAppTimeZone, normalizeDateKey } from '@/lib/timezone';
+import {
+  APP_TIME_ZONE,
+  formatDateKeyFromDate,
+  getTodayInAppTimeZone,
+  normalizeDateKey,
+} from '@/lib/timezone';
 
 const DB_KEY = withNamespace('local.db.v1');
 const SESSION_KEY = withNamespace('local.session.v1');
@@ -641,6 +646,7 @@ const fromAdRow = (row) => {
     archived: Boolean(row.archived),
     published_at: row.published_at || null,
     published_dates: toArray(row.published_dates),
+    scheduled_timezone: String(row.scheduled_timezone || APP_TIME_ZONE).trim() || APP_TIME_ZONE,
     created_at: row.created_at || nowIso(),
     updated_at: row.updated_at || nowIso(),
   };
@@ -649,6 +655,7 @@ const fromAdRow = (row) => {
 const toAdRow = (input) => {
   const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
   const postDateFrom = toDateOnly(input.post_date_from || postDate);
+  const paidViaInvoiceId = input.paid_via_invoice_id || input.invoice_id || null;
   return {
     id: input.id || createId(),
     ad_name: String(input.ad_name || '').trim(),
@@ -660,6 +667,7 @@ const toAdRow = (input) => {
     status: input.status || 'Draft',
     payment: input.payment || 'Unpaid',
     post_date: toDateColumn(postDate),
+    schedule: toDateColumn(input.schedule || postDate),
     post_date_from: toDateColumn(postDateFrom),
     post_date_to: toDateColumn(input.post_date_to),
     post_time: toTimeColumn(input.post_time),
@@ -671,7 +679,13 @@ const toAdRow = (input) => {
     placement: String(input.placement || '').trim(),
     reminder_minutes: Number(input.reminder_minutes) || 15,
     price: toMoney(input.price),
-    invoice_id: input.invoice_id || null,
+    invoice_id: paidViaInvoiceId,
+    paid_via_invoice_id: paidViaInvoiceId,
+    archived: Boolean(input.archived),
+    published_at: input.published_at || null,
+    published_dates: toArray(input.published_dates),
+    scheduled_timezone:
+      String(input.scheduled_timezone || APP_TIME_ZONE).trim() || APP_TIME_ZONE,
     created_at: input.created_at || nowIso(),
     updated_at: input.updated_at || nowIso(),
   };
@@ -1371,6 +1385,7 @@ export const upsertAd = async (input) => {
     const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
     const product = db.products.find((item) => item.id === input.product_id);
     const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
+    const paidViaInvoiceId = input.paid_via_invoice_id || input.invoice_id || null;
     const payload = {
       id: input.id || createId('ad'),
       ad_name: (input.ad_name || '').trim(),
@@ -1394,7 +1409,13 @@ export const upsertAd = async (input) => {
       placement: input.placement || '',
       reminder_minutes: Number(input.reminder_minutes) || 15,
       price: toMoney(input.price),
-      invoice_id: input.invoice_id || null,
+      invoice_id: paidViaInvoiceId,
+      paid_via_invoice_id: paidViaInvoiceId,
+      archived: Boolean(input.archived),
+      published_at: input.published_at || null,
+      published_dates: toArray(input.published_dates),
+      scheduled_timezone:
+        String(input.scheduled_timezone || APP_TIME_ZONE).trim() || APP_TIME_ZONE,
       created_at: input.created_at || now,
       updated_at: now,
     };

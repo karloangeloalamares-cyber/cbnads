@@ -28,6 +28,7 @@ import {
   DollarSign,
   FileText,
   Calendar,
+  Globe,
   RefreshCw,
   Eye,
   Play,
@@ -326,6 +327,7 @@ const CREATE_AD_POST_TYPE_OPTIONS = [
 ];
 
 const ADS_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const CREATE_AD_ADD_ADVERTISER_VALUE = "__add_advertiser__";
 
 const normalizeAdsPayment = (value) => {
   const payment = String(value || "").trim();
@@ -1906,6 +1908,7 @@ export default function AdsPage() {
   const [advertiserDeleteModal, setAdvertiserDeleteModal] = useState(null);
   const [advertiserActionLoading, setAdvertiserActionLoading] = useState(false);
   const [advertiserCreateOpen, setAdvertiserCreateOpen] = useState(false);
+  const [advertiserCreateSource, setAdvertiserCreateSource] = useState("advertisers");
   const [advertiserCreateLoading, setAdvertiserCreateLoading] = useState(false);
   const [advertiserCreateForm, setAdvertiserCreateForm] = useState({
     advertiser_name: "",
@@ -1955,6 +1958,8 @@ export default function AdsPage() {
   const [createAdAvailabilityError, setCreateAdAvailabilityError] = useState(null);
   const [createAdCheckingAvailability, setCreateAdCheckingAvailability] = useState(false);
   const [createAdFullyBookedDates, setCreateAdFullyBookedDates] = useState([]);
+  const [createAdSubmitting, setCreateAdSubmitting] = useState(false);
+  const [createAdSubmitMode, setCreateAdSubmitMode] = useState("");
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
@@ -2482,6 +2487,53 @@ export default function AdsPage() {
     }
     return ads.filter((item) => item.advertiser_id === invoice.advertiser_id);
   }, [ads, invoice.advertiser_id]);
+
+  const selectedInvoiceAdvertiser = useMemo(
+    () => advertisers.find((item) => item.id === invoice.advertiser_id) || null,
+    [advertisers, invoice.advertiser_id],
+  );
+
+  const invoicePreviewStatus = useMemo(
+    () => normalizeInvoiceStatus(invoice.status),
+    [invoice.status],
+  );
+
+  const invoicePreviewAmount = useMemo(
+    () => Number(invoice.amount || 0) || 0,
+    [invoice.amount],
+  );
+
+  const invoicePreviewLinkedAds = useMemo(
+    () =>
+      (Array.isArray(invoice.ad_ids) ? invoice.ad_ids : [])
+        .map((adId) => ads.find((item) => item.id === adId))
+        .filter(Boolean),
+    [ads, invoice.ad_ids],
+  );
+
+  const invoicePreviewLineItem = useMemo(() => {
+    if (invoicePreviewLinkedAds.length === 1) {
+      return {
+        title: invoicePreviewLinkedAds[0].ad_name || "Advertising services",
+        detail: invoicePreviewLinkedAds[0].placement || "",
+        amount: invoicePreviewAmount,
+      };
+    }
+
+    if (invoicePreviewLinkedAds.length > 1) {
+      return {
+        title: `${invoicePreviewLinkedAds.length} linked ads`,
+        detail: invoicePreviewLinkedAds.map((item) => item.ad_name).join(" • "),
+        amount: invoicePreviewAmount,
+      };
+    }
+
+    return {
+      title: selectedInvoiceAdvertiser?.advertiser_name || "Advertising services",
+      detail: "No ads selected yet",
+      amount: invoicePreviewAmount,
+    };
+  }, [invoicePreviewAmount, invoicePreviewLinkedAds, selectedInvoiceAdvertiser?.advertiser_name]);
 
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
@@ -3354,6 +3406,7 @@ export default function AdsPage() {
         title: successText,
       });
     } catch (error) {
+      console.error("[AdsPage] Action failed", error);
       appToast.error({
         title: error instanceof Error ? error.message : "Action failed",
       });
@@ -4118,12 +4171,16 @@ export default function AdsPage() {
   };
 
   const closeCreateAd = () => {
+    if (createAdSubmitting) {
+      return;
+    }
     setView("list");
     setAd(blankAd);
     setCreateAdCustomDate("");
     setCreateAdCustomTime("");
     setCreateAdAvailabilityError(null);
     setCreateAdFullyBookedDates([]);
+    closeAdvertiserCreate();
   };
 
   const setCreateAdPostType = (postType) => {
@@ -4302,8 +4359,16 @@ export default function AdsPage() {
     });
   };
 
-  const saveCreateAd = (mode = "save") =>
-    run(async () => {
+  const saveCreateAd = async (mode = "save") => {
+    if (createAdSubmitting) {
+      return;
+    }
+
+    setCreateAdSubmitting(true);
+    setCreateAdSubmitMode(mode);
+
+    try {
+      await run(async () => {
       if (!String(ad.ad_name || "").trim()) {
         throw new Error("Ad title is required");
       }
@@ -4349,6 +4414,35 @@ export default function AdsPage() {
         payload.custom_dates = [];
       }
 
+      if (mode !== "draft" && !String(payload.placement || "").trim()) {
+        throw new Error("Placement is required");
+      }
+
+      if (mode !== "draft" && selectedPostType === "One-Time Post") {
+        if (!String(payload.post_date || "").trim()) {
+          throw new Error("Post date is required");
+        }
+        if (!String(payload.post_time || "").trim()) {
+          throw new Error("Post time is required");
+        }
+      }
+
+      if (mode !== "draft" && selectedPostType === "Daily Run") {
+        if (!String(payload.post_date_from || "").trim()) {
+          throw new Error("Start date is required");
+        }
+        if (!String(payload.post_date_to || "").trim()) {
+          throw new Error("End date is required");
+        }
+        if (payload.post_date_to < payload.post_date_from) {
+          throw new Error("End date must be on or after the start date");
+        }
+      }
+
+      if (mode !== "draft" && selectedPostType === "Custom Schedule" && customDates.length === 0) {
+        throw new Error("Add at least one custom date");
+      }
+
       const availability = await checkAdAvailability({
         postType: selectedPostType,
         postDateFrom: payload.post_date_from || payload.post_date || "",
@@ -4364,14 +4458,39 @@ export default function AdsPage() {
         throw new Error(availability.availabilityError || "Selected dates are unavailable.");
       }
 
-      await upsertAd(payload);
+      const savedAd = await upsertAd(payload);
 
       if (mode === "continue") {
-        setInvoice({
-          ...blankInvoice,
-          advertiser_id: payload.advertiser_id || "",
-          amount: payload.price || "",
-        });
+        const linkedInvoiceId =
+          savedAd?.paid_via_invoice_id ||
+          savedAd?.invoice_id ||
+          payload.paid_via_invoice_id ||
+          payload.invoice_id ||
+          null;
+        const linkedInvoice = linkedInvoiceId
+          ? invoices.find((item) => String(item.id) === String(linkedInvoiceId))
+          : null;
+
+        if (linkedInvoice) {
+          setInvoice({
+            ...blankInvoice,
+            ...linkedInvoice,
+            status: normalizeInvoiceStatus(linkedInvoice.status),
+            advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
+            ad_ids: Array.isArray(linkedInvoice.ad_ids)
+              ? linkedInvoice.ad_ids
+              : savedAd?.id
+                ? [savedAd.id]
+                : [],
+          });
+        } else {
+          setInvoice({
+            ...blankInvoice,
+            advertiser_id: payload.advertiser_id || "",
+            amount: savedAd?.price || payload.price || "",
+            ad_ids: savedAd?.id ? [savedAd.id] : [],
+          });
+        }
         setActiveSection("Billing");
         setView("newInvoice");
       } else {
@@ -4379,7 +4498,16 @@ export default function AdsPage() {
       }
 
       setAd(blankAd);
-    }, mode === "continue" ? "Ad saved. Continue to billing." : "Ad saved.");
+      setCreateAdCustomDate("");
+      setCreateAdCustomTime("");
+      setCreateAdAvailabilityError(null);
+      setCreateAdFullyBookedDates([]);
+      }, mode === "continue" ? "Ad saved. Continue to billing." : "Ad saved.");
+    } finally {
+      setCreateAdSubmitting(false);
+      setCreateAdSubmitMode("");
+    }
+  };
 
   const selectedCreateAdPostType = normalizeCreateAdPostType(ad.post_type);
   const createAdPaymentMode =
@@ -4389,6 +4517,27 @@ export default function AdsPage() {
       : ad.price
         ? "Custom Amount"
         : "TBD");
+  const createAdRequiresBilling = useMemo(
+    () => normalizeAdsPayment(ad.payment_raw || ad.payment) !== "Paid",
+    [ad.payment, ad.payment_raw],
+  );
+  const createAdPrimaryLabel = useMemo(() => {
+    if (createAdSubmitting) {
+      if (createAdSubmitMode === "continue") {
+        return ad.id ? "Opening billing..." : "Continuing...";
+      }
+      if (createAdSubmitMode === "draft") {
+        return "Saving draft...";
+      }
+      return "Saving...";
+    }
+
+    if (ad.id) {
+      return createAdRequiresBilling ? "Go to billing" : "Save";
+    }
+
+    return "Continue to billing";
+  }, [ad.id, createAdRequiresBilling, createAdSubmitMode, createAdSubmitting]);
   const createAdPreviewData = useMemo(() => {
     const advertiserName =
       advertisers.find((item) => item.id === ad.advertiser_id)?.advertiser_name || "";
@@ -4536,7 +4685,7 @@ export default function AdsPage() {
     );
   };
 
-  const openAdvertiserCreate = () => {
+  const openAdvertiserCreate = (source = "advertisers") => {
     setAdvertiserCreateForm({
       advertiser_name: "",
       contact_name: "",
@@ -4544,6 +4693,7 @@ export default function AdsPage() {
       phone_number: "",
       status: "active",
     });
+    setAdvertiserCreateSource(source);
     setAdvertiserCreateOpen(true);
     setOpenAdvertiserMenuId(null);
     setAdvertiserEditModal(null);
@@ -4584,6 +4734,11 @@ export default function AdsPage() {
       })),
     });
     setOpenAdvertiserMenuId(null);
+  };
+
+  const closeAdvertiserCreate = () => {
+    setAdvertiserCreateOpen(false);
+    setAdvertiserCreateSource("advertisers");
   };
 
   const saveAdvertiserModal = async () => {
@@ -4635,7 +4790,7 @@ export default function AdsPage() {
 
   const saveNewAdvertiser = async (type) => {
     if (type === "cancel") {
-      setAdvertiserCreateOpen(false);
+      closeAdvertiserCreate();
       return;
     }
 
@@ -4648,14 +4803,20 @@ export default function AdsPage() {
         throw new Error("Contact name required");
       }
 
-      await upsertAdvertiser({
+      const savedAdvertiser = await upsertAdvertiser({
         ...advertiserCreateForm,
         phone: String(advertiserCreateForm.phone_number || "").trim(),
         phone_number: String(advertiserCreateForm.phone_number || "").trim(),
       });
       setDb(readDb());
       appToast.success({ title: "Advertiser saved." });
-      setAdvertiserCreateOpen(false);
+      if (advertiserCreateSource === "createAd" && savedAdvertiser?.id) {
+        setAd((current) => ({
+          ...current,
+          advertiser_id: savedAdvertiser.id,
+        }));
+      }
+      closeAdvertiserCreate();
     } catch (error) {
       appToast.error({
         title: error instanceof Error ? error.message : "Failed to create advertiser",
@@ -5837,288 +5998,288 @@ export default function AdsPage() {
 
               <div className="flex items-center mb-6 gap-3 min-w-0">
                 <div className="flex items-center gap-3 shrink-0">
-                <select
-                  value={adsFilters.status}
-                  onChange={(event) =>
-                    setAdsFilters((current) => ({ ...current, status: event.target.value }))
-                  }
-                  className="w-[138px] px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all"
-                  style={adsSelectStyle}
-                >
-                  <option value="All Ads">All Ads</option>
-                  <option value="Upcoming Ads">Upcoming Ads</option>
-                  <option value="Past Ads">Past Ads</option>
-                  <option value="Published">Published</option>
-                  <option value="Draft">Draft</option>
-                  <option value="Scheduled">Scheduled</option>
-                </select>
-
-                <button
-                  onClick={() =>
-                    setAdsFilters((current) => ({
-                      ...current,
-                      status: current.status === "Today" ? "All Ads" : "Today",
-                    }))
-                  }
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "Today"
-                    ? "bg-gray-900 text-white"
-                    : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-                    }`}
-                  type="button"
-                >
-                  {adsFilters.status === "Today" ? <X size={16} /> : <Clock size={16} />}
-                  Today&apos;s Ads
-                </button>
-
-                <button
-                  onClick={() =>
-                    setAdsFilters((current) => ({
-                      ...current,
-                      status: current.status === "This Week" ? "All Ads" : "This Week",
-                    }))
-                  }
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "This Week"
-                    ? "bg-gray-900 text-white"
-                    : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-                    }`}
-                  type="button"
-                >
-                  {adsFilters.status === "This Week" ? (
-                    <X size={16} />
-                  ) : (
-                    <Calendar size={16} />
-                  )}
-                  This Week
-                </button>
-
-                <div className="relative" ref={adsAdvancedFiltersRef}>
-                  <button
-                    onClick={() => setAdsShowAdvancedFilters((current) => !current)}
-                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
-                    type="button"
-                  >
-                    <Filter size={16} />
-                    Advanced filters
-                    {adsActiveAdvancedFilterCount > 0 ? (
-                      <span className="ml-1 px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
-                        {adsActiveAdvancedFilterCount}
-                      </span>
-                    ) : null}
-                    <ChevronDown size={16} />
-                  </button>
-
-                  {adsShowAdvancedFilters ? (
-                    <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                            Date Range
-                          </label>
-                          <button
-                            onClick={() =>
-                              setAdsShowDateRangePicker((current) => !current)
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
-                            type="button"
-                          >
-                            <Calendar size={16} />
-                            {adsFilters.dateFrom && adsFilters.dateTo
-                              ? `${adsFilters.dateFrom} - ${adsFilters.dateTo}`
-                              : "Select date range"}
-                          </button>
-                          {adsShowDateRangePicker ? (
-                            <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-                              <div className="grid grid-cols-2 gap-2">
-                                <input
-                                  type="date"
-                                  value={adsFilters.dateFrom}
-                                  onChange={(event) =>
-                                    setAdsFilters((current) => ({
-                                      ...current,
-                                      dateFrom: event.target.value,
-                                    }))
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                                />
-                                <input
-                                  type="date"
-                                  value={adsFilters.dateTo}
-                                  onChange={(event) =>
-                                    setAdsFilters((current) => ({
-                                      ...current,
-                                      dateTo: event.target.value,
-                                    }))
-                                  }
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-                                />
-                              </div>
-                              {adsFilters.dateFrom || adsFilters.dateTo ? (
-                                <button
-                                  onClick={() =>
-                                    setAdsFilters((current) => ({
-                                      ...current,
-                                      dateFrom: "",
-                                      dateTo: "",
-                                    }))
-                                  }
-                                  className="w-full mt-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
-                                  type="button"
-                                >
-                                  Clear Dates
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div>
-                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                            Placement
-                          </label>
-                          <select
-                            value={adsFilters.placement}
-                            onChange={(event) =>
-                              setAdsFilters((current) => ({
-                                ...current,
-                                placement: event.target.value,
-                              }))
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="All Placement">All Placement</option>
-                            {adsPlacementOptions.map((item) => (
-                              <option key={item} value={item}>
-                                {item}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                            Post Type
-                          </label>
-                          <select
-                            value={adsFilters.postType}
-                            onChange={(event) =>
-                              setAdsFilters((current) => ({
-                                ...current,
-                                postType: event.target.value,
-                              }))
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="All post types">All post types</option>
-                            {adsPostTypeOptions.map((item) => (
-                              <option key={item} value={item}>
-                                {item}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                            Advertiser
-                          </label>
-                          <select
-                            value={adsFilters.advertiser}
-                            onChange={(event) =>
-                              setAdsFilters((current) => ({
-                                ...current,
-                                advertiser: event.target.value,
-                              }))
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="All Advertisers">All Advertisers</option>
-                            {adsAdvertiserOptions.map((item) => (
-                              <option key={item} value={item}>
-                                {item}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
-                            Payment Status
-                          </label>
-                          <select
-                            value={adsFilters.payment}
-                            onChange={(event) =>
-                              setAdsFilters((current) => ({
-                                ...current,
-                                payment: event.target.value,
-                              }))
-                            }
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="All Payment Status">All Payment Status</option>
-                            <option value="Paid">Paid</option>
-                            <option value="Pending">Pending</option>
-                            <option value="Refunded">Refunded</option>
-                          </select>
-                        </div>
-
-                        {adsActiveAdvancedFilterCount > 0 ? (
-                          <button
-                            onClick={clearAdsAdvancedFilters}
-                            className="w-full mt-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
-                            type="button"
-                          >
-                            <X size={16} />
-                            Clear Advanced Filters
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-                </div>
-                <div className="ml-auto flex items-center gap-3 shrink-0">
-                <div className="relative w-[clamp(170px,18vw,230px)]">
-                  <Search
-                    size={16}
-                    className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search ads..."
-                    value={adsFilters.search}
+                  <select
+                    value={adsFilters.status}
                     onChange={(event) =>
+                      setAdsFilters((current) => ({ ...current, status: event.target.value }))
+                    }
+                    className="w-[138px] px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer transition-all"
+                    style={adsSelectStyle}
+                  >
+                    <option value="All Ads">All Ads</option>
+                    <option value="Upcoming Ads">Upcoming Ads</option>
+                    <option value="Past Ads">Past Ads</option>
+                    <option value="Published">Published</option>
+                    <option value="Draft">Draft</option>
+                    <option value="Scheduled">Scheduled</option>
+                  </select>
+
+                  <button
+                    onClick={() =>
                       setAdsFilters((current) => ({
                         ...current,
-                        search: event.target.value,
+                        status: current.status === "Today" ? "All Ads" : "Today",
                       }))
                     }
-                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
-                  />
-                </div>
-                <button
-                  onClick={exportVisibleAdsCsv}
-                  className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2"
-                  type="button"
-                >
-                  <Download size={16} />
-                  Export
-                </button>
-                {isAdmin ? (
-                  <button
-                    onClick={() => {
-                      setAd(blankAd);
-                      setView("createAd");
-                    }}
-                    className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "Today"
+                      ? "bg-gray-900 text-white"
+                      : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
                     type="button"
                   >
-                    Create new ad
+                    {adsFilters.status === "Today" ? <X size={16} /> : <Clock size={16} />}
+                    Today&apos;s Ads
                   </button>
-                ) : null}
+
+                  <button
+                    onClick={() =>
+                      setAdsFilters((current) => ({
+                        ...current,
+                        status: current.status === "This Week" ? "All Ads" : "This Week",
+                      }))
+                    }
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${adsFilters.status === "This Week"
+                      ? "bg-gray-900 text-white"
+                      : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                      }`}
+                    type="button"
+                  >
+                    {adsFilters.status === "This Week" ? (
+                      <X size={16} />
+                    ) : (
+                      <Calendar size={16} />
+                    )}
+                    This Week
+                  </button>
+
+                  <div className="relative" ref={adsAdvancedFiltersRef}>
+                    <button
+                      onClick={() => setAdsShowAdvancedFilters((current) => !current)}
+                      className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
+                      type="button"
+                    >
+                      <Filter size={16} />
+                      Advanced filters
+                      {adsActiveAdvancedFilterCount > 0 ? (
+                        <span className="ml-1 px-2 py-0.5 bg-gray-900 text-white text-xs rounded-full">
+                          {adsActiveAdvancedFilterCount}
+                        </span>
+                      ) : null}
+                      <ChevronDown size={16} />
+                    </button>
+
+                    {adsShowAdvancedFilters ? (
+                      <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Date Range
+                            </label>
+                            <button
+                              onClick={() =>
+                                setAdsShowDateRangePicker((current) => !current)
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all flex items-center gap-2"
+                              type="button"
+                            >
+                              <Calendar size={16} />
+                              {adsFilters.dateFrom && adsFilters.dateTo
+                                ? `${adsFilters.dateFrom} - ${adsFilters.dateTo}`
+                                : "Select date range"}
+                            </button>
+                            {adsShowDateRangePicker ? (
+                              <div className="mt-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input
+                                    type="date"
+                                    value={adsFilters.dateFrom}
+                                    onChange={(event) =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateFrom: event.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                  />
+                                  <input
+                                    type="date"
+                                    value={adsFilters.dateTo}
+                                    onChange={(event) =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateTo: event.target.value,
+                                      }))
+                                    }
+                                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                                  />
+                                </div>
+                                {adsFilters.dateFrom || adsFilters.dateTo ? (
+                                  <button
+                                    onClick={() =>
+                                      setAdsFilters((current) => ({
+                                        ...current,
+                                        dateFrom: "",
+                                        dateTo: "",
+                                      }))
+                                    }
+                                    className="w-full mt-2 px-3 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-100 transition-colors"
+                                    type="button"
+                                  >
+                                    Clear Dates
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Placement
+                            </label>
+                            <select
+                              value={adsFilters.placement}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  placement: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Placement">All Placement</option>
+                              {adsPlacementOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Post Type
+                            </label>
+                            <select
+                              value={adsFilters.postType}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  postType: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All post types">All post types</option>
+                              {adsPostTypeOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Advertiser
+                            </label>
+                            <select
+                              value={adsFilters.advertiser}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  advertiser: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Advertisers">All Advertisers</option>
+                              {adsAdvertiserOptions.map((item) => (
+                                <option key={item} value={item}>
+                                  {item}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
+                              Payment Status
+                            </label>
+                            <select
+                              value={adsFilters.payment}
+                              onChange={(event) =>
+                                setAdsFilters((current) => ({
+                                  ...current,
+                                  payment: event.target.value,
+                                }))
+                              }
+                              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="All Payment Status">All Payment Status</option>
+                              <option value="Paid">Paid</option>
+                              <option value="Pending">Pending</option>
+                              <option value="Refunded">Refunded</option>
+                            </select>
+                          </div>
+
+                          {adsActiveAdvancedFilterCount > 0 ? (
+                            <button
+                              onClick={clearAdsAdvancedFilters}
+                              className="w-full mt-2 px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                              type="button"
+                            >
+                              <X size={16} />
+                              Clear Advanced Filters
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="ml-auto flex items-center gap-3 shrink-0">
+                  <div className="relative w-[clamp(170px,18vw,230px)]">
+                    <Search
+                      size={16}
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search ads..."
+                      value={adsFilters.search}
+                      onChange={(event) =>
+                        setAdsFilters((current) => ({
+                          ...current,
+                          search: event.target.value,
+                        }))
+                      }
+                      className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                    />
+                  </div>
+                  <button
+                    onClick={exportVisibleAdsCsv}
+                    className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2"
+                    type="button"
+                  >
+                    <Download size={16} />
+                    Export
+                  </button>
+                  {isAdmin ? (
+                    <button
+                      onClick={() => {
+                        setAd(blankAd);
+                        setView("createAd");
+                      }}
+                      className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
+                      type="button"
+                    >
+                      Create new ad
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
@@ -6282,14 +6443,151 @@ export default function AdsPage() {
           )}
           {activeSection === "Ads" && view === "createAd" && isAdmin && (
             <div className="flex-1 overflow-auto bg-white -m-8">
-              <div className="flex max-w-none mx-auto">
-                <div className="flex-1 bg-white p-12">
-                  <div className="max-w-[680px] mx-auto">
+              {advertiserCreateOpen && advertiserCreateSource === "createAd" ? (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl">
+                    <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-xl font-semibold text-gray-900">Add Advertiser</h2>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Create the advertiser first, then continue creating the ad.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeAdvertiserCreate}
+                        className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+
+                    <div className="p-6 space-y-4">
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Advertiser Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.advertiser_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              advertiser_name: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter advertiser business name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Contact Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.contact_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              contact_name: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter primary contact name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Email
+                          </label>
+                          <input
+                            type="email"
+                            value={advertiserCreateForm.email}
+                            onChange={(event) =>
+                              setAdvertiserCreateForm((current) => ({
+                                ...current,
+                                email: event.target.value,
+                              }))
+                            }
+                            placeholder="contact@example.com"
+                            className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Phone Number
+                          </label>
+                          <input
+                            type="tel"
+                            value={advertiserCreateForm.phone_number}
+                            onChange={(event) =>
+                              setAdvertiserCreateForm((current) => ({
+                                ...current,
+                                phone_number: event.target.value,
+                              }))
+                            }
+                            placeholder="555-0123"
+                            className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Account Status
+                        </label>
+                        <select
+                          value={advertiserCreateForm.status}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              status: event.target.value,
+                            }))
+                          }
+                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                          style={adsSelectStyle}
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="px-6 py-5 border-t border-gray-200 flex items-center justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => saveNewAdvertiser("cancel")}
+                        className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => saveNewAdvertiser("save")}
+                        disabled={advertiserCreateLoading}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all disabled:opacity-50"
+                      >
+                        {advertiserCreateLoading ? "Saving..." : "Save Advertiser"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex max-w-none mx-auto min-h-screen">
+                <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12 flex justify-end">
+                  <div className="w-full max-w-[680px] lg:mr-8 xl:mr-12">
                     <div className="mb-10 flex items-center justify-between gap-4">
                       <button
                         type="button"
                         onClick={closeCreateAd}
-                        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
+                        disabled={createAdSubmitting}
+                        className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <ArrowLeft size={18} />
                         Back
@@ -6298,34 +6596,45 @@ export default function AdsPage() {
                         <button
                           type="button"
                           onClick={closeCreateAd}
-                          className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
+                          disabled={createAdSubmitting}
+                          className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Cancel
                         </button>
                         {ad.id ? (
                           <button
                             type="button"
-                            onClick={() => saveCreateAd("save")}
-                            className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all"
+                            onClick={() =>
+                              saveCreateAd(createAdRequiresBilling ? "continue" : "save")
+                            }
+                            disabled={createAdSubmitting}
+                            className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Save
+                            {createAdPrimaryLabel}
+                            {!createAdSubmitting && createAdRequiresBilling ? (
+                              <ArrowRight size={16} />
+                            ) : null}
                           </button>
                         ) : (
                           <>
                             <button
                               type="button"
                               onClick={() => saveCreateAd("draft")}
-                              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
+                              disabled={createAdSubmitting}
+                              className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Save as draft
+                              {createAdSubmitting && createAdSubmitMode === "draft"
+                                ? "Saving draft..."
+                                : "Save as draft"}
                             </button>
                             <button
                               type="button"
                               onClick={() => saveCreateAd("continue")}
-                              className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all flex items-center gap-2"
+                              disabled={createAdSubmitting}
+                              className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                              Continue to billing
-                              <ArrowRight size={16} />
+                              {createAdPrimaryLabel}
+                              {!createAdSubmitting ? <ArrowRight size={16} /> : null}
                             </button>
                           </>
                         )}
@@ -6353,7 +6662,9 @@ export default function AdsPage() {
                     <form
                       onSubmit={(event) => {
                         event.preventDefault();
-                        saveCreateAd("save");
+                        saveCreateAd(
+                          ad.id && createAdRequiresBilling ? "continue" : "save",
+                        );
                       }}
                       className="space-y-8"
                     >
@@ -6367,15 +6678,27 @@ export default function AdsPage() {
                             <select
                               required
                               value={ad.advertiser_id || ""}
-                              onChange={(event) =>
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                if (nextValue === CREATE_AD_ADD_ADVERTISER_VALUE) {
+                                  openAdvertiserCreate("createAd");
+                                  return;
+                                }
+
                                 setAd((current) => ({
                                   ...current,
-                                  advertiser_id: event.target.value,
-                                }))
-                              }
+                                  advertiser_id: nextValue,
+                                }));
+                              }}
                               className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
                               style={adsSelectStyle}
                             >
+                              <option
+                                value={CREATE_AD_ADD_ADVERTISER_VALUE}
+                                style={{ color: "#2563eb", fontWeight: "600" }}
+                              >
+                                + Add Advertiser
+                              </option>
                               <option value="">Select advertiser</option>
                               {advertisers.map((item) => (
                                 <option key={item.id} value={item.id}>
@@ -6516,8 +6839,10 @@ export default function AdsPage() {
                   </div>
                 </div>
 
-                <div className="hidden lg:block w-[700px] bg-[#F5F5F5] p-12 flex-shrink-0">
-                  <AdPreview formData={createAdPreviewData} />
+                <div className="hidden lg:flex w-[450px] xl:w-[500px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 justify-center">
+                  <div className="w-full max-w-[332px]">
+                    <AdPreview formData={createAdPreviewData} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -8107,59 +8432,129 @@ export default function AdsPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-fit sticky top-6">
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Invoice Preview</h3>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Invoice</span>
-                      <span className="font-medium text-gray-900">
-                        {invoice.invoice_number || "Auto-generated"}
-                      </span>
+                <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-10 h-fit sticky top-8">
+                  <div className="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    Invoice Preview
+                  </div>
+
+                  <div className="flex items-start justify-between mb-10 pb-8 border-b border-gray-200">
+                    <div>
+                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center mb-4 shadow-sm">
+                        <Globe size={26} className="text-white" />
+                      </div>
+                      <div className="text-base font-bold text-gray-900 mb-2">CBN Media LLC</div>
+                      <div className="text-xs text-gray-500 space-y-0.5">
+                        <div>2345 Manhattan Ave</div>
+                        <div>advertise@cbnads.com</div>
+                        <div>800.938.0499</div>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Advertiser</span>
-                      <span className="font-medium text-gray-900">
-                        {advertisers.find((item) => item.id === invoice.advertiser_id)
-                          ?.advertiser_name || "-"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Issue Date</span>
-                      <span className="font-medium text-gray-900">
-                        {formatInvoiceListDate(invoice.due_date)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Status</span>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
-                          invoice.status,
+                    <div className="text-right">
+                      <div className="text-xs text-gray-500 mb-2">
+                        {invoice.invoice_number || "New Invoice"}
+                      </div>
+                      <div
+                        className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getInvoiceStatusColor(
+                          invoicePreviewStatus,
                         )}`}
                       >
-                        {normalizeInvoiceStatus(invoice.status)}
-                      </span>
+                        {invoicePreviewStatus.toUpperCase()}
+                      </div>
                     </div>
-                    <div className="pt-3 border-t border-gray-200">
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-8 mb-10 pb-8 border-b border-gray-200">
+                    <div>
                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                        Linked Ads
+                        Bill to
                       </div>
-                      <div className="space-y-1.5 max-h-32 overflow-auto">
-                        {invoice.ad_ids.length === 0 ? (
-                          <p className="text-xs text-gray-500">No ads selected.</p>
-                        ) : (
-                          invoice.ad_ids.map((adId) => (
-                            <p key={adId} className="text-xs text-gray-700 truncate">
-                              {ads.find((item) => item.id === adId)?.ad_name || adId}
-                            </p>
-                          ))
-                        )}
+                      <div className="text-sm font-semibold text-gray-900 mb-2">
+                        {selectedInvoiceAdvertiser?.advertiser_name || "—"}
+                      </div>
+                      <div className="text-xs text-gray-600 space-y-0.5">
+                        <div>
+                          Attn:{" "}
+                          {selectedInvoiceAdvertiser?.contact_name ||
+                            selectedInvoiceAdvertiser?.email ||
+                            "—"}
+                        </div>
+                        <div>{selectedInvoiceAdvertiser?.email || "—"}</div>
                       </div>
                     </div>
-                    <div className="pt-3 border-t border-gray-200 flex justify-between">
-                      <span className="text-sm font-semibold text-gray-900">Total</span>
-                      <span className="text-sm font-bold text-gray-900">
-                        {formatCurrency(invoice.amount)}
-                      </span>
+                    <div className="text-right space-y-4">
+                      <div>
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                          Issue Date
+                        </div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {formatInvoiceListDate(invoice.due_date) || "—"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                          Amount Due
+                        </div>
+                        <div className="text-lg font-bold text-gray-900">
+                          {formatCurrency(invoicePreviewAmount)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mb-8">
+                    <div className="flex justify-between mb-3">
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                        Description
+                      </div>
+                      <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                        Amount
+                      </div>
+                    </div>
+                    <div className="flex justify-between py-3 border-b border-gray-100 gap-4">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-900">
+                          {invoicePreviewLineItem.title}
+                        </div>
+                        {invoicePreviewLineItem.detail ? (
+                          <div className="text-xs text-gray-500 mt-0.5 truncate">
+                            {invoicePreviewLineItem.detail}
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                        {formatCurrency(invoicePreviewLineItem.amount)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 mb-10 pb-8 border-b border-gray-200">
+                    <div className="flex justify-between text-sm">
+                      <div className="text-gray-600">Subtotal</div>
+                      <div className="font-medium text-gray-900">
+                        {formatCurrency(invoicePreviewAmount)}
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <div className="text-gray-600">Tax</div>
+                      <div className="font-medium text-gray-900">
+                        {formatCurrency(0)}
+                      </div>
+                    </div>
+                    <div className="flex justify-between text-base font-bold pt-3 border-t border-gray-200">
+                      <div className="text-gray-900">Total</div>
+                      <div className="text-gray-900">
+                        {formatCurrency(invoicePreviewAmount)}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-center space-y-2">
+                    <div className="text-sm font-medium text-gray-900">
+                      Thank you for your business
+                    </div>
+                    <div className="text-xs text-gray-500 leading-relaxed">
+                      Payment is due upon receipt. Please include invoice number in transfer
+                      description.
                     </div>
                   </div>
                 </div>

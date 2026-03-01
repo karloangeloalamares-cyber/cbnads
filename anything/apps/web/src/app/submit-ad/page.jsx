@@ -88,7 +88,7 @@ export default function SubmitAdPage() {
 
       <div className="min-h-screen bg-white">
         <div className="flex max-w-none mx-auto">
-          <div className="flex-1 bg-white p-12">
+          <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12">
             <div className="max-w-[680px] mx-auto mb-6">
               <button
                 type="button"
@@ -176,7 +176,7 @@ export default function SubmitAdPage() {
             )}
           </div>
 
-          <div className="hidden lg:block w-[700px] bg-[#F5F5F5] p-12 flex-shrink-0">
+          <div className="hidden lg:block w-[700px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:p-12 flex-shrink-0">
             <AdPreview formData={previewData} />
           </div>
         </div>

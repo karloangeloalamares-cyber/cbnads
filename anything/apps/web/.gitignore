@@ -12,3 +12,4 @@ dist/
 build/
 
 .vercel
+dev-api-test.log
