@@ -1,6 +1,7 @@
 import { getCurrentRequest } from "./request-context.js";
 import { getSessionFromRequestContext } from "./session-auth.js";
 import { db, table } from "./supabase-db.js";
+import { can, isAdvertiserRole, isInternalRole, normalizeAppRole } from "../../../lib/permissions.js";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
@@ -240,9 +241,15 @@ const getSupabaseBearerUser = async (request) => {
   return mapSupabaseUser(supabase, authUser);
 };
 
-export const isAdvertiserUser = (user) => normalizeText(user?.role) === "advertiser";
+export const isAdvertiserUser = (user) => isAdvertiserRole(user?.role);
 
-export const isAdminUser = (user) => normalizeText(user?.role) === "admin";
+export const isAdminUser = (user) => normalizeAppRole(user?.role) === "admin";
+
+export const isManagerUser = (user) => normalizeAppRole(user?.role) === "manager";
+
+export const isStaffUser = (user) => normalizeAppRole(user?.role) === "staff";
+
+export const isInternalUser = (user) => isInternalRole(user?.role);
 
 export async function requireAdmin(request = null) {
   const user = await getSessionUser(request);
@@ -264,6 +271,58 @@ export async function requireAdmin(request = null) {
   return {
     authorized: true,
     user,
+  };
+}
+
+export async function requirePermission(permission, request = null) {
+  const user = await getSessionUser(request);
+
+  if (!user?.id) {
+    return {
+      authorized: false,
+      error: "Unauthorized - Please sign in",
+      status: 401,
+    };
+  }
+
+  if (!can(user.role, permission)) {
+    return {
+      authorized: false,
+      error: "Unauthorized - Permission denied",
+      status: 403,
+    };
+  }
+
+  return {
+    authorized: true,
+    user,
+    status: 200,
+  };
+}
+
+export async function requireInternalUser(request = null) {
+  const user = await getSessionUser(request);
+
+  if (!user?.id) {
+    return {
+      authorized: false,
+      error: "Unauthorized - Please sign in",
+      status: 401,
+    };
+  }
+
+  if (!isInternalUser(user)) {
+    return {
+      authorized: false,
+      error: "Unauthorized - Internal access required",
+      status: 403,
+    };
+  }
+
+  return {
+    authorized: true,
+    user,
+    status: 200,
   };
 }
 

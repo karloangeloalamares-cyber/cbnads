@@ -1,5 +1,9 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
+import {
+  isCompleteUSPhoneNumber,
+  normalizeUSPhoneNumber,
+} from "../../../../lib/phone.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -10,7 +14,7 @@ const normalizePreferences = (row, fallbackEmail = "") => ({
   reminder_time_value: row?.reminder_time_value ?? 1,
   reminder_time_unit: row?.reminder_time_unit ?? "hours",
   email_address: row?.email_address ?? fallbackEmail,
-  phone_number: row?.phone_number ?? "",
+  phone_number: normalizeUSPhoneNumber(row?.phone_number ?? ""),
   sound_enabled: row?.sound_enabled ?? true,
 });
 
@@ -73,6 +77,14 @@ export async function POST(request) {
     const email = String(user?.email || "").trim();
     const userId = UUID_REGEX.test(String(user?.id || "")) ? String(user.id) : null;
     const body = await request.json();
+    const normalizedPhoneNumber = normalizeUSPhoneNumber(body?.phone_number || "");
+
+    if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+      return Response.json(
+        { error: "Phone number must be a complete US number" },
+        { status: 400 },
+      );
+    }
 
     const patch = {
       email_enabled: Boolean(body?.email_enabled),
@@ -80,7 +92,7 @@ export async function POST(request) {
       reminder_time_value: Number(body?.reminder_time_value) || 1,
       reminder_time_unit: body?.reminder_time_unit || "hours",
       email_address: body?.email_address || email || null,
-      phone_number: body?.phone_number || null,
+      phone_number: normalizedPhoneNumber || null,
       sound_enabled: body?.sound_enabled !== undefined ? Boolean(body.sound_enabled) : true,
       updated_at: new Date().toISOString(),
     };

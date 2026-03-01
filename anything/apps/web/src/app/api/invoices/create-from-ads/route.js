@@ -1,13 +1,13 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import { requirePermission } from "../../utils/auth-check.js";
 import { adAmount, nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("billing:edit", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const { adIds, invoiceData = {} } = await request.json();
@@ -21,7 +21,7 @@ export async function POST(request) {
 
     const { data: ads, error: adsError } = await supabase
       .from(table("ads"))
-      .select("id, ad_name, advertiser, advertiser_id, product_id, payment, price")
+      .select("id, ad_name, advertiser, advertiser_id, product_id, product_name, payment, price")
       .in("id", uniqueAdIds);
     if (adsError) throw adsError;
 
@@ -73,6 +73,7 @@ export async function POST(request) {
     );
 
     let subtotal = 0;
+    const unresolvedAds = [];
     const lineItems = ads.map((ad) => {
       const product = productsById.get(ad.product_id);
       const amount = adAmount({
@@ -80,16 +81,37 @@ export async function POST(request) {
         price: ad.price,
         product_price: product?.price,
       });
+      const resolvedProductName =
+        String(ad.product_name || product?.product_name || "").trim();
+      if (!resolvedProductName || amount <= 0) {
+        unresolvedAds.push({
+          id: ad.id,
+          ad_name: ad.ad_name || "Untitled ad",
+        });
+      }
       subtotal += amount;
       return {
         ad_id: ad.id,
         product_id: ad.product_id || null,
-        description: ad.ad_name || product?.product_name || "Ad placement",
+        description: resolvedProductName
+          ? `${resolvedProductName}${ad.ad_name ? ` | Ad: ${ad.ad_name}` : ""}`
+          : ad.ad_name || "Ad placement",
         quantity: 1,
         unit_price: amount,
         amount,
       };
     });
+
+    if (unresolvedAds.length > 0) {
+      return Response.json(
+        {
+          error:
+            "One or more selected ads do not have a resolved product and billable price.",
+          unresolved_ads: unresolvedAds,
+        },
+        { status: 400 },
+      );
+    }
 
     const discount = toNumber(invoiceData.discount, 0);
     const tax = toNumber(invoiceData.tax, 0);

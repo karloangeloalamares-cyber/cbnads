@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { db, table } from "./supabase-db.js";
 import { sendEmail } from "./send-email.js";
 import { APP_TIME_ZONE } from "../../../lib/timezone.js";
+import { normalizeUSPhoneNumber } from "../../../lib/phone.js";
 
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24;
 const TOKEN_TYPE = "advertiser_verify";
@@ -195,12 +196,14 @@ export const ensureAdvertiserRecord = async ({
     throw fetchError;
   }
 
+  const normalizedPhoneNumber = normalizeUSPhoneNumber(phoneNumber || "");
+
   const payload = {
     advertiser_name: String(advertiserName || "").trim() || normalizedEmail,
     contact_name: String(contactName || "").trim() || null,
     email: normalizedEmail,
-    phone: String(phoneNumber || "").trim() || null,
-    phone_number: String(phoneNumber || "").trim() || null,
+    phone: normalizedPhoneNumber || null,
+    phone_number: normalizedPhoneNumber || null,
     status: "active",
     updated_at: new Date().toISOString(),
   };

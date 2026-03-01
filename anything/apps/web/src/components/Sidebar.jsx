@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
   Calendar,
@@ -16,8 +16,9 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
+import { can, getVisibleSectionsForRole, normalizeAppRole } from "@/lib/permissions";
 
-const adminMenuItems = [
+const menuItemsCatalog = [
   { icon: LayoutDashboard, label: "Dashboard", id: "Dashboard" },
   { icon: Calendar, label: "Calendar", id: "Calendar" },
   { icon: FileText, label: "Submissions", id: "Submissions", showBadge: true },
@@ -29,17 +30,18 @@ const adminMenuItems = [
   { icon: AlertTriangle, label: "Reconciliation", id: "Reconciliation" },
 ];
 
-const advertiserMenuItems = [
-  { icon: LayoutDashboard, label: "Dashboard", id: "Dashboard" },
-  { icon: Calendar, label: "Calendar", id: "Calendar" },
-  { icon: FileText, label: "Submissions", id: "Submissions" },
-  { icon: Megaphone, label: "Ads", id: "Ads" },
-  { icon: CreditCard, label: "Billing", id: "Billing" },
-];
-
-export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "admin" }) {
+export default function Sidebar({
+  activeItem = "Ads",
+  onNavigate,
+  userRole = "admin",
+  mobileOpen = false,
+  onClose,
+}) {
   const [isMinimized, setIsMinimized] = useState(false);
-  const isAdmin = String(userRole || "").trim().toLowerCase() === "admin";
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const normalizedRole = normalizeAppRole(userRole);
+  const isInternal = normalizedRole !== "advertiser";
+  const canViewSettings = can(normalizedRole, "settings:view");
   const markAllAsReadRef = useRef(async () => {});
   const handleViewPendingFromToast = useCallback(async () => {
     await markAllAsReadRef.current();
@@ -47,26 +49,51 @@ export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "ad
       onNavigate("Submissions");
     }
   }, [onNavigate]);
-  const { unreadCount, markAllAsRead } = useSubmissionNotifications(isAdmin, {
+  const { unreadCount, markAllAsRead } = useSubmissionNotifications(
+    can(normalizedRole, "notifications:view"),
+    {
     onViewPending: handleViewPendingFromToast,
-  });
+    },
+  );
   markAllAsReadRef.current = markAllAsRead;
-  const menuItems = isAdmin ? adminMenuItems : advertiserMenuItems;
+  const visibleSections = new Set(getVisibleSectionsForRole(normalizedRole));
+  const menuItems = menuItemsCatalog.filter((item) => visibleSections.has(item.id));
+
+  useEffect(() => {
+    const syncViewport = () => {
+      const width = window.innerWidth;
+      setIsMobileViewport(width < 768);
+      setIsMinimized(width >= 768 && width < 1280);
+    };
+
+    syncViewport();
+    window.addEventListener("resize", syncViewport);
+    return () => window.removeEventListener("resize", syncViewport);
+  }, []);
 
   const handleNavigate = (item) => {
-    if (isAdmin && item.id === "Submissions" && unreadCount > 0) {
+    if (isInternal && item.id === "Submissions" && unreadCount > 0) {
       markAllAsRead();
     }
 
     if (onNavigate) {
       onNavigate(item.id);
     }
+
+    if (isMobileViewport && onClose) {
+      onClose();
+    }
   };
 
   return (
-    <div
-      className={`bg-[#F7F8FA] border-r border-gray-200 h-screen flex flex-col transition-all duration-300 ${isMinimized ? "w-[72px]" : "w-[220px]"}`}
-    >
+    <>
+      <div
+        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        onClick={onClose}
+      />
+      <div
+        className={`fixed inset-y-0 left-0 z-50 bg-[#F7F8FA] border-r border-gray-200 h-screen flex flex-col transition-all duration-300 md:static md:z-auto ${isMinimized ? "md:w-[72px]" : "md:w-[220px]"} w-[220px] ${mobileOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
+      >
       <div className="p-6 flex items-center justify-between">
         {!isMinimized && (
           <>
@@ -80,6 +107,7 @@ export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "ad
               className="p-1 hover:bg-gray-200 rounded transition-colors"
               title="Minimize sidebar"
               type="button"
+              disabled={isMobileViewport}
             >
               <ChevronLeft size={18} className="text-gray-600" />
             </button>
@@ -92,6 +120,7 @@ export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "ad
             className="p-1 hover:bg-gray-200 rounded transition-colors mx-auto"
             title="Expand sidebar"
             type="button"
+            disabled={isMobileViewport}
           >
             <ChevronRight size={18} className="text-gray-600" />
           </button>
@@ -145,12 +174,15 @@ export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "ad
         })}
       </nav>
 
-      {isAdmin ? (
+      {canViewSettings ? (
         <div className="p-3 border-t border-gray-200">
           <div className="relative group">
             <button
               onClick={() => {
                 if (onNavigate) onNavigate("Settings");
+                if (isMobileViewport && onClose) {
+                  onClose();
+                }
               }}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${activeItem === "Settings" ? "bg-white text-black shadow-sm" : "text-gray-600 hover:bg-white hover:text-black"} ${isMinimized ? "justify-center" : ""}`}
               type="button"
@@ -171,6 +203,7 @@ export default function Sidebar({ activeItem = "Ads", onNavigate, userRole = "ad
           </div>
         </div>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }

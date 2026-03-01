@@ -1,5 +1,9 @@
 import { advertiserResponse, dateOnly, db, table } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
+import {
+  isCompleteUSPhoneNumber,
+  normalizeUSPhoneNumber,
+} from "../../../../lib/phone.js";
 
 const isInactive = (value) => String(value || "").toLowerCase() === "inactive";
 
@@ -85,6 +89,14 @@ export async function PUT(request, { params }) {
     const { id } = params;
     const body = await request.json();
     const { advertiser_name, contact_name, email, phone_number, status } = body;
+    const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
+
+    if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+      return Response.json(
+        { error: "Phone number must be a complete US number" },
+        { status: 400 },
+      );
+    }
 
     const { data: oldAdvertiser, error: oldAdvertiserError } = await supabase
       .from(table("advertisers"))
@@ -106,12 +118,12 @@ export async function PUT(request, { params }) {
       advertiser_name,
       contact_name,
       email,
-      phone: phone_number || null,
+      phone: normalizedPhoneNumber || null,
       updated_at: new Date().toISOString(),
     };
     const extendedPatch = {
       ...basePatch,
-      phone_number: phone_number || null,
+      phone_number: normalizedPhoneNumber || null,
       status: normalizedStatus,
     };
 

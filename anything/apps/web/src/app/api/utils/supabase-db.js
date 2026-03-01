@@ -1,5 +1,6 @@
 import { adminTableName, getSupabaseAdmin } from "../../../lib/supabaseAdmin.js";
 import { formatDateKeyFromDate, normalizeDateKey } from "../../../lib/timezone.js";
+import { normalizeUSPhoneNumber } from "../../../lib/phone.js";
 
 export const db = () => getSupabaseAdmin();
 
@@ -69,7 +70,8 @@ export const adDatesForDayCheck = (ad) => {
 
 export const advertiserResponse = (row) => ({
   ...row,
-  phone_number: row?.phone_number ?? row?.phone ?? null,
+  phone_number: normalizeUSPhoneNumber(row?.phone_number ?? row?.phone ?? "") || null,
+  phone: normalizeUSPhoneNumber(row?.phone ?? row?.phone_number ?? "") || null,
   total_spend: row?.total_spend ?? row?.ad_spend ?? 0,
   status: row?.status ?? "active",
 });

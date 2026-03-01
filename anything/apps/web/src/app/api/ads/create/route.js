@@ -1,5 +1,5 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import { requirePermission } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
@@ -12,9 +12,9 @@ const typeEquals = (value, target) => normalizePostType(value) === normalizePost
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("ads:edit", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const supabase = db();
@@ -36,6 +36,7 @@ export async function POST(request) {
       post_time,
       reminder_minutes,
       skip_duplicate_check,
+      advertiser_id,
     } = body;
 
     if (!ad_name || !advertiser || !post_type || !placement || !payment) {
@@ -45,11 +46,16 @@ export async function POST(request) {
       );
     }
 
-    const { data: advertiserRow, error: advertiserError } = await supabase
+    let advertiserLookup = supabase
       .from(table("advertisers"))
       .select("id, advertiser_name, status")
-      .eq("advertiser_name", advertiser)
       .maybeSingle();
+    if (advertiser_id) {
+      advertiserLookup = advertiserLookup.eq("id", advertiser_id);
+    } else {
+      advertiserLookup = advertiserLookup.eq("advertiser_name", advertiser);
+    }
+    const { data: advertiserRow, error: advertiserError } = await advertiserLookup;
     if (advertiserError) throw advertiserError;
 
     if (advertiserRow && String(advertiserRow.status || "").toLowerCase() === "inactive") {
@@ -59,6 +65,20 @@ export async function POST(request) {
         },
         { status: 400 },
       );
+    }
+
+    let productRow = null;
+    if (product_id) {
+      const { data, error } = await supabase
+        .from(table("products"))
+        .select("id, product_name, price")
+        .eq("id", product_id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        return Response.json({ error: "Selected product was not found" }, { status: 400 });
+      }
+      productRow = data;
     }
 
     // Duplicate check for same advertiser + placement + schedule intent.
@@ -187,6 +207,8 @@ export async function POST(request) {
         custom_dates: customDates,
         payment,
         product_id: product_id || null,
+        product_name: productRow?.product_name || null,
+        price: productRow?.price || 0,
         media: Array.isArray(media) ? media : [],
         ad_text: ad_text || null,
         post_time: post_time || null,

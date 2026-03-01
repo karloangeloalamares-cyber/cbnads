@@ -271,8 +271,10 @@ export function ScheduleSection({
   const hasBookedDates = fullyBookedDates && fullyBookedDates.length > 0;
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [monthAvailability, setMonthAvailability] = useState({});
+  const [monthAvailabilityError, setMonthAvailabilityError] = useState("");
   const loadedMonthsRef = useRef(new Set());
   const loadingMonthsRef = useRef(new Set());
+  const monthAbortControllerRef = useRef(null);
 
   const loadMonthAvailability = useCallback(
     async (monthDate) => {
@@ -286,16 +288,26 @@ export function ScheduleSection({
 
       loadingMonthsRef.current.add(monthKey);
       setCalendarLoading(true);
+      setMonthAvailabilityError("");
+
+      if (monthAbortControllerRef.current) {
+        monthAbortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      monthAbortControllerRef.current = controller;
 
       try {
         const results = await fetchMonthAvailability({
           monthDate,
           excludeAdId,
+          signal: controller.signal,
         });
         loadedMonthsRef.current.add(monthKey);
         setMonthAvailability((current) => ({ ...current, ...results }));
       } catch (error) {
-        console.error("Failed to load monthly availability:", error);
+        if (error?.name !== "AbortError") {
+          setMonthAvailabilityError("Unable to load monthly availability right now.");
+        }
       } finally {
         loadingMonthsRef.current.delete(monthKey);
         setCalendarLoading(loadingMonthsRef.current.size > 0);
@@ -308,10 +320,19 @@ export function ScheduleSection({
     loadedMonthsRef.current.clear();
     loadingMonthsRef.current.clear();
     setMonthAvailability({});
+    setMonthAvailabilityError("");
     void loadMonthAvailability(
       parseDate(formData.post_date_from) || getTodayDateInAppTimeZone(),
     );
   }, [excludeAdId, formData.post_date_from, loadMonthAvailability]);
+
+  useEffect(() => {
+    return () => {
+      if (monthAbortControllerRef.current) {
+        monthAbortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!pastTimeError) {
@@ -532,6 +553,12 @@ export function ScheduleSection({
               <p className="text-sm text-red-700 mt-2">Please choose different dates.</p>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {monthAvailabilityError ? (
+        <div className="bg-amber-50 border border-amber-200 px-4 py-3 rounded-lg mt-4 text-sm text-amber-700">
+          {monthAvailabilityError}
         </div>
       ) : null}
     </div>

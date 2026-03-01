@@ -115,22 +115,34 @@ export const checkSingleDateAvailability = async ({
     );
 
     const isTimeBlocked = requestedTime ? blockedTimes.has(requestedTime) : false;
+    const isDayFull = totalAdsOnDate >= maxAdsPerDay;
+    const available = !isDayFull && !isTimeBlocked;
+    const reason = isDayFull ? "limit_reached" : isTimeBlocked ? "time_blocked" : null;
 
     return {
-      available: totalAdsOnDate < maxAdsPerDay && !isTimeBlocked,
+      available,
+      limit: maxAdsPerDay,
+      bookedCount: totalAdsOnDate,
+      reason,
+      tooltip: isDayFull ? "Ad limit reached" : isTimeBlocked ? "Time slot already booked" : null,
       blocked_times: Array.from(blockedTimes),
       total_ads_on_date: totalAdsOnDate,
       max_ads_per_day: maxAdsPerDay,
-      is_day_full: totalAdsOnDate >= maxAdsPerDay,
+      is_day_full: isDayFull,
       is_time_blocked: isTimeBlocked,
     };
   }
 
+  const isDayFull = totalAdsOnDate >= maxAdsPerDay;
   return {
-    available: totalAdsOnDate < maxAdsPerDay,
+    available: !isDayFull,
+    limit: maxAdsPerDay,
+    bookedCount: totalAdsOnDate,
+    reason: isDayFull ? "limit_reached" : null,
+    tooltip: isDayFull ? "Ad limit reached" : null,
     total_ads_on_date: totalAdsOnDate,
     max_ads_per_day: maxAdsPerDay,
-    is_day_full: totalAdsOnDate >= maxAdsPerDay,
+    is_day_full: isDayFull,
     is_time_blocked: false,
     blocked_times: [],
   };
@@ -156,11 +168,16 @@ export const checkBatchAvailability = async ({
 
   for (const day of normalizedDates) {
     const totalAdsOnDate = visibleItems.filter((item) => includesDate(item, day)).length;
+    const isFull = totalAdsOnDate >= maxAdsPerDay;
     results[day] = {
+      available: !isFull,
+      limit: maxAdsPerDay,
+      bookedCount: totalAdsOnDate,
+      reason: isFull ? "limit_reached" : null,
       total_ads_on_date: totalAdsOnDate,
       max_ads_per_day: maxAdsPerDay,
-      is_full: totalAdsOnDate >= maxAdsPerDay,
-      tooltip: totalAdsOnDate >= maxAdsPerDay ? "Ad limit reached" : "",
+      is_full: isFull,
+      tooltip: isFull ? "Ad limit reached" : null,
     };
   }
 

@@ -6,6 +6,10 @@ import {
   checkSingleDateAvailability,
   expandDateRange,
 } from "../../utils/ad-availability.js";
+import {
+  isCompleteUSPhoneNumber,
+  normalizeUSPhoneNumber,
+} from "../../../../lib/phone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
@@ -99,6 +103,7 @@ export async function POST(request) {
       notes,
       website,
     } = body;
+    const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
 
     // Honeypot for basic bot filtering.
     if (String(website || "").trim()) {
@@ -119,11 +124,18 @@ export async function POST(request) {
       return Response.json({ error: "Invalid email address" }, { status: 400 });
     }
 
+    if (!isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+      return Response.json(
+        { error: "Phone number must be a complete US number" },
+        { status: 400 },
+      );
+    }
+
     const escaped = {
       advertiser_name: escapeHtml(advertiser_name),
       contact_name: escapeHtml(contact_name),
       email: escapeHtml(normalizedEmail),
-      phone_number: escapeHtml(phone_number),
+      phone_number: escapeHtml(normalizedPhoneNumber),
       ad_name: escapeHtml(ad_name),
       post_type: escapeHtml(post_type),
       placement: escapeHtml(placement),
@@ -250,8 +262,8 @@ export async function POST(request) {
         advertiser_name,
         contact_name,
         email: normalizedEmail,
-        phone_number: phone_number || null,
-        phone: phone_number || null,
+        phone_number: normalizedPhoneNumber || null,
+        phone: normalizedPhoneNumber || null,
         ad_name,
         post_type,
         post_date: post_date_from || null,
@@ -332,7 +344,7 @@ export async function POST(request) {
         <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiser_name}</div>
         <div class="info-row"><span class="label">Contact Name:</span> ${escaped.contact_name}</div>
         <div class="info-row"><span class="label">Email:</span> ${escaped.email}</div>
-        ${phone_number ? `<div class="info-row"><span class="label">Phone:</span> ${escaped.phone_number}</div>` : ""}
+        ${normalizedPhoneNumber ? `<div class="info-row"><span class="label">Phone:</span> ${escaped.phone_number}</div>` : ""}
         <div class="info-row"><span class="label">Ad Name:</span> ${escaped.ad_name}</div>
         <div class="info-row"><span class="label">Post Type:</span> ${escaped.post_type}</div>
         ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
@@ -396,7 +408,7 @@ export async function POST(request) {
           <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiser_name}</div>
           <div class="info-row"><span class="label">Contact Name:</span> ${escaped.contact_name}</div>
           <div class="info-row"><span class="label">Email:</span> <a href="mailto:${escaped.email}">${escaped.email}</a></div>
-          ${phone_number ? `<div class="info-row"><span class="label">Phone Number:</span> ${escaped.phone_number}</div>` : ""}
+          ${normalizedPhoneNumber ? `<div class="info-row"><span class="label">Phone Number:</span> ${escaped.phone_number}</div>` : ""}
         </div>
       </div>
       

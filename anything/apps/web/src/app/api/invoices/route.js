@@ -3,11 +3,12 @@ import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
-  requireAdmin,
-  requireAdminOrAdvertiser,
+  requireAuth,
+  requirePermission,
   resolveAdvertiserScope,
 } from "../utils/auth-check.js";
 import { recalculateAdvertiserSpend } from "../utils/recalculate-advertiser-spend.js";
+import { can } from "../../../lib/permissions.js";
 
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
   if (String(currentStatus || "").toLowerCase() === "paid") return "Paid";
@@ -18,12 +19,16 @@ const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
 
 export async function GET(request) {
   try {
-    const auth = await requireAdminOrAdvertiser(request);
+    const auth = await requireAuth(request);
     if (!auth.authorized) {
       return Response.json(
         { error: auth.error },
         { status: auth.status || getRequestStatusForError(auth.error) },
       );
+    }
+
+    if (!isAdvertiserUser(auth.user) && !can(auth.user.role, "billing:view")) {
+      return Response.json({ error: "Unauthorized - Billing access required" }, { status: 403 });
     }
 
     const supabase = db();
@@ -78,9 +83,10 @@ export async function GET(request) {
     const { data: invoices, error: invoicesError } = await query;
     if (invoicesError) throw invoicesError;
 
-    let filtered = advertiserScope
+    const authorizedInvoices = advertiserScope
       ? (invoices || []).filter((invoice) => matchesAdvertiserScope(invoice, advertiserScope))
       : invoices || [];
+    let filtered = [...authorizedInvoices];
     if (search) {
       const needle = String(search).toLowerCase();
       filtered = filtered.filter((invoice) => {
@@ -114,7 +120,31 @@ export async function GET(request) {
       items: itemsByInvoice.get(invoice.id) || [],
     }));
 
-    return Response.json({ invoices: result });
+    const summary = authorizedInvoices.reduce(
+      (accumulator, invoice) => {
+        const statusValue = String(invoice.status || "").trim().toLowerCase();
+        const total = toNumber(invoice.total ?? invoice.amount, 0);
+        const amountPaid = toNumber(invoice.amount_paid, statusValue === "paid" ? total : 0);
+        const outstanding = Math.max(total - amountPaid, 0);
+
+        if (statusValue === "paid") {
+          accumulator.collected += amountPaid || total;
+        } else if (statusValue === "partial") {
+          accumulator.collected += amountPaid;
+          accumulator.outstanding += outstanding;
+        } else if (statusValue === "overdue") {
+          accumulator.outstanding += outstanding || total;
+          accumulator.overdueCount += 1;
+        } else {
+          accumulator.outstanding += outstanding || total;
+        }
+
+        return accumulator;
+      },
+      { outstanding: 0, collected: 0, overdueCount: 0 },
+    );
+
+    return Response.json({ invoices: result, summary });
   } catch (error) {
     console.error("Error fetching invoices:", error);
     return Response.json(
@@ -126,9 +156,9 @@ export async function GET(request) {
 
 export async function PUT(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("billing:edit", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const supabase = db();

@@ -1,5 +1,9 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
+import {
+  isCompleteUSPhoneNumber,
+  normalizeUSPhoneNumber,
+} from "../../../../../lib/phone.js";
 
 export async function PUT(request, { params }) {
   try {
@@ -11,6 +15,10 @@ export async function PUT(request, { params }) {
     const supabase = db();
     const { id } = params;
     const body = await request.json();
+    const normalizedPhoneNumber =
+      body.phone_number !== undefined
+        ? normalizeUSPhoneNumber(body.phone_number || "")
+        : undefined;
 
     const patch = { updated_at: new Date().toISOString() };
 
@@ -32,12 +40,21 @@ export async function PUT(request, { params }) {
 
     for (const field of fields) {
       if (body[field] !== undefined) {
-        patch[field] = body[field];
+        patch[field] =
+          field === "phone_number"
+            ? normalizedPhoneNumber || null
+            : body[field];
       }
     }
 
     if (body.phone_number !== undefined) {
-      patch.phone = body.phone_number || null;
+      if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+        return Response.json(
+          { error: "Phone number must be a complete US number" },
+          { status: 400 },
+        );
+      }
+      patch.phone = normalizedPhoneNumber || null;
     }
 
     if (body.custom_dates !== undefined) {

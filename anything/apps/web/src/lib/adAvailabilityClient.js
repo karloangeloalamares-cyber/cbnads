@@ -62,9 +62,9 @@ export const checkAdAvailability = async ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         date: postDateFrom,
-        post_type: postType,
-        post_time: normalizeTime(postTime),
-        exclude_ad_id: excludeAdId || null,
+        postType,
+        postTime: normalizeTime(postTime),
+        adId: excludeAdId || null,
       }),
     });
 
@@ -80,12 +80,13 @@ export const checkAdAvailability = async ({
       available: Boolean(data.available),
       availabilityError: data.available
         ? null
-        : data.is_day_full
+        : data.reason === "limit_reached" || data.is_day_full
           ? "Ad limit reached for this date. Please choose the next available day."
-          : data.is_time_blocked
+          : data.reason === "time_blocked" || data.is_time_blocked
             ? "This time slot is already taken. Please choose a different time."
             : "This time slot is not available.",
-      fullyBookedDates: data.is_day_full && postDateFrom ? [postDateFrom] : [],
+      fullyBookedDates:
+        (data.reason === "limit_reached" || data.is_day_full) && postDateFrom ? [postDateFrom] : [],
       data,
     };
   }
@@ -101,8 +102,8 @@ export const checkAdAvailability = async ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         dates,
-        post_type: "Daily Run",
-        exclude_ad_id: excludeAdId || null,
+        postType: "Daily Run",
+        adId: excludeAdId || null,
       }),
     });
 
@@ -113,7 +114,8 @@ export const checkAdAvailability = async ({
     }
 
     const data = await response.json();
-    const fullyBookedDates = dates.filter((date) => data.results?.[date]?.is_full);
+    const availabilityByDate = data.availabilityByDate || data.results || {};
+    const fullyBookedDates = dates.filter((date) => availabilityByDate?.[date]?.is_full);
 
     return {
       available: fullyBookedDates.length === 0,
@@ -137,8 +139,8 @@ export const checkAdAvailability = async ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         dates,
-        post_type: "Custom Schedule",
-        exclude_ad_id: excludeAdId || null,
+        postType: "Custom Schedule",
+        adId: excludeAdId || null,
       }),
     });
 
@@ -149,7 +151,8 @@ export const checkAdAvailability = async ({
     }
 
     const data = await response.json();
-    const fullyBookedDates = dates.filter((date) => data.results?.[date]?.is_full);
+    const availabilityByDate = data.availabilityByDate || data.results || {};
+    const fullyBookedDates = dates.filter((date) => availabilityByDate?.[date]?.is_full);
 
     return {
       available: fullyBookedDates.length === 0,
@@ -170,7 +173,7 @@ export const checkAdAvailability = async ({
   };
 };
 
-export const fetchMonthAvailability = async ({ monthDate, excludeAdId }) => {
+export const fetchMonthAvailability = async ({ monthDate, excludeAdId, signal }) => {
   const month = new Date(monthDate);
   if (Number.isNaN(month.valueOf())) {
     return {};
@@ -189,9 +192,10 @@ export const fetchMonthAvailability = async ({ monthDate, excludeAdId }) => {
   const response = await fetch("/api/ads/availability-batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    signal,
     body: JSON.stringify({
       dates,
-      exclude_ad_id: excludeAdId || null,
+      adId: excludeAdId || null,
     }),
   });
 
@@ -202,5 +206,5 @@ export const fetchMonthAvailability = async ({ monthDate, excludeAdId }) => {
   }
 
   const data = await response.json();
-  return data.results || {};
+  return data.availabilityByDate || data.results || {};
 };

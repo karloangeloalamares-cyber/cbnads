@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ArrowLeft } from "lucide-react";
 import { appToast } from "@/lib/toast";
+import {
+  formatUSPhoneNumber,
+  isCompleteUSPhoneNumber,
+  US_PHONE_INPUT_MAX_LENGTH,
+} from "@/lib/phone";
 
 export default function NewAdvertiserForm({ onCancel, onSuccess }) {
   const [formData, setFormData] = useState({
@@ -37,6 +42,10 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
     setLoading(true);
 
     try {
+      if (formData.phone_number && !isCompleteUSPhoneNumber(formData.phone_number)) {
+        throw new Error("Phone number must be a complete US number.");
+      }
+
       const response = await fetch("/api/advertisers/create", {
         method: "POST",
         headers: {
@@ -50,7 +59,8 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to create advertiser: ${response.status}`);
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `Failed to create advertiser: ${response.status}`);
       }
 
       const data = await response.json();
@@ -62,7 +72,7 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
       onSuccess();
     } catch (err) {
       console.error(err);
-      setError("Failed to create advertiser. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to create advertiser. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -177,9 +187,15 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
               type="tel"
               value={formData.phone_number}
               onChange={(e) =>
-                setFormData({ ...formData, phone_number: e.target.value })
+                setFormData({
+                  ...formData,
+                  phone_number: formatUSPhoneNumber(e.target.value),
+                })
               }
-              placeholder="555-0123"
+              inputMode="tel"
+              autoComplete="tel-national"
+              maxLength={US_PHONE_INPUT_MAX_LENGTH}
+              placeholder="(123) 456-7890"
               className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
             />
           </div>

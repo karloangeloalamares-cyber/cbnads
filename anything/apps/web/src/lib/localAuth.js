@@ -7,7 +7,14 @@ import {
   setSessionUserId,
   upsertLocalUser,
 } from "@/lib/localDb";
-import { getSupabaseClient, hasSupabaseConfig, tableName } from "@/lib/supabase";
+import {
+  getSupabaseClient,
+  hasSupabaseConfig,
+  publicAppUrl,
+  tableName,
+} from "@/lib/supabase";
+import { normalizeUSPhoneNumber } from "@/lib/phone";
+import { normalizeAppRole } from "@/lib/permissions";
 
 const sanitizeUser = (user) => {
   if (!user) {
@@ -18,6 +25,23 @@ const sanitizeUser = (user) => {
 };
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const ALLOWED_APP_ROLES = new Set(["admin", "manager", "staff", "advertiser"]);
+
+const isAllowedAppRole = (value) => ALLOWED_APP_ROLES.has(normalizeAppRole(value));
+
+const buildGoogleRedirectUrl = (callbackUrl = "") => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const baseUrl = String(publicAppUrl || "").trim() || window.location.origin;
+  const redirectUrl = new URL("/account/signin", baseUrl);
+  redirectUrl.searchParams.set("oauth", "google");
+  if (callbackUrl) {
+    redirectUrl.searchParams.set("callbackUrl", callbackUrl);
+  }
+  return redirectUrl.toString();
+};
 
 const syncSupabaseUserToLocalDb = async (resolvedUser) => {
   const email = normalizeEmail(resolvedUser?.email);
@@ -35,41 +59,23 @@ const syncSupabaseUserToLocalDb = async (resolvedUser) => {
     advertiser_name: resolvedUser.advertiser_name || existing?.advertiser_name || "",
     image: resolvedUser.image || existing?.image || "",
     whatsapp_number:
-      resolvedUser.whatsapp_number || existing?.whatsapp_number || "",
+      normalizeUSPhoneNumber(
+        resolvedUser.whatsapp_number || existing?.whatsapp_number || "",
+      ),
     password: existing?.password || "",
   });
 
   return sanitizeUser(saved);
 };
 
-const signInWithSupabase = async ({ email, password }) => {
-  if (!hasSupabaseConfig) {
-    return {
-      ok: false,
-      error: "Supabase auth is not configured.",
-    };
-  }
-
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: normalizeEmail(email),
-    password,
-  });
-
-  if (error) {
-    return {
-      ok: false,
-      error: "Incorrect email or password.",
-    };
-  }
-
+const finalizeSupabaseSignIn = async ({ supabase, authUser }) => {
   const resolvedUser = await resolveSupabaseSessionUser(supabase);
-  const role = String(resolvedUser?.role || "").toLowerCase();
+  const role = normalizeAppRole(resolvedUser?.role);
   const isVerified =
     resolvedUser?.account_verified === true ||
-    data?.user?.user_metadata?.account_verified === true;
+    authUser?.user_metadata?.account_verified === true;
 
-  if (!resolvedUser?.id || !role) {
+  if (!resolvedUser?.id || !isAllowedAppRole(role)) {
     await supabase.auth.signOut();
     return {
       ok: false,
@@ -94,6 +100,33 @@ const signInWithSupabase = async ({ email, password }) => {
   };
 };
 
+const signInWithSupabase = async ({ email, password }) => {
+  if (!hasSupabaseConfig) {
+    return {
+      ok: false,
+      error: "Supabase auth is not configured.",
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: normalizeEmail(email),
+    password,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error: "Incorrect email or password.",
+    };
+  }
+
+  return finalizeSupabaseSignIn({
+    supabase,
+    authUser: data?.user || data?.session?.user || null,
+  });
+};
+
 export const getSignedInUser = () => {
   void ensureDb();
   const userId = getSessionUserId();
@@ -105,6 +138,103 @@ export const getSignedInUser = () => {
 
 export const signIn = async ({ email, password }) => {
   return signInWithSupabase({ email, password });
+};
+
+export const signInWithGoogle = async ({ callbackUrl = "" } = {}) => {
+  if (!hasSupabaseConfig) {
+    return {
+      ok: false,
+      error: "Supabase auth is not configured.",
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: buildGoogleRedirectUrl(callbackUrl),
+      queryParams: {
+        access_type: "offline",
+        prompt: "select_account",
+      },
+    },
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      error: error.message || "Unable to start Google sign-in.",
+    };
+  }
+
+  return {
+    ok: true,
+    url: data?.url || null,
+  };
+};
+
+export const completeOAuthSignIn = async () => {
+  if (!hasSupabaseConfig || typeof window === "undefined") {
+    return {
+      ok: false,
+      error: "Supabase auth is not configured.",
+    };
+  }
+
+  const supabase = getSupabaseClient();
+  const url = new URL(window.location.href);
+  const search = url.searchParams;
+  const code = search.get("code");
+  const errorDescription = search.get("error_description");
+  const providerError = search.get("error");
+
+  if (errorDescription || providerError) {
+    return {
+      ok: false,
+      error: decodeURIComponent(errorDescription || providerError || "Google sign-in failed."),
+    };
+  }
+
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      return {
+        ok: false,
+        error: error.message || "Google sign-in failed.",
+      };
+    }
+
+    search.delete("code");
+    search.delete("state");
+    search.delete("error");
+    search.delete("error_description");
+    const nextUrl = `${url.pathname}${search.toString() ? `?${search.toString()}` : ""}${url.hash || ""}`;
+    window.history.replaceState({}, "", nextUrl);
+  }
+
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    return {
+      ok: false,
+      error: sessionError.message || "Unable to restore Google session.",
+    };
+  }
+
+  if (!session?.user) {
+    return {
+      ok: false,
+      error: "Google sign-in did not return a valid session.",
+    };
+  }
+
+  return finalizeSupabaseSignIn({
+    supabase,
+    authUser: session.user,
+  });
 };
 
 export const signOut = async () => {
@@ -140,13 +270,14 @@ export const updateCurrentUser = async (updates) => {
   const nextWhatsapp = String(
     updates?.whatsapp_number ?? current.whatsapp_number ?? "",
   ).trim();
+  const normalizedWhatsapp = normalizeUSPhoneNumber(nextWhatsapp);
 
   const { error: profileError } = await supabase
     .from("profiles")
     .update({
       full_name: nextName || current.email,
       avatar_url: nextImage || null,
-      whatsapp_number: nextWhatsapp || null,
+      whatsapp_number: normalizedWhatsapp || null,
       updated_at: now,
     })
     .eq("id", current.id);

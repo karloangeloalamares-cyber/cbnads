@@ -8,6 +8,10 @@ import {
   isBeforeTodayInAppTimeZone,
   isPastDateTimeInAppTimeZone,
 } from "@/lib/timezone";
+import {
+  formatUSPhoneNumber,
+  isCompleteUSPhoneNumber,
+} from "@/lib/phone";
 
 const initialFormData = {
   advertiser_name: "",
@@ -55,11 +59,13 @@ export function useSubmitAdForm() {
 
   const handleChange = (field, value) => {
     setFormData((prev) => {
-      const updated = { ...prev, [field]: value };
+      const normalizedValue =
+        field === "phone_number" ? formatUSPhoneNumber(value) : value;
+      const updated = { ...prev, [field]: normalizedValue };
 
       if (["post_date_from", "post_time"].includes(field)) {
-        const dateVal = field === "post_date_from" ? value : prev.post_date_from;
-        const timeVal = field === "post_time" ? value : prev.post_time;
+        const dateVal = field === "post_date_from" ? normalizedValue : prev.post_date_from;
+        const timeVal = field === "post_time" ? normalizedValue : prev.post_time;
 
         if (dateVal && timeVal) {
           if (isPastDateTimeInAppTimeZone(dateVal, timeVal)) {
@@ -240,6 +246,12 @@ export function useSubmitAdForm() {
       !formData.ad_name
     ) {
       setError("Please fill in all required fields");
+      setLoading(false);
+      return;
+    }
+
+    if (!isCompleteUSPhoneNumber(formData.phone_number)) {
+      setError("Phone number must be a complete US number.");
       setLoading(false);
       return;
     }

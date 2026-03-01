@@ -1,5 +1,5 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import { requirePermission } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
@@ -77,9 +77,9 @@ const recalcInvoiceStatus = async (supabase, invoiceId) => {
 
 export async function PUT(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("ads:edit", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const supabase = db();
@@ -89,6 +89,7 @@ export async function PUT(request) {
       id,
       ad_name,
       advertiser,
+      advertiser_id,
       status,
       post_type,
       placement,
@@ -110,7 +111,7 @@ export async function PUT(request) {
 
     const { data: oldAd, error: oldAdError } = await supabase
       .from(table("ads"))
-      .select("advertiser, status, payment, paid_via_invoice_id, post_type, schedule, post_date, post_date_from, post_date_to, custom_dates, post_time")
+      .select("advertiser, advertiser_id, status, payment, paid_via_invoice_id, product_id, post_type, schedule, post_date, post_date_from, post_date_to, custom_dates, post_time")
       .eq("id", id)
       .maybeSingle();
     if (oldAdError) throw oldAdError;
@@ -227,6 +228,7 @@ export async function PUT(request) {
 
     if (ad_name !== undefined) patch.ad_name = ad_name;
     if (advertiser !== undefined) patch.advertiser = advertiser;
+    if (advertiser_id !== undefined) patch.advertiser_id = advertiser_id || null;
     if (status !== undefined) {
       patch.status = status;
       if (String(status) === "Published" && oldAd.status !== "Published") {
@@ -237,7 +239,36 @@ export async function PUT(request) {
     if (placement !== undefined) patch.placement = placement;
     if (schedule !== undefined) patch.schedule = schedule || null;
     if (payment !== undefined) patch.payment = payment;
-    if (product_id !== undefined) patch.product_id = product_id || null;
+    if (product_id !== undefined) {
+      const productChanged = String(product_id || "") !== String(oldAd.product_id || "");
+      if (productChanged && oldAd.paid_via_invoice_id) {
+        return Response.json(
+          {
+            error:
+              "This ad is already linked to an invoice. Remove or reissue the invoice before changing the product.",
+          },
+          { status: 400 },
+        );
+      }
+
+      patch.product_id = product_id || null;
+      if (product_id) {
+        const { data: productRow, error: productError } = await supabase
+          .from(table("products"))
+          .select("id, product_name, price")
+          .eq("id", product_id)
+          .maybeSingle();
+        if (productError) throw productError;
+        if (!productRow) {
+          return Response.json({ error: "Selected product was not found" }, { status: 400 });
+        }
+        patch.product_name = productRow.product_name || null;
+        patch.price = productRow.price || 0;
+      } else {
+        patch.product_name = null;
+        patch.price = 0;
+      }
+    }
     if (post_date_from !== undefined) patch.post_date_from = post_date_from || null;
     if (post_date_to !== undefined) patch.post_date_to = post_date_to || null;
     if (custom_dates !== undefined) {

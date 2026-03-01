@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import {
+  completeOAuthSignIn,
   getSignedInUser,
   signIn,
+  signInWithGoogle,
   signOut,
 } from "@/lib/localAuth";
 import { ensureDb } from "@/lib/localDb";
@@ -25,6 +27,7 @@ export default function SignInPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   useEffect(() => {
     if (!notice) {
@@ -54,6 +57,12 @@ export default function SignInPage() {
       const params = new URLSearchParams(window.location.search);
       const prefilledEmail = params.get("email");
       const verified = params.get("verified");
+      const oauthProvider = params.get("oauth");
+      const isOauthCallback =
+        oauthProvider === "google" ||
+        params.has("code") ||
+        params.has("error") ||
+        params.has("error_description");
       const forceLogin =
         params.get("forceLogin") === "1" ||
         params.get("audience") === "advertiser" ||
@@ -66,9 +75,30 @@ export default function SignInPage() {
         setNotice("Account verified. You can now sign in as Advertiser.");
       }
 
-      if (forceLogin) {
+      if (forceLogin && !isOauthCallback) {
         await signOut();
         return;
+      }
+
+      if (isOauthCallback) {
+        if (!cancelled) {
+          setGoogleLoading(true);
+        }
+
+        const result = await completeOAuthSignIn();
+        if (!cancelled) {
+          setGoogleLoading(false);
+        }
+
+        if (result.ok) {
+          const currentUser = getSignedInUser() || result.user;
+          window.location.replace(resolveRedirectTarget(currentUser, params));
+          return;
+        }
+
+        if (!cancelled && result.error) {
+          setError(result.error);
+        }
       }
 
       await ensureDb();
@@ -111,6 +141,27 @@ export default function SignInPage() {
       console.error("Sign in error:", err);
       setError("Something went wrong. Please try again.");
       setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setGoogleLoading(true);
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const result = await signInWithGoogle({
+        callbackUrl: String(params.get("callbackUrl") || "").trim(),
+      });
+
+      if (!result.ok) {
+        setError(result.error || "Unable to start Google sign-in.");
+        setGoogleLoading(false);
+      }
+    } catch (err) {
+      console.error("Google sign in error:", err);
+      setError("Unable to start Google sign-in.");
+      setGoogleLoading(false);
     }
   };
 
@@ -194,12 +245,48 @@ export default function SignInPage() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || googleLoading}
               className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase tracking-wide text-gray-400">
+              <span className="bg-white px-3">Or continue with</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={loading || googleLoading}
+            className="w-full flex items-center justify-center gap-3 border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="#EA4335"
+                d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.9-5.4 3.9-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7 6.9 2.7 2.8 6.8 2.8 12s4.1 9.3 9.2 9.3c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.1-1.5H12Z"
+              />
+              <path
+                fill="#34A853"
+                d="M3.9 7.3 7.1 9.6c.9-1.8 2.7-3 4.9-3 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7c-3.5 0-6.6 2-8.1 4.6Z"
+              />
+              <path
+                fill="#4A90E2"
+                d="M12 21.3c2.4 0 4.5-.8 6-2.3l-2.8-2.2c-.8.6-1.8 1.1-3.2 1.1-3.7 0-5.1-2.5-5.4-3.8l-3.1 2.4c1.5 2.7 4.4 4.8 8.5 4.8Z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M6.6 14.1c-.1-.4-.2-.9-.2-1.4s.1-1 .2-1.4L3.4 8.9C3 9.9 2.8 10.9 2.8 12s.2 2.1.6 3.1l3.2-2.5Z"
+              />
+            </svg>
+            <span>{googleLoading ? "Redirecting to Google..." : "Sign in with Google"}</span>
+          </button>
         </div>
       </div>
     </div>

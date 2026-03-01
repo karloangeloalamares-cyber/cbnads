@@ -1,3 +1,5 @@
+import { US_PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+
 export function AdvertiserInfoSection({ formData, onChange }) {
   return (
     <div>
@@ -57,6 +59,9 @@ export function AdvertiserInfoSection({ formData, onChange }) {
             required
             value={formData.phone_number}
             onChange={(e) => onChange("phone_number", e.target.value)}
+            inputMode="tel"
+            autoComplete="tel-national"
+            maxLength={US_PHONE_INPUT_MAX_LENGTH}
             placeholder="(123) 456-7890"
             className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
           />

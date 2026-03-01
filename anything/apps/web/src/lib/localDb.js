@@ -6,6 +6,9 @@ import {
   getTodayInAppTimeZone,
   normalizeDateKey,
 } from '@/lib/timezone';
+import { normalizeUSPhoneNumber } from '@/lib/phone';
+import { normalizeAppRole } from '@/lib/permissions';
+import { formatPostTypeLabel, normalizePostTypeValue } from '@/lib/postType';
 
 const DB_KEY = withNamespace('local.db.v1');
 const SESSION_KEY = withNamespace('local.session.v1');
@@ -29,6 +32,8 @@ const numberOrZero = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const normalizeText = (value) => String(value || '').trim().toLowerCase();
 
 const isBrowser = () => typeof window !== 'undefined';
 
@@ -128,22 +133,7 @@ const toTimeColumn = (value) => {
   return null;
 };
 
-const normalizePostType = (value) => {
-  const text = String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[-\s]+/g, '_');
-  if (text === 'one_time_post' || text === 'one_time') {
-    return 'one_time';
-  }
-  if (text === 'daily' || text === 'daily_run') {
-    return 'daily_run';
-  }
-  if (text === 'custom' || text === 'custom_schedule') {
-    return 'custom_schedule';
-  }
-  return text || 'one_time';
-};
+const normalizePostType = (value) => normalizePostTypeValue(value);
 
 const toMoney = (value) => numberOrZero(value).toFixed(2);
 
@@ -183,17 +173,6 @@ const throwIfSupabaseError = (label, error) => {
 };
 
 const normalizeRole = (value) => String(value || '').trim().toLowerCase();
-
-const normalizeAppRole = (value) => {
-  const role = normalizeRole(value);
-  if (role === 'advertiser') {
-    return 'advertiser';
-  }
-  if (['owner', 'admin', 'manager', 'assistant', 'staff'].includes(role)) {
-    return 'admin';
-  }
-  return role;
-};
 
 const loadTeamMemberRoleByEmail = async (supabase, email) => {
   const normalizedEmail = String(email || '').trim().toLowerCase();
@@ -328,17 +307,17 @@ export const resolveSupabaseSessionUser = async (supabaseOverride = null) => {
     name:
       String(
         authUser?.user_metadata?.full_name ||
-          authUser?.user_metadata?.advertiser_name ||
-          profile?.full_name ||
-          authUser.email ||
-          '',
+        authUser?.user_metadata?.advertiser_name ||
+        profile?.full_name ||
+        authUser.email ||
+        '',
       ).trim() || email,
     image:
       String(
         authUser?.user_metadata?.avatar_url ||
-          authUser?.user_metadata?.image ||
-          profile?.avatar_url ||
-          '',
+        authUser?.user_metadata?.image ||
+        profile?.avatar_url ||
+        '',
       ).trim() || '',
     role,
     advertiser_id: advertiser?.id || profile?.advertiser_id || null,
@@ -346,7 +325,7 @@ export const resolveSupabaseSessionUser = async (supabaseOverride = null) => {
       advertiser?.advertiser_name ||
       String(authUser?.user_metadata?.advertiser_name || '').trim() ||
       '',
-    whatsapp_number: String(profile?.whatsapp_number || '').trim(),
+    whatsapp_number: normalizeUSPhoneNumber(profile?.whatsapp_number || ''),
     account_verified: authUser?.user_metadata?.account_verified === true,
   };
 
@@ -497,15 +476,25 @@ const refreshDerivedFields = (inputDb) => {
   const spendByAdvertiser = new Map();
   const nextDateByAdvertiser = new Map();
 
-  for (const ad of db.ads) {
-    const advertiserId = ad.advertiser_id;
+  for (const invoice of db.invoices) {
+    const advertiserId = invoice.advertiser_id;
     if (!advertiserId) {
       continue;
     }
 
-    if (String(ad.payment || '').toLowerCase() === 'paid') {
-      const nextSpend = (spendByAdvertiser.get(advertiserId) ?? 0) + numberOrZero(ad.price);
+    const status = normalizeText(invoice.status);
+    if (status === 'paid') {
+      const nextSpend =
+        (spendByAdvertiser.get(advertiserId) ?? 0) +
+        numberOrZero(invoice.total ?? invoice.amount_paid ?? invoice.amount);
       spendByAdvertiser.set(advertiserId, nextSpend);
+    }
+  }
+
+  for (const ad of db.ads) {
+    const advertiserId = ad.advertiser_id;
+    if (!advertiserId) {
+      continue;
     }
 
     const candidateDate = ad.post_date || ad.schedule || ad.post_date_from;
@@ -569,8 +558,8 @@ const fromAdvertiserRow = (row) => ({
   advertiser_name: row.advertiser_name || '',
   contact_name: row.contact_name || '',
   email: row.email || '',
-  phone: row.phone ?? row.phone_number ?? '',
-  phone_number: row.phone_number ?? row.phone ?? '',
+  phone: normalizeUSPhoneNumber(row.phone ?? row.phone_number ?? ''),
+  phone_number: normalizeUSPhoneNumber(row.phone_number ?? row.phone ?? ''),
   business_name: row.business_name || '',
   status: row.status || 'active',
   ad_spend: toMoney(row.ad_spend ?? row.total_spend),
@@ -585,8 +574,8 @@ const toAdvertiserRow = (input) => ({
   advertiser_name: String(input.advertiser_name || '').trim(),
   contact_name: String(input.contact_name || '').trim(),
   email: String(input.email || '').trim(),
-  phone: String(input.phone || input.phone_number || '').trim(),
-  phone_number: String(input.phone_number || input.phone || '').trim(),
+  phone: normalizeUSPhoneNumber(input.phone || input.phone_number || ''),
+  phone_number: normalizeUSPhoneNumber(input.phone_number || input.phone || ''),
   business_name: String(input.business_name || '').trim(),
   status: String(input.status || 'active'),
   ad_spend: toMoney(input.ad_spend ?? input.total_spend),
@@ -696,8 +685,8 @@ const fromPendingAdRow = (row) => ({
   advertiser_name: row.advertiser_name || '',
   contact_name: row.contact_name || '',
   email: row.email || '',
-  phone: row.phone || row.phone_number || '',
-  phone_number: row.phone_number || row.phone || '',
+  phone: normalizeUSPhoneNumber(row.phone || row.phone_number || ''),
+  phone_number: normalizeUSPhoneNumber(row.phone_number || row.phone || ''),
   business_name: row.business_name || '',
   ad_name: row.ad_name || '',
   post_type: normalizePostType(row.post_type),
@@ -723,8 +712,8 @@ const toPendingAdRow = (input) => ({
   advertiser_name: String(input.advertiser_name || '').trim(),
   contact_name: String(input.contact_name || '').trim(),
   email: String(input.email || '').trim(),
-  phone: String(input.phone || input.phone_number || '').trim(),
-  phone_number: String(input.phone_number || input.phone || '').trim(),
+  phone: normalizeUSPhoneNumber(input.phone || input.phone_number || ''),
+  phone_number: normalizeUSPhoneNumber(input.phone_number || input.phone || ''),
   business_name: String(input.business_name || '').trim(),
   ad_name: String(input.ad_name || '').trim(),
   post_type: normalizePostType(input.post_type),
@@ -753,6 +742,17 @@ const fromInvoiceRow = (row) => ({
   status: row.status || 'Unpaid',
   paid_date: toDateOnly(row.paid_date),
   ad_ids: toArray(row.ad_ids).filter(Boolean),
+  items: toArray(row.items).map((item) => ({
+    id: item.id || createId(),
+    invoice_id: item.invoice_id || row.id,
+    ad_id: item.ad_id || null,
+    product_id: item.product_id || null,
+    description: item.description || '',
+    quantity: Number(item.quantity) || 1,
+    unit_price: toMoney(item.unit_price),
+    amount: toMoney(item.amount),
+    created_at: item.created_at || row.created_at || nowIso(),
+  })),
   contact_name: row.contact_name || '',
   contact_email: row.contact_email || '',
   bill_to: row.bill_to || '',
@@ -780,9 +780,39 @@ const toInvoiceRow = (input) => ({
   status: input.status || 'Unpaid',
   paid_date: toDateColumn(input.paid_date),
   ad_ids: toArray(input.ad_ids).filter(Boolean),
+  contact_name: String(input.contact_name || '').trim(),
+  contact_email: String(input.contact_email || '').trim(),
+  bill_to: String(input.bill_to || '').trim(),
+  issue_date: toDateColumn(input.issue_date),
+  discount: toMoney(input.discount),
+  tax: toMoney(input.tax),
+  total: toMoney(input.total ?? input.amount),
+  notes: String(input.notes || '').trim(),
+  amount_paid: toMoney(input.amount_paid),
+  deleted_at: input.deleted_at || null,
+  is_recurring: Boolean(input.is_recurring),
+  recurring_period: String(input.recurring_period || '').trim(),
+  last_generated_at: input.last_generated_at || null,
   created_at: input.created_at || nowIso(),
   updated_at: input.updated_at || nowIso(),
 });
+
+const toInvoiceItemRow = (invoiceId, item) => {
+  const quantity = Math.max(1, Number(item?.quantity) || 1);
+  const unitPrice = toMoney(item?.unit_price ?? item?.amount ?? 0);
+  const amount = toMoney(item?.amount ?? Number(unitPrice) * quantity);
+  return {
+    id: item?.id || createId(),
+    invoice_id: invoiceId,
+    ad_id: item?.ad_id || null,
+    product_id: item?.product_id || null,
+    description: String(item?.description || '').trim(),
+    quantity,
+    unit_price: unitPrice,
+    amount,
+    created_at: item?.created_at || nowIso(),
+  };
+};
 
 const fromTeamMemberRow = (row) => ({
   id: row.id,
@@ -846,7 +876,7 @@ const fromNotificationRows = (notificationRow, adminNotificationRow) => ({
     adminNotificationRow?.email_address ||
     notificationRow?.reminder_email ||
     '',
-  phone_number: adminNotificationRow?.phone_number || '',
+  phone_number: normalizeUSPhoneNumber(adminNotificationRow?.phone_number || ''),
   sound_enabled: adminNotificationRow?.sound_enabled ?? true,
   reminder_email:
     notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
@@ -867,7 +897,7 @@ const toAdminNotificationRow = (input) => ({
   reminder_time_value: Math.max(1, Number(input?.reminder_time_value) || 1),
   reminder_time_unit: String(input?.reminder_time_unit || 'hours'),
   email_address: String(input?.email_address || input?.reminder_email || ''),
-  phone_number: String(input?.phone_number || ''),
+  phone_number: normalizeUSPhoneNumber(input?.phone_number || ''),
   sound_enabled: input?.sound_enabled !== false,
   telegram_chat_ids: toArray(input?.telegram_chat_ids),
   updated_at: nowIso(),
@@ -950,6 +980,7 @@ const fetchDbFromSupabase = async () => {
     adRows,
     pendingRows,
     invoiceRows,
+    invoiceItemRows,
     adminSettingsRow,
     notificationRow,
     teamMemberRows,
@@ -960,6 +991,7 @@ const fetchDbFromSupabase = async () => {
     fetchRows(supabase, 'ads'),
     fetchRows(supabase, 'pending_ads'),
     fetchRows(supabase, 'invoices'),
+    fetchRows(supabase, 'invoice_items', { optional: true, allowPermissionDenied: true }),
     fetchSingleton(supabase, 'admin_settings', { optional: true, allowPermissionDenied: true }),
     fetchSingleton(supabase, 'notification_preferences', {
       optional: true,
@@ -997,6 +1029,12 @@ const fetchDbFromSupabase = async () => {
   }
 
   const users = currentUser ? normalizeUsers([currentUser]) : [];
+  const invoiceItemsByInvoiceId = new Map();
+  for (const item of invoiceItemRows || []) {
+    const list = invoiceItemsByInvoiceId.get(item.invoice_id) || [];
+    list.push(item);
+    invoiceItemsByInvoiceId.set(item.invoice_id, list);
+  }
   return refreshDerivedFields(
     normalizeDb({
       ...baseDb(users),
@@ -1005,7 +1043,12 @@ const fetchDbFromSupabase = async () => {
       products: productRows.map(fromProductRow),
       ads: adRows.map(fromAdRow),
       pending_ads: pendingRows.map(fromPendingAdRow),
-      invoices: invoiceRows.map(fromInvoiceRow),
+      invoices: invoiceRows.map((row) =>
+        fromInvoiceRow({
+          ...row,
+          items: invoiceItemsByInvoiceId.get(row.id) || [],
+        }),
+      ),
       admin_settings: fromAdminSettingsRow(adminSettingsRow),
       notification_preferences: notificationPreferences,
       telegram_chat_ids: notificationPreferences.telegram_chat_ids,
@@ -1103,12 +1146,17 @@ const syncSingletonTable = async (
 const persistDbToSupabase = async (value) => {
   const db = refreshDerivedFields(normalizeDb(value));
   const supabase = getSupabaseClient();
+  const invoiceRows = db.invoices.map(toInvoiceRow);
+  const invoiceItemRows = db.invoices.flatMap((invoice) =>
+    toArray(invoice.items).map((item) => toInvoiceItemRow(invoice.id, item)),
+  );
 
   await syncIdTable(supabase, 'advertisers', db.advertisers.map(toAdvertiserRow));
   await syncIdTable(supabase, 'products', db.products.map(toProductRow));
   await syncIdTable(supabase, 'team_members', db.team_members.map(toTeamMemberRow));
   await syncIdTable(supabase, 'pending_ads', db.pending_ads.map(toPendingAdRow));
-  await syncIdTable(supabase, 'invoices', db.invoices.map(toInvoiceRow));
+  await syncIdTable(supabase, 'invoices', invoiceRows);
+  await syncIdTable(supabase, 'invoice_items', invoiceItemRows, { optional: true });
   await syncIdTable(supabase, 'ads', db.ads.map(toAdRow));
 
   await syncSingletonTable(
@@ -1201,7 +1249,7 @@ export const updateDb = async (updater) => {
 
 export const subscribeDb = (listener) => {
   if (!isBrowser()) {
-    return () => {};
+    return () => { };
   }
 
   const trackedKeys = new Set([
@@ -1299,7 +1347,7 @@ export const upsertAdvertiser = async (input) => {
   let saved = null;
   await updateDb((db) => {
     const now = nowIso();
-    const phone = (input.phone_number || input.phone || '').trim();
+    const phone = normalizeUSPhoneNumber(input.phone_number || input.phone || '');
     const payload = {
       id: input.id || createId('adv'),
       advertiser_name: (input.advertiser_name || '').trim(),
@@ -1386,6 +1434,7 @@ export const upsertAd = async (input) => {
     const product = db.products.find((item) => item.id === input.product_id);
     const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
     const paidViaInvoiceId = input.paid_via_invoice_id || input.invoice_id || null;
+    const resolvedPrice = toMoney(input.price || product?.price || 0);
     const payload = {
       id: input.id || createId('ad'),
       ad_name: (input.ad_name || '').trim(),
@@ -1408,7 +1457,7 @@ export const upsertAd = async (input) => {
       media_urls: toArray(input.media_urls),
       placement: input.placement || '',
       reminder_minutes: Number(input.reminder_minutes) || 15,
-      price: toMoney(input.price),
+      price: resolvedPrice,
       invoice_id: paidViaInvoiceId,
       paid_via_invoice_id: paidViaInvoiceId,
       archived: Boolean(input.archived),
@@ -1465,7 +1514,7 @@ export const submitPendingAd = async (input) => {
     const postDateFrom = input.post_date_from || input.post_date || '';
     const postDateTo = input.post_date_to || '';
     const customDates = Array.isArray(input.custom_dates) ? input.custom_dates.filter(Boolean) : [];
-    const phone = (input.phone || input.phone_number || '').trim();
+    const phone = normalizeUSPhoneNumber(input.phone || input.phone_number || '');
     const payload = {
       id: input.id || createId('pending'),
       advertiser_name: (input.advertiser_name || '').trim(),
@@ -1521,8 +1570,8 @@ export const approvePendingAd = async (pendingAdId) => {
         advertiser_name: pending.advertiser_name || pending.email || 'New advertiser',
         contact_name: pending.contact_name || '',
         email: pending.email || '',
-        phone: pending.phone || pending.phone_number || '',
-        phone_number: pending.phone_number || pending.phone || '',
+        phone: normalizeUSPhoneNumber(pending.phone || pending.phone_number || ''),
+        phone_number: normalizeUSPhoneNumber(pending.phone_number || pending.phone || ''),
         business_name: pending.business_name || '',
         status: 'active',
         ad_spend: '0.00',
@@ -1593,7 +1642,7 @@ const applyInvoiceLinks = (db, invoiceId, previousAdIds, nextAdIds, invoiceStatu
       return {
         ...ad,
         invoice_id: invoiceId,
-        payment: invoiceStatus === 'Paid' ? 'Paid' : ad.payment,
+        payment: normalizeText(invoiceStatus) === 'paid' ? 'Paid' : 'Pending',
         updated_at: nowIso(),
       };
     }
@@ -1620,17 +1669,61 @@ export const upsertInvoice = async (input) => {
     const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
     const existing = db.invoices.find((item) => item.id === invoiceId);
     const previousAdIds = existing?.ad_ids || [];
+    const selectedAds = adIds
+      .map((adId) => db.ads.find((item) => item.id === adId))
+      .filter(Boolean);
+    const derivedItems = selectedAds.map((adItem) => ({
+      id:
+        existing?.items?.find((item) => item.ad_id === adItem.id)?.id ||
+        createId('inv_item'),
+      invoice_id: invoiceId,
+      ad_id: adItem.id,
+      product_id: adItem.product_id || null,
+      description: adItem.product_name
+        ? `${adItem.product_name}${adItem.ad_name ? ` | Ad: ${adItem.ad_name}` : ''}`
+        : adItem.ad_name || 'Advertising services',
+      quantity: 1,
+      unit_price: toMoney(adItem.price),
+      amount: toMoney(adItem.price),
+      created_at:
+        existing?.items?.find((item) => item.ad_id === adItem.id)?.created_at || now,
+    }));
+    const items = Array.isArray(input.items) && input.items.length > 0 ? input.items : derivedItems;
+    const subtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
+    const discount = toMoney(input.discount);
+    const tax = toMoney(input.tax);
+    const total = toMoney(subtotal - numberOrZero(discount) + numberOrZero(tax));
+    const status = input.status || 'Unpaid';
+    const amountPaid =
+      normalizeText(status) === 'paid' ? total : toMoney(input.amount_paid);
 
     const payload = {
       id: invoiceId,
       invoice_number: (input.invoice_number || '').trim() || `INV-${Date.now().toString().slice(-6)}`,
       advertiser_id: input.advertiser_id || '',
       advertiser_name: advertiser?.advertiser_name || input.advertiser_name || '',
-      amount: toMoney(input.amount),
+      amount: total,
       due_date: toDateOnly(input.due_date),
-      status: input.status || 'Unpaid',
-      paid_date: input.status === 'Paid' ? toDateOnly(input.paid_date || now.slice(0, 10)) : '',
+      status,
+      paid_date: normalizeText(status) === 'paid' ? toDateOnly(input.paid_date || now.slice(0, 10)) : '',
       ad_ids: adIds,
+      items: items.map((item) => ({
+        ...item,
+        id: item.id || createId('inv_item'),
+        invoice_id: invoiceId,
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        unit_price: toMoney(item.unit_price ?? item.amount),
+        amount: toMoney(item.amount ?? item.unit_price),
+      })),
+      contact_name: input.contact_name || advertiser?.contact_name || '',
+      contact_email: input.contact_email || advertiser?.email || '',
+      bill_to: input.bill_to || advertiser?.advertiser_name || input.advertiser_name || '',
+      issue_date: toDateOnly(input.issue_date || input.due_date || now.slice(0, 10)),
+      discount,
+      tax,
+      total,
+      notes: String(input.notes || '').trim(),
+      amount_paid,
       created_at: existing?.created_at || now,
       updated_at: now,
     };

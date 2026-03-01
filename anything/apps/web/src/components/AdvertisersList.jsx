@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { appToast } from "@/lib/toast";
+import { formatUSPhoneNumber, US_PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
 export default function AdvertisersList({ onCreateNew }) {
   const [advertisers, setAdvertisers] = useState([]);
@@ -564,8 +565,15 @@ export default function AdvertisersList({ onCreateNew }) {
                   type="tel"
                   value={editModal.phone_number || ""}
                   onChange={(e) =>
-                    setEditModal({ ...editModal, phone_number: e.target.value })
+                    setEditModal({
+                      ...editModal,
+                      phone_number: formatUSPhoneNumber(e.target.value),
+                    })
                   }
+                  inputMode="tel"
+                  autoComplete="tel-national"
+                  maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                  placeholder="(123) 456-7890"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
                 />
               </div>

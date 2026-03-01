@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   Bell,
   LogOut,
+  Menu,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -58,6 +59,13 @@ import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import { checkAdAvailability } from "@/lib/adAvailabilityClient";
 import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
 import { appToast } from "@/lib/toast";
+import { can, getVisibleSectionsForRole, isInternalRole, normalizeAppRole } from "@/lib/permissions";
+import { formatPostTypeBadgeLabel, formatPostTypeLabel, normalizePostTypeValue } from "@/lib/postType";
+import {
+  formatUSPhoneNumber,
+  isCompleteUSPhoneNumber,
+  US_PHONE_INPUT_MAX_LENGTH,
+} from "@/lib/phone";
 import {
   formatDateKeyFromDate,
   formatDateTimeInAppTimeZone,
@@ -89,6 +97,7 @@ import {
   upsertInvoice,
   upsertProduct,
 } from "@/lib/localDb";
+import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
 
 const sections = [
   "Dashboard",
@@ -101,14 +110,6 @@ const sections = [
   "Billing",
   "Reconciliation",
   "Settings",
-];
-
-const advertiserSections = [
-  "Dashboard",
-  "Calendar",
-  "Submissions",
-  "Ads",
-  "Billing",
 ];
 
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
@@ -144,7 +145,6 @@ const settingsTabs = [
   { id: "team", label: "Team" },
   { id: "notifications", label: "Notifications" },
   { id: "scheduling", label: "Ad Scheduling" },
-  { id: "billing", label: "Billing" },
   { id: "system", label: "System" },
 ];
 
@@ -196,6 +196,16 @@ const blankInvoice = {
   due_date: "",
   status: "Pending",
   ad_ids: [],
+  items: [],
+  contact_name: "",
+  contact_email: "",
+  bill_to: "",
+  issue_date: "",
+  discount: "0.00",
+  tax: "0.00",
+  total: "",
+  amount_paid: "0.00",
+  notes: "",
 };
 
 const formatCurrency = (value) => {
@@ -1196,7 +1206,9 @@ const getSubmissionStatusBadgeClass = (status) => {
 };
 
 const formatSubmissionStatus = (status) =>
-  String(status || "pending").replace(/_/g, " ").toUpperCase();
+  String(status || "pending")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 
 const formatSubmissionDate = (value) => {
   if (!value) {
@@ -1942,11 +1954,19 @@ export default function AdsPage() {
   });
   const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
+  const [submissionPreviewModal, setSubmissionPreviewModal] = useState(null);
+  const [submissionReviewSource, setSubmissionReviewSource] = useState(null);
+  const [submissionDeleteModal, setSubmissionDeleteModal] = useState(null);
+  const [adDeleteModal, setAdDeleteModal] = useState(null);
+  const [invoiceDeleteModal, setInvoiceDeleteModal] = useState(null);
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const notificationsDropdownRef = useRef(null);
   const advertiserMenuRef = useRef(null);
   const productMenuRef = useRef(null);
   const invoiceMenuRef = useRef(null);
@@ -1961,6 +1981,7 @@ export default function AdsPage() {
   const [createAdFullyBookedDates, setCreateAdFullyBookedDates] = useState([]);
   const [createAdSubmitting, setCreateAdSubmitting] = useState(false);
   const [createAdSubmitMode, setCreateAdSubmitMode] = useState("");
+  const [createAdErrors, setCreateAdErrors] = useState({});
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(blankInvoice);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
@@ -2011,10 +2032,33 @@ export default function AdsPage() {
   const [whatsAppSearchTerm, setWhatsAppSearchTerm] = useState("");
   const [whatsAppSelectedMessageId, setWhatsAppSelectedMessageId] = useState(null);
 
-  const userRole = normalizeComparableText(user?.role);
+  const userRole = normalizeAppRole(user?.role);
   const isAdmin = userRole === "admin";
+  const isManager = userRole === "manager";
+  const isStaff = userRole === "staff";
   const isAdvertiser = userRole === "advertiser";
-  const allowedSections = isAdvertiser ? advertiserSections : sections;
+  const isInternalUserRole = isInternalRole(userRole);
+  const allowedSections = getVisibleSectionsForRole(userRole);
+  const canViewBilling = can(userRole, "billing:view");
+  const canEditBilling = can(userRole, "billing:edit");
+  const canViewSettings = can(userRole, "settings:view");
+  const canDeleteAds = can(userRole, "ads:delete");
+  const canEditAds = can(userRole, "ads:edit");
+  const canViewAdvertisers = can(userRole, "advertisers:view");
+  const canEditAdvertisers = can(userRole, "advertisers:edit");
+  const canViewProducts = can(userRole, "products:view");
+  const canEditProducts = can(userRole, "products:edit");
+  const canViewReconciliation = can(userRole, "reconciliation:view");
+  const canConvertSubmissions = can(userRole, "submissions:convert");
+  const canRejectSubmissions = can(userRole, "submissions:reject");
+  const canViewNotifications = can(userRole, "notifications:view");
+  const { unreadCount, markAllAsRead } = useSubmissionNotifications(canViewNotifications, {
+    onViewPending: async () => {
+      setShowNotificationsDropdown(false);
+      setActiveSection("Submissions");
+      setView("list");
+    },
+  });
 
   useEffect(() => {
     if (!settingsProfileMessage) {
@@ -2036,6 +2080,12 @@ export default function AdsPage() {
 
     appToast.error(payload);
   }, [settingsProfileMessage]);
+
+  useEffect(() => {
+    if (settingsActiveTab === "billing") {
+      setSettingsActiveTab("profile");
+    }
+  }, [settingsActiveTab]);
 
   useEffect(() => {
     if (!settingsNotificationMessage) {
@@ -2193,14 +2243,20 @@ export default function AdsPage() {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setShowProfileDropdown(false);
       }
+      if (
+        notificationsDropdownRef.current &&
+        !notificationsDropdownRef.current.contains(event.target)
+      ) {
+        setShowNotificationsDropdown(false);
+      }
     };
 
-    if (!showProfileDropdown) {
+    if (!showProfileDropdown && !showNotificationsDropdown) {
       return undefined;
     }
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [showProfileDropdown]);
+  }, [showNotificationsDropdown, showProfileDropdown]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -2430,7 +2486,7 @@ export default function AdsPage() {
   useEffect(() => {
     setSettingsProfileName(user?.name || "");
     setSettingsProfileImage(user?.image || "");
-    setSettingsProfileWhatsapp(user?.whatsapp_number || "");
+    setSettingsProfileWhatsapp(formatUSPhoneNumber(user?.whatsapp_number || ""));
     setSettingsProfileMessage(null);
   }, [user?.id, user?.name, user?.image, user?.whatsapp_number]);
 
@@ -2458,7 +2514,7 @@ export default function AdsPage() {
         user?.email ||
         "",
       phone_number:
-        notificationPreferences.phone_number || current.phone_number || "",
+        formatUSPhoneNumber(notificationPreferences.phone_number || current.phone_number || ""),
       sound_enabled:
         notificationPreferences.sound_enabled ?? current.sound_enabled ?? true,
     }));
@@ -2500,22 +2556,48 @@ export default function AdsPage() {
   );
 
   const invoicePreviewAmount = useMemo(
-    () => Number(invoice.amount || 0) || 0,
-    [invoice.amount],
+    () => Number(invoice.total || invoice.amount || 0) || 0,
+    [invoice.amount, invoice.total],
   );
 
   const invoicePreviewLinkedAds = useMemo(
     () =>
-      (Array.isArray(invoice.ad_ids) ? invoice.ad_ids : [])
-        .map((adId) => ads.find((item) => item.id === adId))
+      (
+        Array.isArray(invoice.items) && invoice.items.length > 0
+          ? invoice.items.map((item) => item.ad_id).filter(Boolean)
+          : Array.isArray(invoice.ad_ids)
+            ? invoice.ad_ids
+            : []
+      )
+        .map((adId) => ads.find((item) => String(item.id) === String(adId)))
         .filter(Boolean),
-    [ads, invoice.ad_ids],
+    [ads, invoice.ad_ids, invoice.items],
   );
 
   const invoicePreviewLineItem = useMemo(() => {
+    const invoiceItems = Array.isArray(invoice.items) ? invoice.items : [];
+    if (invoiceItems.length === 1) {
+      return {
+        title: invoiceItems[0].description || "Advertising services",
+        detail: invoicePreviewLinkedAds[0]?.placement || "",
+        amount: Number(invoiceItems[0].amount || invoicePreviewAmount) || 0,
+      };
+    }
+
+    if (invoiceItems.length > 1) {
+      return {
+        title: `${invoiceItems.length} line items`,
+        detail: invoiceItems.map((item) => item.description).join(" • "),
+        amount: invoicePreviewAmount,
+      };
+    }
+
     if (invoicePreviewLinkedAds.length === 1) {
       return {
-        title: invoicePreviewLinkedAds[0].ad_name || "Advertising services",
+        title:
+          invoicePreviewLinkedAds[0].product_name
+            ? `${invoicePreviewLinkedAds[0].product_name}${invoicePreviewLinkedAds[0].ad_name ? ` | Ad: ${invoicePreviewLinkedAds[0].ad_name}` : ""}`
+            : invoicePreviewLinkedAds[0].ad_name || "Advertising services",
         detail: invoicePreviewLinkedAds[0].placement || "",
         amount: invoicePreviewAmount,
       };
@@ -2534,7 +2616,12 @@ export default function AdsPage() {
       detail: "No ads selected yet",
       amount: invoicePreviewAmount,
     };
-  }, [invoicePreviewAmount, invoicePreviewLinkedAds, selectedInvoiceAdvertiser?.advertiser_name]);
+  }, [
+    invoice.items,
+    invoicePreviewAmount,
+    invoicePreviewLinkedAds,
+    selectedInvoiceAdvertiser?.advertiser_name,
+  ]);
 
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
@@ -2590,15 +2677,26 @@ export default function AdsPage() {
     const issueDate = formatInvoiceListDate(
       invoicePreviewModal.due_date || invoicePreviewModal.created_at,
     );
-    const linkedAds = (Array.isArray(invoicePreviewModal.ad_ids) ? invoicePreviewModal.ad_ids : [])
-      .map((adId) => ads.find((item) => item.id === adId))
+    const invoiceItems = Array.isArray(invoicePreviewModal.items) ? invoicePreviewModal.items : [];
+    const linkedAds = (
+      invoiceItems.length > 0
+        ? invoiceItems.map((item) => item.ad_id).filter(Boolean)
+        : Array.isArray(invoicePreviewModal.ad_ids)
+          ? invoicePreviewModal.ad_ids
+          : []
+    )
+      .map((adId) => ads.find((item) => String(item.id) === String(adId)))
       .filter(Boolean);
-    const total = Number(invoicePreviewModal.amount || 0) || 0;
+    const total = Number(invoicePreviewModal.total || invoicePreviewModal.amount || 0) || 0;
     const primaryDescription =
-      linkedAds.length === 1
-        ? linkedAds[0].ad_name || "Advertising services"
+      invoiceItems.length === 1
+        ? invoiceItems[0].description || "Advertising services"
+        : linkedAds.length === 1
+          ? linkedAds[0].product_name
+            ? `${linkedAds[0].product_name}${linkedAds[0].ad_name ? ` | Ad: ${linkedAds[0].ad_name}` : ""}`
+            : linkedAds[0].ad_name || "Advertising services"
         : linkedAds.length > 1
-          ? `${linkedAds.length} linked ads`
+          ? `${Math.max(invoiceItems.length, linkedAds.length)} linked ads`
           : advertiser?.advertiser_name || invoicePreviewModal.advertiser_name || "Advertising services";
     const attentionLine =
       invoicePreviewModal.contact_name ||
@@ -2615,6 +2713,7 @@ export default function AdsPage() {
       invoiceNumber,
       issueDate,
       linkedAds,
+      items: invoiceItems,
       total,
       primaryDescription,
       attentionLine,
@@ -3608,15 +3707,21 @@ export default function AdsPage() {
   }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
 
   const invoiceSummary = useMemo(() => {
-    return filteredInvoices.reduce(
+    return invoices.reduce(
       (acc, item) => {
-        const amount = Number(item.amount) || 0;
+        const total = Number(item.total ?? item.amount ?? 0) || 0;
+        const amountPaid = Number(item.amount_paid ?? 0) || 0;
+        const outstanding = Math.max(total - amountPaid, 0);
         const status = normalizeInvoiceStatus(item.status);
         if (status === "Paid") {
-          acc.totalPaid += amount;
+          acc.totalPaid += amountPaid || total;
+        }
+        if (status === "Partial") {
+          acc.totalPaid += amountPaid;
+          acc.totalOutstanding += outstanding;
         }
         if (status === "Pending" || status === "Overdue") {
-          acc.totalOutstanding += amount;
+          acc.totalOutstanding += outstanding || total;
         }
         if (status === "Overdue") {
           acc.overdueCount += 1;
@@ -3625,7 +3730,7 @@ export default function AdsPage() {
       },
       { totalOutstanding: 0, totalPaid: 0, overdueCount: 0 },
     );
-  }, [filteredInvoices]);
+  }, [invoices]);
 
   const reconciliation = useMemo(() => getReconciliationReport(), [db]);
 
@@ -3698,13 +3803,24 @@ export default function AdsPage() {
       return;
     }
 
+    if (
+      settingsProfileWhatsapp &&
+      !isCompleteUSPhoneNumber(settingsProfileWhatsapp)
+    ) {
+      setSettingsProfileMessage({
+        type: "error",
+        text: "WhatsApp number must be a complete US number.",
+      });
+      return;
+    }
+
     setSettingsProfileSaving(true);
     setSettingsProfileMessage(null);
     try {
       const updated = await updateCurrentUser({
         name: settingsProfileName.trim() || user.name || "User",
         image: settingsProfileImage || "",
-        whatsapp_number: settingsProfileWhatsapp.trim(),
+        whatsapp_number: formatUSPhoneNumber(settingsProfileWhatsapp),
       });
       if (!updated) {
         throw new Error("Failed to update profile");
@@ -3792,6 +3908,17 @@ export default function AdsPage() {
   };
 
   const handleSettingsSaveNotifications = async () => {
+    if (
+      settingsNotification.phone_number &&
+      !isCompleteUSPhoneNumber(settingsNotification.phone_number)
+    ) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text: "Phone number must be a complete US number.",
+      });
+      return;
+    }
+
     setSettingsNotificationSaving(true);
     setSettingsNotificationMessage(null);
     try {
@@ -4936,8 +5063,8 @@ export default function AdsPage() {
     setAdvertiserEditModal({
       ...blankAdvertiser,
       ...item,
-      phone_number: item.phone_number || item.phone || "",
-      phone: item.phone || item.phone_number || "",
+      phone_number: formatUSPhoneNumber(item.phone_number || item.phone || ""),
+      phone: formatUSPhoneNumber(item.phone || item.phone_number || ""),
       status: item.status || "active",
     });
     setOpenAdvertiserMenuId(null);
@@ -4955,7 +5082,7 @@ export default function AdsPage() {
       advertiser: {
         ...item,
         contact_name: item.contact_name || item.business_name || "\u2014",
-        phone_number: item.phone_number || item.phone || "",
+        phone_number: formatUSPhoneNumber(item.phone_number || item.phone || ""),
         total_spend: Number(item.total_spend ?? item.ad_spend ?? 0) || 0,
         status: item.status || "active",
       },
@@ -4977,6 +5104,14 @@ export default function AdsPage() {
       return;
     }
 
+    if (
+      advertiserEditModal.phone_number &&
+      !isCompleteUSPhoneNumber(advertiserEditModal.phone_number)
+    ) {
+      appToast.error({ title: "Phone number must be a complete US number." });
+      return;
+    }
+
     setAdvertiserActionLoading(true);
     try {
       if (!String(advertiserEditModal.advertiser_name || "").trim()) {
@@ -4985,8 +5120,9 @@ export default function AdsPage() {
 
       await upsertAdvertiser({
         ...advertiserEditModal,
-        phone:
-          String(advertiserEditModal.phone_number || advertiserEditModal.phone || "").trim(),
+        phone: formatUSPhoneNumber(
+          advertiserEditModal.phone_number || advertiserEditModal.phone || "",
+        ),
       });
       setDb(readDb());
       appToast.success({ title: "Advertiser saved." });
@@ -5033,11 +5169,17 @@ export default function AdsPage() {
       if (!String(advertiserCreateForm.contact_name || "").trim()) {
         throw new Error("Contact name required");
       }
+      if (
+        advertiserCreateForm.phone_number &&
+        !isCompleteUSPhoneNumber(advertiserCreateForm.phone_number)
+      ) {
+        throw new Error("Phone number must be a complete US number");
+      }
 
       const savedAdvertiser = await upsertAdvertiser({
         ...advertiserCreateForm,
-        phone: String(advertiserCreateForm.phone_number || "").trim(),
-        phone_number: String(advertiserCreateForm.phone_number || "").trim(),
+        phone: formatUSPhoneNumber(advertiserCreateForm.phone_number || ""),
+        phone_number: formatUSPhoneNumber(advertiserCreateForm.phone_number || ""),
       });
       setDb(readDb());
       appToast.success({ title: "Advertiser saved." });
@@ -5202,7 +5344,7 @@ export default function AdsPage() {
     );
   }
 
-  if (!isAdmin && !isAdvertiser) {
+  if (!["admin", "manager", "staff", "advertiser"].includes(userRole)) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
         <div className="text-center max-w-md">
@@ -5225,14 +5367,86 @@ export default function AdsPage() {
 
   return (
     <div className="flex h-screen bg-white">
-      <Sidebar activeItem={activeSection} onNavigate={handleNavigate} userRole={userRole} />
+      <Sidebar
+        activeItem={activeSection}
+        onNavigate={handleNavigate}
+        userRole={userRole}
+        mobileOpen={mobileSidebarOpen}
+        onClose={() => setMobileSidebarOpen(false)}
+      />
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {view === "list" && (
-          <header className="h-16 border-b border-gray-200 flex items-center justify-end px-8 gap-4 flex-shrink-0 bg-white">
-            <button className="p-2 hover:bg-gray-100 rounded-lg" type="button">
-              <Bell size={20} className="text-gray-600" />
-            </button>
+          <header className="h-16 border-b border-gray-200 flex items-center justify-between px-4 md:px-8 gap-4 flex-shrink-0 bg-white">
+            <div className="flex items-center gap-3">
+              <button
+                className="inline-flex items-center justify-center p-2 hover:bg-gray-100 rounded-lg md:hidden"
+                type="button"
+                onClick={() => setMobileSidebarOpen(true)}
+              >
+                <Menu size={20} className="text-gray-600" />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-4">
+            <div className="relative" ref={notificationsDropdownRef}>
+              <button
+                className="relative p-2 hover:bg-gray-100 rounded-lg"
+                type="button"
+                onClick={() => setShowNotificationsDropdown((current) => !current)}
+              >
+                <Bell size={20} className="text-gray-600" />
+                {unreadCount > 0 ? (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-[#ED1D26] px-1 text-[10px] font-semibold text-white flex items-center justify-center">
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </span>
+                ) : null}
+              </button>
+
+              {showNotificationsDropdown ? (
+                <div className="absolute right-0 mt-2 w-[320px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Notifications</p>
+                      <p className="text-xs text-gray-500">Recent app activity</p>
+                    </div>
+                    {unreadCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => void markAllAsRead()}
+                        className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                      >
+                        Mark all read
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {unreadCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await markAllAsRead();
+                        setShowNotificationsDropdown(false);
+                        setActiveSection("Submissions");
+                        setView("list");
+                      }}
+                      className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
+                    >
+                      <p className="text-sm font-semibold text-gray-900">
+                        New ad submission received
+                      </p>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Click to review pending submissions.
+                      </p>
+                    </button>
+                  ) : (
+                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                      No new notifications
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
 
             <div className="relative" ref={dropdownRef}>
               <button
@@ -5283,6 +5497,7 @@ export default function AdsPage() {
                   </a>
                 </div>
               )}
+            </div>
             </div>
           </header>
         )}
@@ -6759,10 +6974,13 @@ export default function AdsPage() {
                             onChange={(event) =>
                               setAdvertiserCreateForm((current) => ({
                                 ...current,
-                                phone_number: event.target.value,
+                                phone_number: formatUSPhoneNumber(event.target.value),
                               }))
                             }
-                            placeholder="555-0123"
+                            inputMode="tel"
+                            autoComplete="tel-national"
+                            maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                            placeholder="(123) 456-7890"
                             className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
                           />
                         </div>
@@ -7192,10 +7410,13 @@ export default function AdsPage() {
                           onChange={(event) =>
                             setAdvertiserCreateForm({
                               ...advertiserCreateForm,
-                              phone_number: event.target.value,
+                              phone_number: formatUSPhoneNumber(event.target.value),
                             })
                           }
-                          placeholder="555-0123"
+                          inputMode="tel"
+                          autoComplete="tel-national"
+                          maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                          placeholder="(123) 456-7890"
                           className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
                         />
                       </div>
@@ -7620,10 +7841,14 @@ export default function AdsPage() {
                           onChange={(event) =>
                             setAdvertiserEditModal({
                               ...advertiserEditModal,
-                              phone_number: event.target.value,
-                              phone: event.target.value,
+                              phone_number: formatUSPhoneNumber(event.target.value),
+                              phone: formatUSPhoneNumber(event.target.value),
                             })
                           }
+                          inputMode="tel"
+                          autoComplete="tel-national"
+                          maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                          placeholder="(123) 456-7890"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
                         />
                       </div>
@@ -9032,12 +9257,17 @@ export default function AdsPage() {
                         id="settings-whatsapp-number"
                         type="tel"
                         value={settingsProfileWhatsapp}
-                        onChange={(event) => setSettingsProfileWhatsapp(event.target.value)}
-                        placeholder="+1234567890"
+                        onChange={(event) =>
+                          setSettingsProfileWhatsapp(formatUSPhoneNumber(event.target.value))
+                        }
+                        inputMode="tel"
+                        autoComplete="tel-national"
+                        maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                        placeholder="(123) 456-7890"
                         className="w-full max-w-md px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
                       />
                       <p className="text-xs text-gray-500 mt-2">
-                        Use international format (e.g. +1234567890) for reminders.
+                        Use standard US format for reminders.
                       </p>
                     </div>
 
@@ -9532,14 +9762,17 @@ export default function AdsPage() {
                           </label>
                           <input
                             type="tel"
-                            placeholder="+1 (555) 123-4567"
+                            placeholder="(123) 456-7890"
                             value={settingsNotification.phone_number}
                             onChange={(event) =>
                               setSettingsNotification((current) => ({
                                 ...current,
-                                phone_number: event.target.value,
+                                phone_number: formatUSPhoneNumber(event.target.value),
                               }))
                             }
+                            inputMode="tel"
+                            autoComplete="tel-national"
+                            maxLength={US_PHONE_INPUT_MAX_LENGTH}
                             className="w-full max-w-md px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
