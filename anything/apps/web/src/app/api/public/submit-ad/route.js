@@ -1,5 +1,6 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { sendEmail } from "../../utils/send-email.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
@@ -70,7 +71,7 @@ const toSafeHttpUrl = (value) => {
 export async function POST(request) {
   try {
     const requesterIp = clientIpFromHeaders(request.headers) || "unknown";
-    const rateLimitKey = `${requesterIp}:${new Date().toISOString().slice(0, 10)}`;
+    const rateLimitKey = `${requesterIp}:${getTodayInAppTimeZone()}`;
     if (isRateLimited(rateLimitKey)) {
       return Response.json(
         { error: "Too many submissions. Please try again later." },

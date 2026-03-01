@@ -9,15 +9,16 @@
  */
 
 import { ensureDb, readDb, writeDb } from '@/lib/localDb';
+import { formatDateKeyFromDate, getTodayDateInAppTimeZone } from '@/lib/timezone';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-const today = new Date();
+const today = getTodayDateInAppTimeZone();
 const isoNow = () => new Date().toISOString();
 const daysFromNow = (n) => {
   const d = new Date(today);
   d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
+  return formatDateKeyFromDate(d);
 };
 const daysAgo = (n) => daysFromNow(-n);
 

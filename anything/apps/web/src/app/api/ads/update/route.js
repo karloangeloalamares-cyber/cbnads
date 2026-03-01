@@ -1,6 +1,7 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
+import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
@@ -246,6 +247,7 @@ export async function PUT(request) {
     if (ad_text !== undefined) patch.ad_text = ad_text || null;
     if (post_time !== undefined) patch.post_time = post_time || null;
     if (reminder_minutes !== undefined) patch.reminder_minutes = reminder_minutes;
+    if (timeFieldsUpdated) patch.scheduled_timezone = APP_TIME_ZONE;
 
     if (Object.keys(patch).length <= 1) {
       return Response.json({ error: "No fields to update" }, { status: 400 });

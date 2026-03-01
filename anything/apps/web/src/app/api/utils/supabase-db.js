@@ -1,4 +1,5 @@
 import { adminTableName, getSupabaseAdmin } from "../../../lib/supabaseAdmin.js";
+import { formatDateKeyFromDate, normalizeDateKey } from "../../../lib/timezone.js";
 
 export const db = () => getSupabaseAdmin();
 
@@ -10,17 +11,7 @@ export const toNumber = (value, fallback = 0) => {
 };
 
 export const dateOnly = (value) => {
-  if (!value) return "";
-  if (value instanceof Date && !Number.isNaN(value.valueOf())) {
-    return value.toISOString().slice(0, 10);
-  }
-  const asText = String(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(asText)) {
-    return asText;
-  }
-  const parsed = new Date(asText);
-  if (Number.isNaN(parsed.valueOf())) return "";
-  return parsed.toISOString().slice(0, 10);
+  return normalizeDateKey(value);
 };
 
 export const normalizePostType = (value) => {
@@ -55,7 +46,7 @@ export const adDatesForDayCheck = (ad) => {
     const dates = [];
     const cursor = new Date(startDate);
     while (cursor <= endDate) {
-      dates.push(cursor.toISOString().slice(0, 10));
+      dates.push(formatDateKeyFromDate(cursor));
       cursor.setDate(cursor.getDate() + 1);
     }
     return dates;

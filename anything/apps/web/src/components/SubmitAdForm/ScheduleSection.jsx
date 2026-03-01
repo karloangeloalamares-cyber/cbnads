@@ -2,12 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { fetchMonthAvailability } from "@/lib/adAvailabilityClient";
 import { appToast } from "@/lib/toast";
+import {
+  formatDateKeyFromDate,
+  getTodayDateInAppTimeZone,
+  getTodayInAppTimeZone,
+} from "@/lib/timezone";
 
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const getMinDate = () => {
-  const today = new Date();
-  return today.toISOString().slice(0, 10);
+  return getTodayInAppTimeZone();
 };
 
 const parseDate = (value) => {
@@ -73,7 +77,9 @@ function AvailabilityDateField({
 }) {
   const fieldRef = useRef(null);
   const [open, setOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(() => parseDate(value) || new Date());
+  const [visibleMonth, setVisibleMonth] = useState(
+    () => parseDate(value) || getTodayDateInAppTimeZone(),
+  );
 
   useEffect(() => {
     const selectedDate = parseDate(value);
@@ -190,7 +196,7 @@ function AvailabilityDateField({
                 return <div key={`empty-${index}`} className="h-9" />;
               }
 
-              const dateKey = day.toISOString().slice(0, 10);
+              const dateKey = formatDateKeyFromDate(day);
               const blockedInfo = blockedDates?.[dateKey];
               const isBlocked = Boolean(blockedInfo?.is_full || blockedInfo?.blocked);
               const isPast = dateKey < minDateValue;
@@ -302,7 +308,9 @@ export function ScheduleSection({
     loadedMonthsRef.current.clear();
     loadingMonthsRef.current.clear();
     setMonthAvailability({});
-    void loadMonthAvailability(parseDate(formData.post_date_from) || new Date());
+    void loadMonthAvailability(
+      parseDate(formData.post_date_from) || getTodayDateInAppTimeZone(),
+    );
   }, [excludeAdId, formData.post_date_from, loadMonthAvailability]);
 
   useEffect(() => {
@@ -346,7 +354,9 @@ export function ScheduleSection({
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-900 mb-4">Schedule</h3>
-      <p className="text-xs text-gray-500 mb-4">All times are in Eastern Time (ET)</p>
+      <p className="text-xs text-gray-500 mb-4">
+        All times are in New York time (ET)
+      </p>
 
       {postType === "One-Time Post" && (
         <>

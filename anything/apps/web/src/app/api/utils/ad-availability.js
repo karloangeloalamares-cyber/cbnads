@@ -5,6 +5,7 @@ import {
   table,
   toNumber,
 } from "./supabase-db.js";
+import { formatDateKeyFromDate } from "../../../lib/timezone.js";
 
 const normalizeTime = (value) => {
   if (!value) return "";
@@ -41,7 +42,7 @@ export const expandDateRange = (from, to) => {
   }
 
   while (cursor <= endDate) {
-    dates.push(cursor.toISOString().slice(0, 10));
+    dates.push(formatDateKeyFromDate(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
 

@@ -1,3 +1,5 @@
+import { formatDateKeyFromDate } from "@/lib/timezone";
+
 const normalizeTime = (value) => {
   if (!value) return "";
   const text = String(value).trim();
@@ -30,7 +32,7 @@ export const getDatesInRange = (from, to) => {
   }
 
   while (current <= end) {
-    dates.push(current.toISOString().slice(0, 10));
+    dates.push(formatDateKeyFromDate(current));
     current.setDate(current.getDate() + 1);
   }
 
@@ -180,7 +182,7 @@ export const fetchMonthAvailability = async ({ monthDate, excludeAdId }) => {
   const cursor = new Date(start);
 
   while (cursor <= end) {
-    dates.push(cursor.toISOString().slice(0, 10));
+    dates.push(formatDateKeyFromDate(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
 

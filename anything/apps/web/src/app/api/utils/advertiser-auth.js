@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { db, table } from "./supabase-db.js";
 import { sendEmail } from "./send-email.js";
+import { APP_TIME_ZONE } from "../../../lib/timezone.js";
 
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24;
 const TOKEN_TYPE = "advertiser_verify";
@@ -255,6 +256,7 @@ export const upsertAdvertiserProfile = async ({
         advertiser_id: advertiserId || null,
         full_name: String(fullName || "").trim() || normalizeEmail(email),
         email: normalizeEmail(email),
+        timezone: APP_TIME_ZONE,
         onboarding_complete: Boolean(onboardingComplete),
         updated_at: new Date().toISOString(),
       },

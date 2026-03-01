@@ -1,5 +1,6 @@
 import { withNamespace } from '@/lib/appNamespace';
 import { getSupabaseClient, hasSupabaseConfig, tableName } from '@/lib/supabase';
+import { formatDateKeyFromDate, getTodayInAppTimeZone, normalizeDateKey } from '@/lib/timezone';
 
 const DB_KEY = withNamespace('local.db.v1');
 const SESSION_KEY = withNamespace('local.session.v1');
@@ -76,18 +77,10 @@ const toDateOnly = (value) => {
   if (!value) {
     return '';
   }
-  const text = String(value).trim();
-  if (!text) {
-    return '';
+  if (value instanceof Date) {
+    return getTodayInAppTimeZone(value);
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return text;
-  }
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.valueOf())) {
-    return '';
-  }
-  return parsed.toISOString().slice(0, 10);
+  return normalizeDateKey(value);
 };
 
 const toDateColumn = (value) => {
@@ -529,7 +522,7 @@ const refreshDerivedFields = (inputDb) => {
       ...advertiser,
       ad_spend: spend,
       total_spend: spend,
-      next_ad_date: nextDate ? nextDate.toISOString().slice(0, 10) : advertiser.next_ad_date || '',
+      next_ad_date: nextDate ? formatDateKeyFromDate(nextDate) : advertiser.next_ad_date || '',
     };
   });
 

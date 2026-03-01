@@ -3,6 +3,11 @@ import {
   checkAdAvailability,
   normalizeCustomDateEntries,
 } from "@/lib/adAvailabilityClient";
+import {
+  getTodayInAppTimeZone,
+  isBeforeTodayInAppTimeZone,
+  isPastDateTimeInAppTimeZone,
+} from "@/lib/timezone";
 
 const initialFormData = {
   advertiser_name: "",
@@ -57,10 +62,7 @@ export function useSubmitAdForm() {
         const timeVal = field === "post_time" ? value : prev.post_time;
 
         if (dateVal && timeVal) {
-          const now = new Date();
-          const selectedDateTime = new Date(`${dateVal}T${timeVal}`);
-
-          if (selectedDateTime < now) {
+          if (isPastDateTimeInAppTimeZone(dateVal, timeVal)) {
             setPastTimeError("This date and time is in the past. Please choose a future time.");
           } else {
             setPastTimeError(null);
@@ -89,11 +91,7 @@ export function useSubmitAdForm() {
   const addCustomDate = () => {
     if (!customDate) return;
 
-    const selectedDate = new Date(customDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (selectedDate < today) {
+    if (isBeforeTodayInAppTimeZone(customDate)) {
       setError("Cannot select past dates");
       return;
     }
@@ -197,11 +195,8 @@ export function useSubmitAdForm() {
   };
 
   const validateDateTime = () => {
-    const now = new Date();
-
     if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
-      const selectedDateTime = new Date(`${formData.post_date_from}T${formData.post_time}`);
-      if (selectedDateTime < now) {
+      if (isPastDateTimeInAppTimeZone(formData.post_date_from, formData.post_time)) {
         setError("Cannot select a past date and time");
         setPastTimeError("This date and time is in the past. Please choose a future time.");
         return false;
@@ -209,20 +204,17 @@ export function useSubmitAdForm() {
     }
 
     if (formData.post_type === "Daily Run") {
-      const startDate = new Date(formData.post_date_from);
-      startDate.setHours(0, 0, 0, 0);
+      const startDate = String(formData.post_date_from || "").trim();
+      const today = getTodayInAppTimeZone();
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      if (startDate < today) {
+      if (startDate && today && startDate < today) {
         setError("Start date cannot be in the past");
         setPastTimeError(null);
         return false;
       }
 
       if (formData.post_date_to) {
-        const endDate = new Date(formData.post_date_to);
+        const endDate = String(formData.post_date_to || "").trim();
         if (endDate < startDate) {
           setError("End date must be after start date");
           setPastTimeError(null);

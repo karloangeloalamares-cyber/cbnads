@@ -57,6 +57,12 @@ import { checkAdAvailability } from "@/lib/adAvailabilityClient";
 import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
 import { appToast } from "@/lib/toast";
 import {
+  formatDateKeyFromDate,
+  formatDateTimeInAppTimeZone,
+  getTodayDateInAppTimeZone,
+  getTodayInAppTimeZone,
+} from "@/lib/timezone";
+import {
   approvePendingAd,
   createId,
   deleteAd,
@@ -284,11 +290,7 @@ const formatDateTime = (value) => {
   if (!value) {
     return "N/A";
   }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) {
-    return "N/A";
-  }
-  return parsed.toLocaleString("en-US", {
+  return formatDateTimeInAppTimeZone(value, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -584,9 +586,7 @@ function AdsScheduleCell({ ad }) {
   );
 
   const today = useMemo(() => {
-    const next = new Date();
-    next.setHours(0, 0, 0, 0);
-    return next;
+    return getTodayDateInAppTimeZone();
   }, []);
 
   const nextCustomDate = useMemo(() => {
@@ -929,8 +929,7 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
       .map((item) => String(item).slice(0, 10))
       .filter(Boolean),
   );
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = getTodayDateInAppTimeZone();
   const media = parseAdMedia(ad.media);
 
   return (
@@ -1254,10 +1253,7 @@ function StatCard({ label, value }) {
   );
 }
 
-const toDateKey = (date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-    date.getDate(),
-  ).padStart(2, "0")}`;
+const toDateKey = (date) => formatDateKeyFromDate(date);
 
 const parseCalendarDate = (value) => {
   if (!value) {
@@ -1459,7 +1455,7 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
 
           const dayAds = getAdsForDate(ads, dayInfo.date);
           const capacity = getCapacityStatus(dayAds.length, maxAdsPerDay);
-          const today = toDateKey(dayInfo.date) === toDateKey(new Date());
+          const today = toDateKey(dayInfo.date) === getTodayInAppTimeZone();
 
           return (
             <div
@@ -1528,7 +1524,7 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
       <div className="grid grid-cols-7">
         {weekDays.map((date) => {
           const dayAds = getAdsForDate(ads, date);
-          const today = toDateKey(date) === toDateKey(new Date());
+          const today = toDateKey(date) === getTodayInAppTimeZone();
 
           return (
             <div
@@ -1887,7 +1883,9 @@ export default function AdsPage() {
   const [adsPreviewAd, setAdsPreviewAd] = useState(null);
   const [calendarSearch, setCalendarSearch] = useState("");
   const [calendarMode, setCalendarMode] = useState("month");
-  const [calendarCurrentDate, setCalendarCurrentDate] = useState(() => new Date());
+  const [calendarCurrentDate, setCalendarCurrentDate] = useState(() =>
+    getTodayDateInAppTimeZone(),
+  );
   const [calendarShowFilters, setCalendarShowFilters] = useState(false);
   const [calendarSelectedAdvertiser, setCalendarSelectedAdvertiser] = useState("");
   const [calendarSelectedPlacement, setCalendarSelectedPlacement] = useState("");
@@ -2486,7 +2484,7 @@ export default function AdsPage() {
   }, [ads, invoice.advertiser_id]);
 
   const dashboardStats = useMemo(() => {
-    const now = new Date();
+    const now = getTodayDateInAppTimeZone();
     const paidAds = ads.filter((item) => item.payment === "Paid");
     const paidRevenue = paidAds.reduce(
       (sum, item) => sum + (Number(item.price) || 0),
@@ -2528,8 +2526,7 @@ export default function AdsPage() {
   }, [ads, advertisers.length, invoices, pending]);
 
   const upcomingAds = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayDateInAppTimeZone();
     return [...ads]
       .filter((item) => {
         if (!item.post_date) {
@@ -2688,8 +2685,8 @@ export default function AdsPage() {
   ]);
 
   const calendarUpcomingAds = useMemo(() => {
-    const now = new Date();
-    const sevenDaysFromNow = new Date();
+    const now = getTodayDateInAppTimeZone();
+    const sevenDaysFromNow = new Date(now);
     sevenDaysFromNow.setDate(now.getDate() + 7);
     return calendarFilteredAds
       .filter((item) => item.date >= now && item.date <= sevenDaysFromNow)
@@ -2710,7 +2707,7 @@ export default function AdsPage() {
   };
 
   const goToCalendarToday = () => {
-    setCalendarCurrentDate(new Date());
+    setCalendarCurrentDate(getTodayDateInAppTimeZone());
   };
 
   const handleCalendarAdClick = (selectedAd) => {
@@ -2755,7 +2752,7 @@ export default function AdsPage() {
       products.map((item) => [item.id, item.placement || ""]),
     );
 
-    const todayKey = toDateKey(new Date());
+    const todayKey = getTodayInAppTimeZone();
 
     return ads.map((item) => {
       const customDates = toStringArray(item.custom_dates)
@@ -2831,8 +2828,7 @@ export default function AdsPage() {
 
   const filteredAds = useMemo(() => {
     const query = String(adsFilters.search || "").toLowerCase().trim();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = getTodayDateInAppTimeZone();
     const weekStart = getWeekStart(today);
     weekStart.setHours(0, 0, 0, 0);
     const weekEnd = new Date(weekStart);
@@ -2912,7 +2908,7 @@ export default function AdsPage() {
 
   const sortedAds = useMemo(() => {
     if (!adsSortConfig.key) {
-      const todayKey = toDateKey(new Date());
+      const todayKey = getTodayInAppTimeZone();
 
       return [...filteredAds].sort((left, right) => {
         const leftScheduleDate = parseCalendarDate(left.schedule);
@@ -3036,7 +3032,7 @@ export default function AdsPage() {
   }, [adsPreviewAd?.id, invoices]);
 
   const todayAds = useMemo(() => {
-    const todayText = new Date().toISOString().slice(0, 10);
+    const todayText = getTodayInAppTimeZone();
     return upcomingAds.filter(
       (item) => String(item.post_date || "").slice(0, 10) === todayText,
     );
@@ -3056,13 +3052,12 @@ export default function AdsPage() {
       return [];
     }
 
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+    const start = getTodayDateInAppTimeZone();
     const dayMap = new Map();
     for (let offset = 0; offset < 7; offset += 1) {
       const date = new Date(start);
       date.setDate(start.getDate() + offset);
-      const key = date.toISOString().slice(0, 10);
+      const key = toDateKey(date);
       dayMap.set(key, {
         date: key,
         count: 0,
@@ -3133,7 +3128,7 @@ export default function AdsPage() {
 
   const revenueTrend = useMemo(() => {
     const points = [];
-    const now = new Date();
+    const now = getTodayDateInAppTimeZone();
 
     for (let offset = 5; offset >= 0; offset -= 1) {
       const monthDate = new Date(now.getFullYear(), now.getMonth() - offset, 1);

@@ -6,6 +6,7 @@ import {
   requireAdminOrAdvertiser,
   resolveAdvertiserScope,
 } from "../../utils/auth-check.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 const adPrimaryDate = (ad) => dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
 
@@ -177,7 +178,7 @@ export async function GET(request) {
     return new Response(csvContent, {
       headers: {
         "Content-Type": "text/csv",
-        "Content-Disposition": `attachment; filename="ads-export-${new Date().toISOString().split("T")[0]}.csv"`,
+        "Content-Disposition": `attachment; filename="ads-export-${getTodayInAppTimeZone()}.csv"`,
       },
     });
   } catch (error) {

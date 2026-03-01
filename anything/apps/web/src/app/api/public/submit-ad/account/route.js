@@ -9,6 +9,7 @@ import {
   updatePendingAdAccountEmail,
   upsertAdvertiserProfile,
 } from "../../../utils/advertiser-auth.js";
+import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 8;
@@ -82,7 +83,7 @@ export async function POST(request) {
     const password = String(body.password || "");
     const confirmPassword = String(body.confirmPassword || "");
 
-    const rateLimitKey = `${requesterIp}:${normalizedEmail}:${new Date().toISOString().slice(0, 10)}`;
+    const rateLimitKey = `${requesterIp}:${normalizedEmail}:${getTodayInAppTimeZone()}`;
     if (isRateLimited(rateLimitKey)) {
       return Response.json(
         { error: "Too many account setup attempts. Please try again later." },

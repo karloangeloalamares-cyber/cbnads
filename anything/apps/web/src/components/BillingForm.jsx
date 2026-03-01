@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Globe, Calendar, ChevronLeft, Plus, Trash2 } from "lucide-react";
 import { appToast } from "@/lib/toast";
+import { getTodayInAppTimeZone } from "@/lib/timezone";
 
 export default function BillingForm({
   adData,
@@ -21,7 +22,7 @@ export default function BillingForm({
     contactName: "",
     contactEmail: "",
     billTo: "",
-    issueDate: new Date().toISOString().split("T")[0],
+    issueDate: getTodayInAppTimeZone(),
     status: "Paid",
     notes: "",
     discount: "0",

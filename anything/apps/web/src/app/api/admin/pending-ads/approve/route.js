@@ -1,6 +1,7 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
+import { APP_TIME_ZONE } from "../../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
@@ -206,6 +207,7 @@ export async function POST(request) {
         post_date_to: ad.post_date_to || null,
         custom_dates: Array.isArray(ad.custom_dates) ? ad.custom_dates : [],
         post_time: ad.post_time || null,
+        scheduled_timezone: APP_TIME_ZONE,
         reminder_minutes: ad.reminder_minutes || 15,
         ad_text: ad.ad_text || null,
         media: Array.isArray(ad.media) ? ad.media : [],

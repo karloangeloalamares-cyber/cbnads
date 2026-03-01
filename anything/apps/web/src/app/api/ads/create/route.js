@@ -1,6 +1,7 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
+import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
@@ -189,6 +190,7 @@ export async function POST(request) {
         media: Array.isArray(media) ? media : [],
         ad_text: ad_text || null,
         post_time: post_time || null,
+        scheduled_timezone: APP_TIME_ZONE,
         reminder_minutes: reminder_minutes || 15,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
