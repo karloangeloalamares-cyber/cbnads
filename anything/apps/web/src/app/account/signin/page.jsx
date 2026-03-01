@@ -212,81 +212,123 @@ export default function SignInPage() {
             <p className="text-gray-600 mt-2">Welcome back! Please sign in to continue.</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
-                placeholder="you@example.com"
-              />
+          {error && error.includes("couldn't find an active account") ? (
+            <div className="space-y-6">
+              <div className="bg-amber-50 border-l-4 border-amber-400 p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-amber-400" xmlns="http://www.000webhost.com/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-amber-800">Account Not Found</h3>
+                    <div className="mt-2 text-sm text-amber-700">
+                      <p>{error}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = "/submit-ad";
+                }}
+                className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-4 rounded-lg transition"
+              >
+                Apply as an Advertiser
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError("");
+                  setEmail("");
+                  setPassword("");
+                }}
+                className="w-full bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 px-4 rounded-lg border border-gray-300 transition"
+              >
+                Sign in with a different account
+              </button>
             </div>
+          ) : (
+            <>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+                    Email Address
+                  </label>
+                  <input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
+                    placeholder="you@example.com"
+                  />
+                </div>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
-                placeholder="********"
-              />
-            </div>
+                <div>
+                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+                    Password
+                  </label>
+                  <input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
+                    placeholder="********"
+                  />
+                </div>
 
-            <button
-              type="submit"
-              disabled={loading || googleLoading}
-              className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Signing in..." : "Sign In"}
-            </button>
-          </form>
+                <button
+                  type="submit"
+                  disabled={loading || googleLoading}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? "Signing in..." : "Sign In"}
+                </button>
+              </form>
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase tracking-wide text-gray-400">
-              <span className="bg-white px-3">Or continue with</span>
-            </div>
-          </div>
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-gray-200" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase tracking-wide text-gray-400">
+                  <span className="bg-white px-3">Or continue with</span>
+                </div>
+              </div>
 
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={loading || googleLoading}
-            className="w-full flex items-center justify-center gap-3 border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                fill="#EA4335"
-                d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.9-5.4 3.9-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7 6.9 2.7 2.8 6.8 2.8 12s4.1 9.3 9.2 9.3c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.1-1.5H12Z"
-              />
-              <path
-                fill="#34A853"
-                d="M3.9 7.3 7.1 9.6c.9-1.8 2.7-3 4.9-3 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7c-3.5 0-6.6 2-8.1 4.6Z"
-              />
-              <path
-                fill="#4A90E2"
-                d="M12 21.3c2.4 0 4.5-.8 6-2.3l-2.8-2.2c-.8.6-1.8 1.1-3.2 1.1-3.7 0-5.1-2.5-5.4-3.8l-3.1 2.4c1.5 2.7 4.4 4.8 8.5 4.8Z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M6.6 14.1c-.1-.4-.2-.9-.2-1.4s.1-1 .2-1.4L3.4 8.9C3 9.9 2.8 10.9 2.8 12s.2 2.1.6 3.1l3.2-2.5Z"
-              />
-            </svg>
-            <span>{googleLoading ? "Redirecting to Google..." : "Sign in with Google"}</span>
-          </button>
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={loading || googleLoading}
+                className="w-full flex items-center justify-center gap-3 border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#EA4335"
+                    d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.9-5.4 3.9-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7 6.9 2.7 2.8 6.8 2.8 12s4.1 9.3 9.2 9.3c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.1-1.5H12Z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M3.9 7.3 7.1 9.6c.9-1.8 2.7-3 4.9-3 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7c-3.5 0-6.6 2-8.1 4.6Z"
+                  />
+                  <path
+                    fill="#4A90E2"
+                    d="M12 21.3c2.4 0 4.5-.8 6-2.3l-2.8-2.2c-.8.6-1.8 1.1-3.2 1.1-3.7 0-5.1-2.5-5.4-3.8l-3.1 2.4c1.5 2.7 4.4 4.8 8.5 4.8Z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M6.6 14.1c-.1-.4-.2-.9-.2-1.4s.1-1 .2-1.4L3.4 8.9C3 9.9 2.8 10.9 2.8 12s.2 2.1.6 3.1l3.2-2.5Z"
+                  />
+                </svg>
+                <span>{googleLoading ? "Redirecting to Google..." : "Sign in with Google"}</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

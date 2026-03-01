@@ -75,11 +75,11 @@ const finalizeSupabaseSignIn = async ({ supabase, authUser }) => {
     resolvedUser?.account_verified === true ||
     authUser?.user_metadata?.account_verified === true;
 
-  if (!resolvedUser?.id || !isAllowedAppRole(role)) {
+  if (!resolvedUser?.id || !isAllowedAppRole(role) || role === "user") {
     await supabase.auth.signOut();
     return {
       ok: false,
-      error: "This account does not have access to the ads manager.",
+      error: "We couldn't find an active account for this email. If you are a new advertiser, please submit an application to start running ads with us.",
     };
   }
 
