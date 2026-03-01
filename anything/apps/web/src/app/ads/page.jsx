@@ -33,6 +33,7 @@ import {
   Eye,
   Play,
   Receipt,
+  Printer,
   Pencil,
   MoreVertical,
   Edit2,
@@ -2576,6 +2577,236 @@ export default function AdsPage() {
         .length,
     };
   }, [ads, advertisers.length, invoices, pending]);
+
+  const invoicePreviewDetails = useMemo(() => {
+    if (!invoicePreviewModal) {
+      return null;
+    }
+
+    const advertiser =
+      advertisers.find((item) => item.id === invoicePreviewModal.advertiser_id) || null;
+    const status = normalizeInvoiceStatus(invoicePreviewModal.status);
+    const invoiceNumber = invoicePreviewModal.invoice_number || invoicePreviewModal.id || "";
+    const issueDate = formatInvoiceListDate(
+      invoicePreviewModal.due_date || invoicePreviewModal.created_at,
+    );
+    const linkedAds = (Array.isArray(invoicePreviewModal.ad_ids) ? invoicePreviewModal.ad_ids : [])
+      .map((adId) => ads.find((item) => item.id === adId))
+      .filter(Boolean);
+    const total = Number(invoicePreviewModal.amount || 0) || 0;
+    const primaryDescription =
+      linkedAds.length === 1
+        ? linkedAds[0].ad_name || "Advertising services"
+        : linkedAds.length > 1
+          ? `${linkedAds.length} linked ads`
+          : advertiser?.advertiser_name || invoicePreviewModal.advertiser_name || "Advertising services";
+    const attentionLine =
+      invoicePreviewModal.contact_name ||
+      advertiser?.contact_name ||
+      advertiser?.email ||
+      invoicePreviewModal.advertiser_name ||
+      "";
+    const contactEmail =
+      invoicePreviewModal.contact_email || advertiser?.email || "";
+
+    return {
+      advertiser,
+      status,
+      invoiceNumber,
+      issueDate,
+      linkedAds,
+      total,
+      primaryDescription,
+      attentionLine,
+      contactEmail,
+    };
+  }, [ads, advertisers, invoicePreviewModal]);
+
+  const buildInvoicePreviewDocument = (details) => {
+    if (!details) {
+      return "";
+    }
+
+    const escapeHtml = (value) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const badgeClass =
+      details.status === "Paid"
+        ? "color:#047857;background:#ecfdf5;border:1px solid #d1fae5;"
+        : details.status === "Pending"
+          ? "color:#b45309;background:#fffbeb;border:1px solid #fde68a;"
+          : "color:#be123c;background:#fff1f2;border:1px solid #fecdd3;";
+
+    const invoiceLogoHtml = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" aria-hidden="true" style="display:block;margin-bottom:12px;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.1));">
+        <defs>
+          <linearGradient id="invoice-logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#ef4444"></stop>
+            <stop offset="100%" stop-color="#b91c1c"></stop>
+          </linearGradient>
+        </defs>
+        <rect width="48" height="48" rx="12" fill="url(#invoice-logo-gradient)"></rect>
+        <svg x="13" y="13" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+          <path d="M2 12h20"></path>
+        </svg>
+      </svg>
+    `;
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Invoice #${escapeHtml(details.invoiceNumber)}</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 32px; color: #111827; }
+      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; max-width: 580px; margin: 0 auto; padding: 32px; }
+      .row { display: flex; justify-content: space-between; gap: 24px; }
+      .muted { color: #6b7280; font-size: 12px; }
+      .title { font-size: 14px; font-weight: 700; margin: 0 0 4px; }
+      .company { font-size: 14px; font-weight: 700; margin: 0 0 4px; }
+      .big { font-size: 20px; font-weight: 700; }
+      .section { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #e5e7eb; }
+      .badge { display:inline-flex; padding: 6px 12px; border-radius: 10px; font-size: 12px; font-weight: 700; ${badgeClass} }
+      .line { display:flex; justify-content:space-between; padding:12px 0; border-bottom:1px solid #f3f4f6; }
+      .totals { display:flex; justify-content:space-between; margin:8px 0; font-size:14px; }
+      .total-final { display:flex; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px solid #e5e7eb; font-size:16px; font-weight:700; }
+      .footer { text-align:center; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="section row">
+        <div>
+          ${invoiceLogoHtml}
+
+          <div class="company">CBN Media LLC</div>
+          <div class="muted">2345 Manhattan Ave</div>
+          <div class="muted">advertise@cbnads.com</div>
+          <div class="muted">800.938.0499</div>
+        </div>
+        <div style="text-align:right;">
+          <div class="muted">#${escapeHtml(details.invoiceNumber)}</div>
+          <div style="margin-top:8px;"><span class="badge">${escapeHtml(details.status.toUpperCase())}</span></div>
+        </div>
+      </div>
+      <div class="section row">
+        <div>
+          <div class="muted" style="font-weight:700;text-transform:uppercase;">Bill to</div>
+          <div class="title">${escapeHtml(details.advertiser?.advertiser_name || details.attentionLine || "-")}</div>
+          ${details.attentionLine ? `<div class="muted">Attn: ${escapeHtml(details.attentionLine)}</div>` : ""}
+          ${details.contactEmail ? `<div class="muted">${escapeHtml(details.contactEmail)}</div>` : ""}
+        </div>
+        <div style="text-align:right;">
+          <div style="margin-bottom:12px;">
+            <div class="muted" style="font-weight:700;text-transform:uppercase;">Issue Date</div>
+            <div class="title">${escapeHtml(details.issueDate || "-")}</div>
+          </div>
+          <div>
+            <div class="muted" style="font-weight:700;text-transform:uppercase;">Amount Due</div>
+            <div class="big">${escapeHtml(formatCurrency(details.total))}</div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="row muted" style="font-weight:700;text-transform:uppercase;">
+          <div>Description</div>
+          <div>Amount</div>
+        </div>
+        <div class="line">
+          <div class="title">${escapeHtml(details.primaryDescription)}</div>
+          <div class="title">${escapeHtml(formatCurrency(details.total))}</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="totals"><div class="muted" style="font-size:14px;">Subtotal</div><div class="title">${escapeHtml(formatCurrency(details.total))}</div></div>
+        <div class="total-final"><div>Total</div><div>${escapeHtml(formatCurrency(details.total))}</div></div>
+      </div>
+      <div class="footer">
+        <div class="title">Thank you for your business</div>
+        <div class="muted">Please include invoice #${escapeHtml(details.invoiceNumber)} in transfer description.</div>
+      </div>
+    </div>
+  </body>
+</html>`;
+  };
+
+  const printInvoicePreview = () => {
+    if (!invoicePreviewDetails) {
+      return;
+    }
+
+    const invoiceDocumentHtml = buildInvoicePreviewDocument(invoicePreviewDetails);
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.setAttribute("aria-hidden", "true");
+    let printStarted = false;
+
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
+      }, 250);
+    };
+
+    iframe.onload = () => {
+      if (printStarted) {
+        return;
+      }
+      printStarted = true;
+
+      const iframeWindow = iframe.contentWindow;
+      if (!iframeWindow) {
+        cleanup();
+        appToast.error({
+          title: "Print unavailable",
+          description: "Could not open the invoice preview for printing.",
+        });
+        return;
+      }
+
+      iframeWindow.focus();
+      iframeWindow.onafterprint = cleanup;
+      window.setTimeout(() => {
+        try {
+          iframeWindow.print();
+        } catch {
+          cleanup();
+          appToast.error({
+            title: "Print unavailable",
+            description: "The browser blocked the print dialog.",
+          });
+        }
+      }, 150);
+    };
+
+    iframe.srcdoc = invoiceDocumentHtml;
+    document.body.appendChild(iframe);
+  };
+
+  const downloadInvoicePreview = () => {
+    if (!invoicePreviewDetails) {
+      return;
+    }
+
+    download(
+      `invoice-${invoicePreviewDetails.invoiceNumber}.html`,
+      buildInvoicePreviewDocument(invoicePreviewDetails),
+      "text/html;charset=utf-8",
+    );
+  };
 
   const upcomingAds = useMemo(() => {
     const today = getTodayDateInAppTimeZone();
@@ -8178,87 +8409,158 @@ export default function AdsPage() {
                           <X size={20} className="text-gray-600" />
                         </button>
                       </div>
-                      <div className="p-6 text-sm space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
+                      <div className="p-8 overflow-y-auto max-h-[calc(90vh-64px)]">
+                        <div className="flex items-start justify-between mb-8 pb-6 border-b border-gray-200">
                           <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                              Bill to
-                            </p>
-                            <p className="font-medium text-gray-900">
-                              {invoicePreviewModal.advertiser_name || "-"}
-                            </p>
+                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center mb-3 shadow-sm">
+                              <Globe size={22} className="text-white" />
+                            </div>
+                            <div className="text-sm font-bold text-gray-900 mb-1">
+                              CBN Media LLC
+                            </div>
+                            <div className="text-xs text-gray-500 space-y-0.5">
+                              <div>2345 Manhattan Ave</div>
+                              <div>advertise@cbnads.com</div>
+                              <div>800.938.0499</div>
+                            </div>
                           </div>
-                          <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                              Date
-                            </p>
-                            <p className="font-medium text-gray-900">
-                              {formatInvoiceListDate(
-                                invoicePreviewModal.due_date ||
-                                invoicePreviewModal.created_at,
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                              Status
-                            </p>
-                            <span
-                              className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
-                                invoicePreviewModal.status,
-                              )}`}
-                            >
-                              {normalizeInvoiceStatus(invoicePreviewModal.status)}
-                            </span>
-                          </div>
-                          <div>
-                            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                              Amount Due
-                            </p>
-                            <p className="text-lg font-bold text-gray-900">
-                              {formatCurrency(invoicePreviewModal.amount)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="border-t border-gray-200 pt-4">
-                          <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">
-                            Linked Ads
-                          </p>
-                          <div className="space-y-1.5 max-h-36 overflow-auto">
-                            {(invoicePreviewModal.ad_ids || []).length === 0 ? (
-                              <p className="text-xs text-gray-500">No linked ads.</p>
-                            ) : (
-                              (invoicePreviewModal.ad_ids || []).map((adId) => (
-                                <p key={adId} className="text-xs text-gray-700 truncate">
-                                  {ads.find((item) => item.id === adId)?.ad_name || adId}
-                                </p>
-                              ))
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex justify-end gap-2 border-t border-gray-200 pt-4">
-                          {isAdmin ? (
-                            <>
-                              {normalizeInvoiceStatus(invoicePreviewModal.status) !== "Paid" ? (
-                                <button
-                                  type="button"
-                                  onClick={() => markInvoiceAsPaid(invoicePreviewModal)}
-                                  className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                                >
-                                  Mark as Paid
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => openInvoiceEditor(invoicePreviewModal)}
-                                className="px-4 py-2 rounded-lg bg-black text-sm text-white hover:bg-gray-800"
+                          <div className="text-right">
+                            <div className="text-xs text-gray-500 mb-2">
+                              #{invoicePreviewDetails?.invoiceNumber || invoicePreviewModal.id}
+                            </div>
+                            <div className="flex items-center gap-2 justify-end">
+                              <span
+                                className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getInvoiceStatusColor(
+                                  invoicePreviewDetails?.status || invoicePreviewModal.status,
+                                )}`}
                               >
-                                Edit Invoice
-                              </button>
-                            </>
-                          ) : null}
+                                {String(
+                                  invoicePreviewDetails?.status || invoicePreviewModal.status || "",
+                                ).toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-6 mb-8 pb-6 border-b border-gray-200">
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                              Bill to
+                            </div>
+                            <div className="text-sm font-semibold text-gray-900 mb-1">
+                              {invoicePreviewDetails?.advertiser?.advertiser_name ||
+                                invoicePreviewModal.advertiser_name ||
+                                "—"}
+                            </div>
+                            <div className="text-xs text-gray-600 space-y-0.5">
+                              {invoicePreviewDetails?.attentionLine ? (
+                                <div>Attn: {invoicePreviewDetails.attentionLine}</div>
+                              ) : null}
+                              {invoicePreviewDetails?.contactEmail ? (
+                                <div>{invoicePreviewDetails.contactEmail}</div>
+                              ) : null}
+                            </div>
+                          </div>
+                          <div className="text-right space-y-3">
+                            <div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                Issue Date
+                              </div>
+                              <div className="text-sm font-semibold text-gray-900">
+                                {invoicePreviewDetails?.issueDate || "—"}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                Amount Due
+                              </div>
+                              <div className="text-lg font-bold text-gray-900">
+                                {formatCurrency(invoicePreviewDetails?.total || 0)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mb-6">
+                          <div className="flex justify-between mb-3">
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                              Description
+                            </div>
+                            <div className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                              Amount
+                            </div>
+                          </div>
+                          <div className="flex justify-between py-3 border-b border-gray-100 gap-4">
+                            <div className="min-w-0">
+                              <div className="text-sm font-medium text-gray-900">
+                                {invoicePreviewDetails?.primaryDescription || "Advertising services"}
+                              </div>
+                              {invoicePreviewDetails &&
+                              invoicePreviewDetails.linkedAds.length > 1 ? (
+                                <div className="text-xs text-gray-500 mt-0.5 truncate">
+                                  {invoicePreviewDetails.linkedAds
+                                    .map((item) => item.ad_name)
+                                    .join(" • ")}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                              {formatCurrency(invoicePreviewDetails?.total || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 mb-8 pb-6 border-b border-gray-200">
+                          <div className="flex justify-between text-sm">
+                            <div className="text-gray-600">Subtotal</div>
+                            <div className="font-medium text-gray-900">
+                              {formatCurrency(invoicePreviewDetails?.total || 0)}
+                            </div>
+                          </div>
+                          <div className="flex justify-between text-base font-bold pt-2 border-t border-gray-200">
+                            <div className="text-gray-900">Total</div>
+                            <div className="text-gray-900">
+                              {formatCurrency(invoicePreviewDetails?.total || 0)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-center space-y-2">
+                          <div className="text-sm font-medium text-gray-900">
+                            Thank you for your business
+                          </div>
+                          <div className="text-xs text-gray-500 leading-relaxed">
+                            Please include invoice #
+                            {invoicePreviewDetails?.invoiceNumber || invoicePreviewModal.id} in
+                            transfer description.
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 mt-6 pt-6 border-t border-gray-200">
+                          <button
+                            type="button"
+                            onClick={printInvoicePreview}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all"
+                          >
+                            <Printer size={16} />
+                            Print
+                          </button>
+                          <button
+                            type="button"
+                            onClick={downloadInvoicePreview}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all"
+                          >
+                            <Download size={16} />
+                            Download
+                          </button>
+                          <div className="flex-1" />
+                          <button
+                            type="button"
+                            onClick={() => setInvoicePreviewModal(null)}
+                            className="px-4 py-2.5 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all"
+                          >
+                            Close
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -9465,3 +9767,5 @@ export default function AdsPage() {
     </div>
   );
 }
+
+
