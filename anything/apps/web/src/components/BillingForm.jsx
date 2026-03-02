@@ -622,7 +622,7 @@ export default function BillingForm({
                     <img
                       src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
                       alt="CBN Unfiltered Logo"
-                      className="h-20 w-auto"
+                      className="h-14 w-auto object-contain"
                     />
                   </div>
                   <div className="text-base font-bold text-gray-900 mb-2">
