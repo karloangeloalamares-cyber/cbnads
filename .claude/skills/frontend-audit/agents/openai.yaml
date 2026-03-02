@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Audit"
+  short_description: "Audit React frontend quality and behavior"
+  default_prompt: "Review this frontend implementation. Return severity-ranked findings with file references, risk, and exact remediation steps."

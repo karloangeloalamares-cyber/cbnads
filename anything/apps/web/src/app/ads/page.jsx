@@ -7021,8 +7021,8 @@ export default function AdsPage() {
 
               <div className="flex max-w-none mx-auto min-h-screen">
                 <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12 flex justify-end">
-                  <div className="w-full max-w-[680px] lg:mr-8 xl:mr-12">
-                    <div className="mb-10 flex items-center justify-between gap-4">
+                  <div className="w-full max-w-[800px] lg:mr-8 xl:mr-12 relative">
+                    <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm pb-4 pt-6 -mt-6 mb-8 flex items-center justify-between gap-4 border-b border-gray-100/50">
                       <button
                         type="button"
                         onClick={closeCreateAd}
@@ -7106,7 +7106,7 @@ export default function AdsPage() {
                           ad.id && createAdRequiresBilling ? "continue" : "save",
                         );
                       }}
-                      className="space-y-8"
+                      className="space-y-12"
                     >
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900 mb-4">Details</h3>
@@ -7170,34 +7170,50 @@ export default function AdsPage() {
                           </div>
                         </div>
 
-                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 mb-4">
-                          <label className="block text-xs font-semibold text-gray-700 mb-1">
-                            Ad Product
-                          </label>
-                          <select
-                            value={ad.product_id || ""}
-                            onChange={(event) => {
-                              const selectedProduct = products.find(
-                                (item) => item.id === event.target.value,
-                              );
-                              setAd((current) => ({
-                                ...current,
-                                product_id: event.target.value,
-                                placement: selectedProduct?.placement || current.placement || "",
-                                price: selectedProduct?.price || current.price || "",
-                              }));
-                            }}
-                            className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="">Select a product package</option>
-                            {products.map((item) => (
-                              <option key={item.id} value={item.id}>
-                                {item.product_name} - {item.placement || "N/A"} - $
-                                {Number(item.price || 0).toFixed(2)}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Ad Product
+                            </label>
+                            <select
+                              value={ad.product_id || ""}
+                              onChange={(event) => {
+                                const selectedProduct = products.find(
+                                  (item) => item.id === event.target.value,
+                                );
+                                setAd((current) => ({
+                                  ...current,
+                                  product_id: event.target.value,
+                                  placement: selectedProduct?.placement || current.placement || "",
+                                  price: selectedProduct?.price || current.price || "",
+                                }));
+                              }}
+                              className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                              style={adsSelectStyle}
+                            >
+                              <option value="">Select a product package</option>
+                              {products.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.product_name} - {item.placement || "N/A"} - $
+                                  {Number(item.price || 0).toFixed(2)}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Ad Name <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={ad.ad_name || ""}
+                              onChange={(event) => handleCreateAdChange("ad_name", event.target.value)}
+                              placeholder="Enter ad name"
+                              className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                            />
+                          </div>
                         </div>
                       </div>
 
@@ -7267,8 +7283,8 @@ export default function AdsPage() {
                   </div>
                 </div>
 
-                <div className="hidden lg:flex w-[450px] xl:w-[500px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 justify-center">
-                  <div className="w-full max-w-[332px]">
+                <div className="hidden lg:flex w-[380px] xl:w-[420px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 justify-center">
+                  <div className="w-full max-w-[320px]">
                     <AdPreview formData={createAdPreviewData} />
                   </div>
                 </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Clock, X, ChevronDown } from "lucide-react";
 import { fetchMonthAvailability } from "@/lib/adAvailabilityClient";
 import { appToast } from "@/lib/toast";
 import {
@@ -38,25 +38,26 @@ function TimeSelect({ value, onChange, onBlur, required }) {
   };
 
   return (
-    <div className="flex gap-2 w-full">
+    <div className="flex items-center gap-1 w-full">
       <select
         required={required}
         value={displayHour}
         onChange={(e) => handleTimeChange("hour", e.target.value)}
         onBlur={onBlur}
-        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none flex-1 border-r border-gray-200 pr-2"
+        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer"
       >
         <option value="" disabled>HH</option>
         {HOURS.map((h) => (
           <option key={h} value={h}>{h.padStart(2, "0")}</option>
         ))}
       </select>
+      <span className="text-sm text-gray-900 font-semibold">:</span>
       <select
         required={required}
         value={currentMinute}
         onChange={(e) => handleTimeChange("minute", e.target.value)}
         onBlur={onBlur}
-        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none flex-1 border-r border-gray-200 pr-2"
+        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer"
       >
         <option value="" disabled>MM</option>
         {MINUTES.map((m) => (
@@ -68,7 +69,7 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         value={currentPeriod}
         onChange={(e) => handleTimeChange("period", e.target.value)}
         onBlur={onBlur}
-        className="text-sm text-gray-900 bg-transparent focus:outline-none w-[60px]"
+        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer ml-1"
       >
         <option value="" disabled>--</option>
         {PERIODS.map((p) => (
@@ -145,7 +146,12 @@ function AvailabilityDateField({
   required,
   placeholder,
   helperText,
+  variant = "default",
 }) {
+  const containerClasses = variant === "subtle"
+    ? "rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all"
+    : "border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0";
+
   const fieldRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(
@@ -196,7 +202,7 @@ function AvailabilityDateField({
 
   return (
     <div className="relative" ref={fieldRef}>
-      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+      <div className={containerClasses}>
         <label className="block text-xs font-semibold text-gray-700 mb-1">
           {label}
           {required ? <span className="text-red-500"> *</span> : null}
@@ -524,75 +530,122 @@ export function ScheduleSection({
       )}
 
       {postType === "Custom Schedule" && (
-        <div>
-          <div className="grid grid-cols-[1fr_140px_auto] gap-2 mb-3">
-            <AvailabilityDateField
-              label="Date"
-              value={customDate}
-              onChange={setCustomDate}
-              minDate={getMinDate()}
-              blockedDates={blockedDates}
-              onLoadMonth={loadMonthAvailability}
-              placeholder="Select date"
-            />
+        <div className="space-y-4">
+          <div className="mb-2">
+            <h3 className="text-sm font-semibold text-gray-900 mb-1">Post Date, Time & Reminder</h3>
+          </div>
 
-            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
-              <TimeSelect
-                value={timeForInput(customTime)}
-                onChange={(val) => setCustomTime(val)}
-              />
-            </div>
+          {formData.custom_dates.map((entry, index) => {
+            const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
+            const timeStr = typeof entry === "object" && entry !== null ? entry.time : "";
+            const reminderStr = typeof entry === "object" && entry !== null ? (entry.reminder || "15-min") : "15-min";
 
+            return (
+              <div
+                key={index}
+                className="bg-white border border-gray-200 rounded-xl p-4 hover:border-gray-300 transition-all"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Date {index + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newDates = [...formData.custom_dates];
+                      newDates.splice(index, 1);
+                      onChange("custom_dates", newDates);
+                      triggerAvailabilityCheck();
+                    }}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-y-3 gap-x-3">
+                  <AvailabilityDateField
+                    label="Date"
+                    variant="subtle"
+                    value={dateStr}
+                    onChange={(val) => {
+                      const newDates = [...formData.custom_dates];
+                      const currentEntry = typeof newDates[index] === "object" && newDates[index] !== null
+                        ? { ...newDates[index] }
+                        : { date: dateStr, time: timeStr, reminder: reminderStr };
+                      currentEntry.date = val;
+                      newDates[index] = currentEntry;
+                      onChange("custom_dates", newDates);
+                      triggerAvailabilityCheck();
+                    }}
+                    minDate={getMinDate()}
+                    blockedDates={blockedDates}
+                    onLoadMonth={loadMonthAvailability}
+                    placeholder="Select date"
+                  />
+
+                  <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
+                    <div className="flex items-center gap-1 pr-6">
+                      <TimeSelect
+                        value={timeForInput(timeStr)}
+                        onChange={(val) => {
+                          const newDates = [...formData.custom_dates];
+                          const currentEntry = typeof newDates[index] === "object" && newDates[index] !== null
+                            ? { ...newDates[index] }
+                            : { date: dateStr, time: timeStr, reminder: reminderStr };
+                          currentEntry.time = val && val.length === 5 ? `${val}:00` : val;
+                          newDates[index] = currentEntry;
+                          onChange("custom_dates", newDates);
+                          triggerAvailabilityCheck();
+                        }}
+                      />
+                    </div>
+                    <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  </div>
+
+                  <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Reminder</label>
+                    <div className="relative">
+                      <select
+                        value={reminderStr}
+                        onChange={(e) => {
+                          const newDates = [...formData.custom_dates];
+                          const currentEntry = typeof newDates[index] === "object" && newDates[index] !== null
+                            ? { ...newDates[index] }
+                            : { date: dateStr, time: timeStr, reminder: reminderStr };
+                          currentEntry.reminder = e.target.value;
+                          newDates[index] = currentEntry;
+                          onChange("custom_dates", newDates);
+                        }}
+                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none pr-8 cursor-pointer relative z-10"
+                      >
+                        <option value="15-min">15 min before</option>
+                        <option value="30-min">30 min before</option>
+                        <option value="1-hour">1 hour before</option>
+                        <option value="custom">Custom</option>
+                      </select>
+                      <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none z-0" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="pt-2">
             <button
               type="button"
               onClick={() => {
-                onAddCustomDate();
-                triggerAvailabilityCheck();
+                const newDates = [...(formData.custom_dates || [])];
+                newDates.push({ date: "", time: "", reminder: "15-min" });
+                onChange("custom_dates", newDates);
               }}
-              className="self-end px-6 py-3 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+              className="px-4 py-2 border border-gray-200 text-gray-700 bg-white hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
             >
-              Add
+              <span className="text-lg leading-none mt-[-2px]">+</span> Add another date
             </button>
           </div>
-
-          {formData.custom_dates.length > 0 ? (
-            <div className="space-y-2 mt-3">
-              {formData.custom_dates.map((entry) => {
-                const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
-                const timeStr = typeof entry === "object" && entry !== null ? entry.time : "";
-
-                return (
-                  <div
-                    key={dateStr}
-                    className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3"
-                  >
-                    <span className="text-sm text-gray-900 font-medium flex-1">
-                      {formatDateLong(dateStr)}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      <Clock size={14} className="text-gray-400" />
-                      <TimeSelect
-                        value={timeForInput(timeStr)}
-                        onChange={(val) => onUpdateCustomDateTime(dateStr, val)}
-                        onBlur={triggerAvailabilityCheck}
-                      />
-                      {timeStr ? <span className="text-xs text-gray-500">ET</span> : null}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => onRemoveCustomDate(dateStr)}
-                      className="text-gray-400 hover:text-red-600 transition-colors text-lg leading-none"
-                    >
-                      x
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
 
           {availabilityChecking ? (
             <p className="text-xs text-gray-500 mt-2">Checking availability...</p>
