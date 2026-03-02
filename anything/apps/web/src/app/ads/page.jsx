@@ -2695,9 +2695,9 @@ export default function AdsPage() {
           ? linkedAds[0].product_name
             ? `${linkedAds[0].product_name}${linkedAds[0].ad_name ? ` | Ad: ${linkedAds[0].ad_name}` : ""}`
             : linkedAds[0].ad_name || "Advertising services"
-        : linkedAds.length > 1
-          ? `${Math.max(invoiceItems.length, linkedAds.length)} linked ads`
-          : advertiser?.advertiser_name || invoicePreviewModal.advertiser_name || "Advertising services";
+          : linkedAds.length > 1
+            ? `${Math.max(invoiceItems.length, linkedAds.length)} linked ads`
+            : advertiser?.advertiser_name || invoicePreviewModal.advertiser_name || "Advertising services";
     const attentionLine =
       invoicePreviewModal.contact_name ||
       advertiser?.contact_name ||
@@ -2742,20 +2742,11 @@ export default function AdsPage() {
           : "color:#be123c;background:#fff1f2;border:1px solid #fecdd3;";
 
     const invoiceLogoHtml = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" aria-hidden="true" style="display:block;margin-bottom:12px;filter:drop-shadow(0 1px 3px rgba(0,0,0,0.1));">
-        <defs>
-          <linearGradient id="invoice-logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#ef4444"></stop>
-            <stop offset="100%" stop-color="#b91c1c"></stop>
-          </linearGradient>
-        </defs>
-        <rect width="48" height="48" rx="12" fill="url(#invoice-logo-gradient)"></rect>
-        <svg x="13" y="13" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"></circle>
-          <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
-          <path d="M2 12h20"></path>
-        </svg>
-      </svg>
+      <img 
+        src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/" 
+        alt="CBN Unfiltered Logo" 
+        style="display:block;margin-bottom:12px;max-height:80px;width:auto;" 
+      />
     `;
 
     return `<!doctype html>
@@ -4727,139 +4718,139 @@ export default function AdsPage() {
 
     try {
       await run(async () => {
-      if (!String(ad.ad_name || "").trim()) {
-        throw new Error("Ad title is required");
-      }
-      if (!ad.advertiser_id) {
-        throw new Error("Advertiser is required");
-      }
-
-      const selectedPostType = normalizeCreateAdPostType(ad.post_type);
-      const customDates = (Array.isArray(ad.custom_dates) ? ad.custom_dates : [])
-        .map((entry) => {
-          if (typeof entry === "object" && entry !== null) {
-            return entry.date;
-          }
-          return entry;
-        })
-        .map((entry) => String(entry || "").slice(0, 10))
-        .filter(Boolean);
-      const paymentMode =
-        ad.payment_mode ||
-        (String(ad.payment || "").toLowerCase() === "paid"
-          ? "Paid"
-          : ad.price
-            ? "Custom Amount"
-            : "TBD");
-
-      const payload = {
-        ...ad,
-        post_type: toCreateAdPostTypeValue(selectedPostType),
-        payment_mode: paymentMode,
-        payment: paymentMode === "Paid" ? "Paid" : "Unpaid",
-        status: mode === "draft" ? "Draft" : ad.status || "Draft",
-        custom_dates: customDates,
-      };
-
-      if (selectedPostType === "Daily Run") {
-        payload.post_date = payload.post_date_from || payload.post_date || "";
-      } else if (selectedPostType === "Custom Schedule") {
-        payload.post_date = customDates[0] || "";
-      } else {
-        payload.post_date = payload.post_date || payload.post_date_from || "";
-        payload.post_date_from = payload.post_date;
-        payload.post_date_to = "";
-        payload.custom_dates = [];
-      }
-
-      if (mode !== "draft" && !String(payload.placement || "").trim()) {
-        throw new Error("Placement is required");
-      }
-
-      if (mode !== "draft" && selectedPostType === "One-Time Post") {
-        if (!String(payload.post_date || "").trim()) {
-          throw new Error("Post date is required");
+        if (!String(ad.ad_name || "").trim()) {
+          throw new Error("Ad title is required");
         }
-        if (!String(payload.post_time || "").trim()) {
-          throw new Error("Post time is required");
+        if (!ad.advertiser_id) {
+          throw new Error("Advertiser is required");
         }
-      }
 
-      if (mode !== "draft" && selectedPostType === "Daily Run") {
-        if (!String(payload.post_date_from || "").trim()) {
-          throw new Error("Start date is required");
-        }
-        if (!String(payload.post_date_to || "").trim()) {
-          throw new Error("End date is required");
-        }
-        if (payload.post_date_to < payload.post_date_from) {
-          throw new Error("End date must be on or after the start date");
-        }
-      }
+        const selectedPostType = normalizeCreateAdPostType(ad.post_type);
+        const customDates = (Array.isArray(ad.custom_dates) ? ad.custom_dates : [])
+          .map((entry) => {
+            if (typeof entry === "object" && entry !== null) {
+              return entry.date;
+            }
+            return entry;
+          })
+          .map((entry) => String(entry || "").slice(0, 10))
+          .filter(Boolean);
+        const paymentMode =
+          ad.payment_mode ||
+          (String(ad.payment || "").toLowerCase() === "paid"
+            ? "Paid"
+            : ad.price
+              ? "Custom Amount"
+              : "TBD");
 
-      if (mode !== "draft" && selectedPostType === "Custom Schedule" && customDates.length === 0) {
-        throw new Error("Add at least one custom date");
-      }
+        const payload = {
+          ...ad,
+          post_type: toCreateAdPostTypeValue(selectedPostType),
+          payment_mode: paymentMode,
+          payment: paymentMode === "Paid" ? "Paid" : "Unpaid",
+          status: mode === "draft" ? "Draft" : ad.status || "Draft",
+          custom_dates: customDates,
+        };
 
-      const availability = await checkAdAvailability({
-        postType: selectedPostType,
-        postDateFrom: payload.post_date_from || payload.post_date || "",
-        postDateTo: payload.post_date_to || "",
-        customDates: payload.custom_dates,
-        postTime: payload.post_time,
-        excludeAdId: payload.id || null,
-      });
-
-      if (!availability.available) {
-        setCreateAdAvailabilityError(availability.availabilityError);
-        setCreateAdFullyBookedDates(availability.fullyBookedDates);
-        throw new Error(availability.availabilityError || "Selected dates are unavailable.");
-      }
-
-      const savedAd = await upsertAd(payload);
-
-      if (mode === "continue") {
-        const linkedInvoiceId =
-          savedAd?.paid_via_invoice_id ||
-          savedAd?.invoice_id ||
-          payload.paid_via_invoice_id ||
-          payload.invoice_id ||
-          null;
-        const linkedInvoice = linkedInvoiceId
-          ? invoices.find((item) => String(item.id) === String(linkedInvoiceId))
-          : null;
-
-        if (linkedInvoice) {
-          setInvoice({
-            ...blankInvoice,
-            ...linkedInvoice,
-            status: normalizeInvoiceStatus(linkedInvoice.status),
-            advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
-            ad_ids: Array.isArray(linkedInvoice.ad_ids)
-              ? linkedInvoice.ad_ids
-              : savedAd?.id
-                ? [savedAd.id]
-                : [],
-          });
+        if (selectedPostType === "Daily Run") {
+          payload.post_date = payload.post_date_from || payload.post_date || "";
+        } else if (selectedPostType === "Custom Schedule") {
+          payload.post_date = customDates[0] || "";
         } else {
-          setInvoice({
-            ...blankInvoice,
-            advertiser_id: payload.advertiser_id || "",
-            amount: savedAd?.price || payload.price || "",
-            ad_ids: savedAd?.id ? [savedAd.id] : [],
-          });
+          payload.post_date = payload.post_date || payload.post_date_from || "";
+          payload.post_date_from = payload.post_date;
+          payload.post_date_to = "";
+          payload.custom_dates = [];
         }
-        setActiveSection("Billing");
-        setView("newInvoice");
-      } else {
-        setView("list");
-      }
 
-      setAd(blankAd);
-      setCreateAdCustomDate("");
-      setCreateAdCustomTime("");
-      setCreateAdAvailabilityError(null);
-      setCreateAdFullyBookedDates([]);
+        if (mode !== "draft" && !String(payload.placement || "").trim()) {
+          throw new Error("Placement is required");
+        }
+
+        if (mode !== "draft" && selectedPostType === "One-Time Post") {
+          if (!String(payload.post_date || "").trim()) {
+            throw new Error("Post date is required");
+          }
+          if (!String(payload.post_time || "").trim()) {
+            throw new Error("Post time is required");
+          }
+        }
+
+        if (mode !== "draft" && selectedPostType === "Daily Run") {
+          if (!String(payload.post_date_from || "").trim()) {
+            throw new Error("Start date is required");
+          }
+          if (!String(payload.post_date_to || "").trim()) {
+            throw new Error("End date is required");
+          }
+          if (payload.post_date_to < payload.post_date_from) {
+            throw new Error("End date must be on or after the start date");
+          }
+        }
+
+        if (mode !== "draft" && selectedPostType === "Custom Schedule" && customDates.length === 0) {
+          throw new Error("Add at least one custom date");
+        }
+
+        const availability = await checkAdAvailability({
+          postType: selectedPostType,
+          postDateFrom: payload.post_date_from || payload.post_date || "",
+          postDateTo: payload.post_date_to || "",
+          customDates: payload.custom_dates,
+          postTime: payload.post_time,
+          excludeAdId: payload.id || null,
+        });
+
+        if (!availability.available) {
+          setCreateAdAvailabilityError(availability.availabilityError);
+          setCreateAdFullyBookedDates(availability.fullyBookedDates);
+          throw new Error(availability.availabilityError || "Selected dates are unavailable.");
+        }
+
+        const savedAd = await upsertAd(payload);
+
+        if (mode === "continue") {
+          const linkedInvoiceId =
+            savedAd?.paid_via_invoice_id ||
+            savedAd?.invoice_id ||
+            payload.paid_via_invoice_id ||
+            payload.invoice_id ||
+            null;
+          const linkedInvoice = linkedInvoiceId
+            ? invoices.find((item) => String(item.id) === String(linkedInvoiceId))
+            : null;
+
+          if (linkedInvoice) {
+            setInvoice({
+              ...blankInvoice,
+              ...linkedInvoice,
+              status: normalizeInvoiceStatus(linkedInvoice.status),
+              advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
+              ad_ids: Array.isArray(linkedInvoice.ad_ids)
+                ? linkedInvoice.ad_ids
+                : savedAd?.id
+                  ? [savedAd.id]
+                  : [],
+            });
+          } else {
+            setInvoice({
+              ...blankInvoice,
+              advertiser_id: payload.advertiser_id || "",
+              amount: savedAd?.price || payload.price || "",
+              ad_ids: savedAd?.id ? [savedAd.id] : [],
+            });
+          }
+          setActiveSection("Billing");
+          setView("newInvoice");
+        } else {
+          setView("list");
+        }
+
+        setAd(blankAd);
+        setCreateAdCustomDate("");
+        setCreateAdCustomTime("");
+        setCreateAdAvailabilityError(null);
+        setCreateAdFullyBookedDates([]);
       }, mode === "continue" ? "Ad saved. Continue to billing." : "Ad saved.");
     } finally {
       setCreateAdSubmitting(false);
@@ -5389,115 +5380,115 @@ export default function AdsPage() {
             </div>
 
             <div className="flex items-center gap-4">
-            <div className="relative" ref={notificationsDropdownRef}>
-              <button
-                className="relative p-2 hover:bg-gray-100 rounded-lg"
-                type="button"
-                onClick={() => setShowNotificationsDropdown((current) => !current)}
-              >
-                <Bell size={20} className="text-gray-600" />
-                {unreadCount > 0 ? (
-                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-[#ED1D26] px-1 text-[10px] font-semibold text-white flex items-center justify-center">
-                    {unreadCount > 99 ? "99+" : unreadCount}
-                  </span>
-                ) : null}
-              </button>
+              <div className="relative" ref={notificationsDropdownRef}>
+                <button
+                  className="relative p-2 hover:bg-gray-100 rounded-lg"
+                  type="button"
+                  onClick={() => setShowNotificationsDropdown((current) => !current)}
+                >
+                  <Bell size={20} className="text-gray-600" />
+                  {unreadCount > 0 ? (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-[#ED1D26] px-1 text-[10px] font-semibold text-white flex items-center justify-center">
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  ) : null}
+                </button>
 
-              {showNotificationsDropdown ? (
-                <div className="absolute right-0 mt-2 w-[320px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50">
-                  <div className="mb-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Notifications</p>
-                      <p className="text-xs text-gray-500">Recent app activity</p>
+                {showNotificationsDropdown ? (
+                  <div className="absolute right-0 mt-2 w-[320px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">Notifications</p>
+                        <p className="text-xs text-gray-500">Recent app activity</p>
+                      </div>
+                      {unreadCount > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => void markAllAsRead()}
+                          className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                        >
+                          Mark all read
+                        </button>
+                      ) : null}
                     </div>
+
                     {unreadCount > 0 ? (
                       <button
                         type="button"
-                        onClick={() => void markAllAsRead()}
-                        className="text-xs font-medium text-gray-600 hover:text-gray-900"
+                        onClick={async () => {
+                          await markAllAsRead();
+                          setShowNotificationsDropdown(false);
+                          setActiveSection("Submissions");
+                          setView("list");
+                        }}
+                        className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
                       >
-                        Mark all read
+                        <p className="text-sm font-semibold text-gray-900">
+                          New ad submission received
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          Click to review pending submissions.
+                        </p>
                       </button>
-                    ) : null}
+                    ) : (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                        No new notifications
+                      </div>
+                    )}
                   </div>
+                ) : null}
+              </div>
 
-                  {unreadCount > 0 ? (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await markAllAsRead();
-                        setShowNotificationsDropdown(false);
-                        setActiveSection("Submissions");
-                        setView("list");
-                      }}
-                      className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowProfileDropdown((current) => !current)}
+                  className="flex items-center gap-3 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors"
+                >
+                  <span className="text-sm font-medium text-gray-900">
+                    {user.name || user.email}
+                  </span>
+                  <div className="w-10 h-10 rounded-full bg-[#F4E4D7] overflow-hidden flex items-center justify-center">
+                    {user.image ? (
+                      <img
+                        src={user.image}
+                        alt="Profile"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-sm font-medium text-gray-700">
+                        {(user.name || user.email || "U").charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown size={16} className="text-gray-600" />
+                </button>
+
+                {showProfileDropdown && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                    {isAdmin ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleNavigate("Settings")}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
+                        >
+                          <Settings size={16} />
+                          Profile Settings
+                        </button>
+                        <div className="border-t border-gray-100 my-1" />
+                      </>
+                    ) : null}
+                    <a
+                      href="/account/logout"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                     >
-                      <p className="text-sm font-semibold text-gray-900">
-                        New ad submission received
-                      </p>
-                      <p className="text-xs text-gray-600 mt-1">
-                        Click to review pending submissions.
-                      </p>
-                    </button>
-                  ) : (
-                    <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-                      No new notifications
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="relative" ref={dropdownRef}>
-              <button
-                type="button"
-                onClick={() => setShowProfileDropdown((current) => !current)}
-                className="flex items-center gap-3 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors"
-              >
-                <span className="text-sm font-medium text-gray-900">
-                  {user.name || user.email}
-                </span>
-                <div className="w-10 h-10 rounded-full bg-[#F4E4D7] overflow-hidden flex items-center justify-center">
-                  {user.image ? (
-                    <img
-                      src={user.image}
-                      alt="Profile"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-sm font-medium text-gray-700">
-                      {(user.name || user.email || "U").charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                </div>
-                <ChevronDown size={16} className="text-gray-600" />
-              </button>
-
-              {showProfileDropdown && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                  {isAdmin ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleNavigate("Settings")}
-                        className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors w-full text-left"
-                      >
-                        <Settings size={16} />
-                        Profile Settings
-                      </button>
-                      <div className="border-t border-gray-100 my-1" />
-                    </>
-                  ) : null}
-                  <a
-                    href="/account/logout"
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    <LogOut size={16} />
-                    Sign Out
-                  </a>
-                </div>
-              )}
-            </div>
+                      <LogOut size={16} />
+                      Sign Out
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
           </header>
         )}
@@ -8637,8 +8628,12 @@ export default function AdsPage() {
                       <div className="p-8 overflow-y-auto max-h-[calc(90vh-64px)]">
                         <div className="flex items-start justify-between mb-8 pb-6 border-b border-gray-200">
                           <div>
-                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center mb-3 shadow-sm">
-                              <Globe size={22} className="text-white" />
+                            <div className="flex items-center justify-start mb-3">
+                              <img
+                                src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                                alt="CBN Unfiltered Logo"
+                                className="h-20 w-auto"
+                              />
                             </div>
                             <div className="text-sm font-bold text-gray-900 mb-1">
                               CBN Media LLC
@@ -8721,7 +8716,7 @@ export default function AdsPage() {
                                 {invoicePreviewDetails?.primaryDescription || "Advertising services"}
                               </div>
                               {invoicePreviewDetails &&
-                              invoicePreviewDetails.linkedAds.length > 1 ? (
+                                invoicePreviewDetails.linkedAds.length > 1 ? (
                                 <div className="text-xs text-gray-500 mt-0.5 truncate">
                                   {invoicePreviewDetails.linkedAds
                                     .map((item) => item.ad_name)
@@ -8966,8 +8961,12 @@ export default function AdsPage() {
 
                   <div className="flex items-start justify-between mb-10 pb-8 border-b border-gray-200">
                     <div>
-                      <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center mb-4 shadow-sm">
-                        <Globe size={26} className="text-white" />
+                      <div className="flex items-center justify-start mb-4">
+                        <img
+                          src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                          alt="CBN Unfiltered Logo"
+                          className="h-20 w-auto"
+                        />
                       </div>
                       <div className="text-base font-bold text-gray-900 mb-2">CBN Media LLC</div>
                       <div className="text-xs text-gray-500 space-y-0.5">

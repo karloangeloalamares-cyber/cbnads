@@ -618,8 +618,12 @@ export default function BillingForm({
               {/* Company Logo and Info */}
               <div className="flex items-start justify-between mb-10 pb-8 border-b border-gray-200">
                 <div>
-                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center mb-4 shadow-sm">
-                    <Globe size={26} className="text-white" />
+                  <div className="flex items-center justify-start mb-4">
+                    <img
+                      src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                      alt="CBN Unfiltered Logo"
+                      className="h-20 w-auto"
+                    />
                   </div>
                   <div className="text-base font-bold text-gray-900 mb-2">
                     CBN Media LLC
@@ -633,13 +637,12 @@ export default function BillingForm({
                 <div className="text-right">
                   <div className="text-xs text-gray-500 mb-2">New Invoice</div>
                   <div
-                    className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-                      formData.status === "Paid"
+                    className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${formData.status === "Paid"
                         ? "text-emerald-700 bg-emerald-50 border-emerald-100"
                         : formData.status === "Pending"
                           ? "text-amber-700 bg-amber-50 border-amber-100"
                           : "text-rose-700 bg-rose-50 border-rose-100"
-                    }`}
+                      }`}
                   >
                     {formData.status.toUpperCase()}
                   </div>
@@ -668,8 +671,8 @@ export default function BillingForm({
                     <div className="text-sm font-semibold text-gray-900">
                       {formData.issueDate
                         ? new Date(
-                            formData.issueDate + "T00:00:00",
-                          ).toLocaleDateString("en-US")
+                          formData.issueDate + "T00:00:00",
+                        ).toLocaleDateString("en-US")
                         : "—"}
                     </div>
                   </div>
