@@ -7235,43 +7235,31 @@ export default function AdsPage() {
 
                       <div>
                         <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
-                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 mb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                        <div className="border border-gray-200 rounded-lg bg-gray-50 px-4 pt-4 pb-3 mb-3">
                           <label className="block text-xs font-semibold text-gray-700 mb-1">
-                            Payment status
+                            Estimated Total
                           </label>
-                          <select
-                            value={createAdPaymentMode}
-                            onChange={(event) =>
-                              setAd((current) => ({
-                                ...current,
-                                payment_mode: event.target.value,
-                                payment: event.target.value === "Paid" ? "Paid" : "Unpaid",
-                              }))
-                            }
-                            className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                            style={adsSelectStyle}
-                          >
-                            <option value="TBD">TBD</option>
-                            <option value="Paid">Paid</option>
-                            <option value="Custom Amount">Custom Amount</option>
-                          </select>
-                        </div>
-                        {createAdPaymentMode === "Custom Amount" ? (
-                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">
-                              Amount
-                            </label>
-                            <input
-                              type="text"
-                              value={ad.price || ""}
-                              onChange={(event) =>
-                                setAd((current) => ({ ...current, price: event.target.value }))
+                          <div className="w-full text-sm font-medium text-gray-900">
+                            {(() => {
+                              const selectedProduct = products.find((item) => item.id === ad.product_id);
+                              const unitPrice = parseFloat(selectedProduct?.price || 0);
+                              if (!unitPrice) return "$0.00";
+
+                              let days = 1;
+                              const postType = normalizeCreateAdPostType(selectedCreateAdPostType);
+                              if (postType === "Daily Run" && ad.post_date_from && ad.post_date_to) {
+                                const start = new Date(ad.post_date_from);
+                                const end = new Date(ad.post_date_to);
+                                if (!isNaN(start) && !isNaN(end) && end >= start) {
+                                  days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+                                }
+                              } else if (postType === "Custom Schedule" && Array.isArray(ad.custom_dates)) {
+                                days = ad.custom_dates.length;
                               }
-                              placeholder="$1,500"
-                              className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
-                            />
+                              return `$${(unitPrice * days).toFixed(2)}`;
+                            })()}
                           </div>
-                        ) : null}
+                        </div>
                       </div>
 
                       <NotesSection notes={ad.notes || ""} onChange={handleCreateAdChange} />

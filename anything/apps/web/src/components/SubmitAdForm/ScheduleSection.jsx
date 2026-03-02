@@ -8,6 +8,77 @@ import {
   getTodayInAppTimeZone,
 } from "@/lib/timezone";
 
+const HOURS = Array.from({ length: 12 }).map((_, i) => String(i === 0 ? 12 : i));
+const MINUTES = ["00", "15", "30", "45"];
+const PERIODS = ["AM", "PM"];
+
+function TimeSelect({ value, onChange, onBlur, required }) {
+  // value is expected to be "HH:MM" (24-hour format)
+  const currentHour24 = value ? parseInt(value.split(":")[0], 10) : null;
+  const currentMinute = value ? value.split(":")[1] : "";
+
+  const currentPeriod = value ? (currentHour24 !== null && currentHour24 >= 12 ? "PM" : "AM") : "";
+  let currentHour12 = currentHour24 !== null ? currentHour24 % 12 : "";
+  if (currentHour12 === 0 && currentHour24 !== null) currentHour12 = 12;
+  const displayHour = currentHour12 ? String(currentHour12) : "";
+
+  const handleTimeChange = (type, val) => {
+    let newHour12 = type === "hour" ? val : displayHour;
+    let newMinute = type === "minute" ? val : (currentMinute || "00");
+    let newPeriod = type === "period" ? val : (currentPeriod || "AM");
+
+    if (!newHour12) newHour12 = "12";
+
+    let newHour24 = parseInt(newHour12, 10);
+    if (newPeriod === "PM" && newHour24 !== 12) newHour24 += 12;
+    if (newPeriod === "AM" && newHour24 === 12) newHour24 = 0;
+
+    const formattedHour24 = String(newHour24).padStart(2, "0");
+    onChange?.(`${formattedHour24}:${newMinute}`);
+  };
+
+  return (
+    <div className="flex gap-2 w-full">
+      <select
+        required={required}
+        value={displayHour}
+        onChange={(e) => handleTimeChange("hour", e.target.value)}
+        onBlur={onBlur}
+        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none flex-1 border-r border-gray-200 pr-2"
+      >
+        <option value="" disabled>HH</option>
+        {HOURS.map((h) => (
+          <option key={h} value={h}>{h.padStart(2, "0")}</option>
+        ))}
+      </select>
+      <select
+        required={required}
+        value={currentMinute}
+        onChange={(e) => handleTimeChange("minute", e.target.value)}
+        onBlur={onBlur}
+        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none flex-1 border-r border-gray-200 pr-2"
+      >
+        <option value="" disabled>MM</option>
+        {MINUTES.map((m) => (
+          <option key={m} value={m}>{m}</option>
+        ))}
+      </select>
+      <select
+        required={required}
+        value={currentPeriod}
+        onChange={(e) => handleTimeChange("period", e.target.value)}
+        onBlur={onBlur}
+        className="text-sm text-gray-900 bg-transparent focus:outline-none w-[60px]"
+      >
+        <option value="" disabled>--</option>
+        {PERIODS.map((p) => (
+          <option key={p} value={p}>{p}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const getMinDate = () => {
@@ -114,7 +185,7 @@ function AvailabilityDateField({
   const canGoPreviousMonth =
     !minMonthDate ||
     new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1) >
-      new Date(minMonthDate.getFullYear(), minMonthDate.getMonth(), 1);
+    new Date(minMonthDate.getFullYear(), minMonthDate.getMonth(), 1);
 
   const calendarDays = useMemo(() => buildCalendarDays(visibleMonth), [visibleMonth]);
 
@@ -400,13 +471,11 @@ export function ScheduleSection({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Post Time (ET) <span className="text-red-500">*</span>
               </label>
-              <input
-                type="time"
+              <TimeSelect
                 required
-                value={formData.post_time}
-                onChange={(event) => onChange("post_time", event.target.value)}
+                value={timeForInput(formData.post_time)}
+                onChange={(val) => onChange("post_time", val)}
                 onBlur={triggerAvailabilityCheck}
-                className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
               {availabilityChecking ? (
                 <p className="text-xs text-gray-500 mt-1">Checking availability...</p>
@@ -469,11 +538,9 @@ export function ScheduleSection({
 
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
-              <input
-                type="time"
-                value={customTime}
-                onChange={(event) => setCustomTime(event.target.value)}
-                className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
+              <TimeSelect
+                value={timeForInput(customTime)}
+                onChange={(val) => setCustomTime(val)}
               />
             </div>
 
@@ -506,12 +573,10 @@ export function ScheduleSection({
 
                     <div className="flex items-center gap-2">
                       <Clock size={14} className="text-gray-400" />
-                      <input
-                        type="time"
+                      <TimeSelect
                         value={timeForInput(timeStr)}
-                        onChange={(event) => onUpdateCustomDateTime(dateStr, event.target.value)}
+                        onChange={(val) => onUpdateCustomDateTime(dateStr, val)}
                         onBlur={triggerAvailabilityCheck}
-                        className="text-sm text-gray-700 bg-white border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-gray-900"
                       />
                       {timeStr ? <span className="text-xs text-gray-500">ET</span> : null}
                     </div>

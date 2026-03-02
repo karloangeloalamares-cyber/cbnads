@@ -21,7 +21,7 @@ export async function POST(request) {
 
     const { data: ads, error: adsError } = await supabase
       .from(table("ads"))
-      .select("id, ad_name, advertiser, advertiser_id, product_id, product_name, payment, price")
+      .select("id, ad_name, advertiser, advertiser_id, product_id, product_name, payment, price, post_type, custom_dates")
       .in("id", uniqueAdIds);
     if (adsError) throw adsError;
 
@@ -76,11 +76,27 @@ export async function POST(request) {
     const unresolvedAds = [];
     const lineItems = ads.map((ad) => {
       const product = productsById.get(ad.product_id);
-      const amount = adAmount({
+      let amount = adAmount({
         payment: ad.payment,
         price: ad.price,
         product_price: product?.price,
       });
+
+      if (ad.post_type === "Custom Schedule") {
+        let datesCount = 0;
+        if (Array.isArray(ad.custom_dates)) {
+          datesCount = ad.custom_dates.length;
+        } else if (typeof ad.custom_dates === "string") {
+          try {
+            datesCount = JSON.parse(ad.custom_dates).length;
+          } catch (e) {
+            datesCount = 1;
+          }
+        }
+        if (datesCount > 1) {
+          amount *= datesCount;
+        }
+      }
       const resolvedProductName =
         String(ad.product_name || product?.product_name || "").trim();
       if (!resolvedProductName || amount <= 0) {

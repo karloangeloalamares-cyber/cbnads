@@ -154,7 +154,9 @@ export default function BillingForm({
       // For custom schedules, create an item per date
       for (const dateVal of adData.customDates) {
         if (!dateVal) continue;
-        const date = new Date(dateVal);
+        const dateStrValue = typeof dateVal === "object" ? dateVal.date : dateVal;
+        if (!dateStrValue) continue;
+        const date = new Date(dateStrValue);
         const dateStr = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
         items.push({
           product_id: productId,
