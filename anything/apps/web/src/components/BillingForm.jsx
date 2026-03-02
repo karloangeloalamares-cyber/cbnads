@@ -101,9 +101,12 @@ export default function BillingForm({
         const response = await fetch("/api/products/list");
         if (response.ok) {
           const products = await response.json();
-          const product = products.find(
-            (p) => p.id === parseInt(adData.product_id),
-          );
+          // product_id could be an object {id, name} or a number
+          const requestedId = typeof adData.product_id === 'object'
+            ? parseInt(adData.product_id.id)
+            : parseInt(adData.product_id);
+
+          const product = products.find((p) => p.id === requestedId);
           if (product) {
             productPrice = parseFloat(product.price) || 0;
             productName = `${product.product_name} - ${product.placement}`;
@@ -638,10 +641,10 @@ export default function BillingForm({
                   <div className="text-xs text-gray-500 mb-2">New Invoice</div>
                   <div
                     className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${formData.status === "Paid"
-                        ? "text-emerald-700 bg-emerald-50 border-emerald-100"
-                        : formData.status === "Pending"
-                          ? "text-amber-700 bg-amber-50 border-amber-100"
-                          : "text-rose-700 bg-rose-50 border-rose-100"
+                      ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+                      : formData.status === "Pending"
+                        ? "text-amber-700 bg-amber-50 border-amber-100"
+                        : "text-rose-700 bg-rose-50 border-rose-100"
                       }`}
                   >
                     {formData.status.toUpperCase()}
