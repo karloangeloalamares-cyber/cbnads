@@ -20,7 +20,7 @@ export default function SubmitAdSuccessPage() {
         </p>
 
         <a
-          href="/ads"
+          href="/ads?section=Dashboard"
           className="inline-flex items-center justify-center bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors font-medium"
         >
           View Dashboard

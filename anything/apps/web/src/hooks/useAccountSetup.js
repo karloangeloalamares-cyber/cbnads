@@ -310,7 +310,7 @@ export function useAccountSetup() {
         }
         params.set("forceLogin", "1");
         params.set("audience", "advertiser");
-        params.set("callbackUrl", "/ads");
+        params.set("callbackUrl", "/ads?section=Dashboard");
         window.location.href = `/account/signin?${params.toString()}`;
     };
 

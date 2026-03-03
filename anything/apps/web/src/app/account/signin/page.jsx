@@ -13,7 +13,7 @@ import { appToast } from "@/lib/toast";
 
 const getDefaultRedirectForUser = (user) => {
   const role = String(user?.role || "").trim().toLowerCase();
-  return role === "advertiser" ? "/ads" : "/ads";
+  return role === "advertiser" ? "/ads?section=Dashboard" : "/ads?section=Dashboard";
 };
 
 const resolveRedirectTarget = (user, params) => {

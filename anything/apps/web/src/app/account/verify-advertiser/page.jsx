@@ -13,7 +13,7 @@ export default function VerifyAdvertiserPage() {
       params.set("verified", "1");
       params.set("forceLogin", "1");
       params.set("audience", "advertiser");
-      params.set("callbackUrl", "/ads");
+      params.set("callbackUrl", "/ads?section=Dashboard");
     }
     if (email) {
       params.set("email", email);

@@ -10,7 +10,7 @@ function useAuth() {
 
     if (result.ok) {
       if (options?.redirect) {
-        const callbackUrl = options?.callbackUrl || '/ads';
+        const callbackUrl = options?.callbackUrl || '/ads?section=Dashboard';
         window.location.href = callbackUrl;
       }
       return { error: null, ok: true };

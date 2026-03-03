@@ -1871,10 +1871,10 @@ export default function AdsPage() {
   const [db, setDb] = useState(() => readDb());
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
-      return "Ads";
+      return "Dashboard";
     }
     const value = new URLSearchParams(window.location.search).get("section");
-    return sections.includes(value) ? value : "Ads";
+    return sections.includes(value) ? value : "Dashboard";
   });
   const [view, setView] = useState("list");
   const [adsFilters, setAdsFilters] = useState({
@@ -10003,5 +10003,4 @@ export default function AdsPage() {
     </div>
   );
 }
-
 
