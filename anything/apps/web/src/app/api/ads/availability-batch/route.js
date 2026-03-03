@@ -1,5 +1,5 @@
-import { db, normalizePostType } from "../../utils/supabase-db.js";
-import { checkBatchAvailability } from "../../utils/ad-availability.js";
+import { db, normalizePostType } from "../../../utils/supabase-db.js";
+import { checkBatchAvailability } from "../../../utils/ad-availability.js";
 
 export async function POST(request) {
   try {

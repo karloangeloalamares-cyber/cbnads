@@ -1,11 +1,11 @@
-import { adDatesForDayCheck, db, normalizePostType, table } from "../../utils/supabase-db.js";
+import { adDatesForDayCheck, db, normalizePostType, table } from "../../../utils/supabase-db.js";
 import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
   requireAdminOrAdvertiser,
   resolveAdvertiserScope,
-} from "../../utils/auth-check.js";
+} from "../../../utils/auth-check.js";
 
 const toLegacyPostType = (value) => {
   const normalized = normalizePostType(value);
