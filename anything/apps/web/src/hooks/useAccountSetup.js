@@ -175,11 +175,12 @@ export function useAccountSetup() {
             const code = url.searchParams.get("code");
 
             if (code) {
+                // exchangeCodeForSession may fail if Supabase's detectSessionInUrl
+                // already exchanged it automatically on client init — fall through
+                // and verify via getSession() regardless.
                 const { error: codeError } = await supabase.auth.exchangeCodeForSession(code);
                 if (codeError) {
-                    setAccountError(codeError.message || "Google sign-in failed.");
-                    setGoogleLoading(false);
-                    return;
+                    console.warn("[completeGoogleSignUp] exchangeCodeForSession:", codeError.message);
                 }
             }
 
@@ -189,7 +190,7 @@ export function useAccountSetup() {
             } = await supabase.auth.getSession();
 
             if (sessionError || !session?.access_token) {
-                setAccountError("Google sign-in did not return a valid session.");
+                setAccountError("Google sign-in did not return a valid session. Please try again.");
                 setGoogleLoading(false);
                 return;
             }
@@ -251,6 +252,7 @@ export function useAccountSetup() {
                     ? "The request timed out. Please check your connection and try again."
                     : err.message || "Failed to complete Google sign-up.";
             setAccountError(message);
+            appToast.error({ title: "Sign-up failed", description: message });
         } finally {
             setGoogleLoading(false);
         }
