@@ -63,6 +63,24 @@ export async function POST(request) {
             );
         }
 
+        // Block non-advertiser users (admins, staff, etc.) from creating advertiser
+        // accounts via this public flow — even if they use their own Google account.
+        const currentUserRole = String(
+            googleUser.user_metadata?.role ||
+            googleUser.app_metadata?.role ||
+            "",
+        ).toLowerCase();
+
+        if (currentUserRole && currentUserRole !== "advertiser") {
+            return Response.json(
+                {
+                    error:
+                        "This Google account is already associated with a non-advertiser account. Please use a different Google account.",
+                },
+                { status: 409 },
+            );
+        }
+
         const normalizedEmail = normalizeEmail(googleUser.email);
         const fullName =
             contactName ||

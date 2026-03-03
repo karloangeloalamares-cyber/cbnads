@@ -223,6 +223,10 @@ export function useAccountSetup() {
                 throw new Error(data.error || "Failed to link Google account.");
             }
 
+            // Refresh the session so the client JWT reflects the updated role
+            // (admin.updateUserById on the server doesn't invalidate the cached token)
+            await supabase.auth.refreshSession();
+
             // Clean up sessionStorage and URL
             sessionStorage.removeItem("googleAdLink");
             const cleanUrl = `${url.pathname}`;
