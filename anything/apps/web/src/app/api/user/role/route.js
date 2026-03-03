@@ -1,4 +1,4 @@
-import { getSessionUser, requireAuth } from "../../../utils/auth-check.js";
+import { getSessionUser, requireAuth } from "../../utils/auth-check.js";
 
 export async function GET(request) {
   try {

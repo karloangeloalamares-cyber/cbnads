@@ -1,5 +1,5 @@
-import { db, table } from "../../../utils/supabase-db.js";
-import { requireAdmin } from "../../../utils/auth-check.js";
+import { db, table } from "../../utils/supabase-db.js";
+import { requireAdmin } from "../../utils/auth-check.js";
 
 export async function GET() {
   try {

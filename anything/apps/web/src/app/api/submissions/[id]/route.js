@@ -1,11 +1,11 @@
-import { db, table } from "../../../utils/supabase-db.js";
+import { db, table } from "../../utils/supabase-db.js";
 import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
   requireAuth,
   resolveAdvertiserScope,
-} from "../../../utils/auth-check.js";
+} from "../../utils/auth-check.js";
 import { can } from "../../../../lib/permissions.js";
 
 export async function GET(request, { params }) {

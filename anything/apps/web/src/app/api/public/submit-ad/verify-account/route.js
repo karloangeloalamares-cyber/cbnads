@@ -1,10 +1,10 @@
-import { db } from "../../../../utils/supabase-db.js";
+import { db } from "../../../utils/supabase-db.js";
 import {
   assertAdvertiserVerificationConfig,
   normalizeEmail,
   upsertAdvertiserProfile,
   verifyAdvertiserVerificationToken,
-} from "../../../../utils/advertiser-auth.js";
+} from "../../../utils/advertiser-auth.js";
 
 export async function POST(request) {
   try {

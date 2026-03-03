@@ -1,11 +1,11 @@
-import { db } from "../../../../utils/supabase-db.js";
+import { db } from "../../../utils/supabase-db.js";
 import {
     ensureAdvertiserRecord,
     findAuthUserByEmail,
     normalizeEmail,
     updatePendingAdAccountEmail,
     upsertAdvertiserProfile,
-} from "../../../../utils/advertiser-auth.js";
+} from "../../../utils/advertiser-auth.js";
 
 const withRetry = async (fn, { retries = 2, delay = 500 } = {}) => {
     for (let attempt = 0; ; attempt++) {

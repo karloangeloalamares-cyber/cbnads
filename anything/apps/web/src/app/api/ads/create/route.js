@@ -1,12 +1,12 @@
-import { dateOnly, db, normalizePostType, table } from "../../../utils/supabase-db.js";
-import { requirePermission } from "../../../utils/auth-check.js";
-import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
+import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
+import { requirePermission } from "../../utils/auth-check.js";
+import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
   expandDateRange,
-} from "../../../utils/ad-availability.js";
+} from "../../utils/ad-availability.js";
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 

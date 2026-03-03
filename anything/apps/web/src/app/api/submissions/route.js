@@ -1,11 +1,11 @@
-import { db, table } from "../../utils/supabase-db.js";
+import { db, table } from "../utils/supabase-db.js";
 import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
   requireAdminOrAdvertiser,
   resolveAdvertiserScope,
-} from "../../utils/auth-check.js";
+} from "../utils/auth-check.js";
 
 const submissionPriority = (status) => {
   const normalized = String(status || "").trim().toLowerCase();

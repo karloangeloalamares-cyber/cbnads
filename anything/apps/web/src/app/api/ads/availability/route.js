@@ -1,5 +1,5 @@
-import { db, normalizePostType } from "../../../utils/supabase-db.js";
-import { checkSingleDateAvailability } from "../../../utils/ad-availability.js";
+import { db, normalizePostType } from "../../utils/supabase-db.js";
+import { checkSingleDateAvailability } from "../../utils/ad-availability.js";
 
 export async function POST(request) {
   try {

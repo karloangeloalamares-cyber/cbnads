@@ -1,15 +1,15 @@
-import { db, table } from "../../../utils/supabase-db.js";
-import { sendEmail } from "../../../utils/send-email.js";
-import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
+import { db, table } from "../../utils/supabase-db.js";
+import { sendEmail } from "../../utils/send-email.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
   expandDateRange,
-} from "../../../utils/ad-availability.js";
+} from "../../utils/ad-availability.js";
 import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
-} from "../../../../../lib/phone.js";
+} from "../../../../lib/phone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
