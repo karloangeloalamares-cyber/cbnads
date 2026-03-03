@@ -33,10 +33,10 @@
       <div className="text-sm text-gray-600">
         Feel free to email us at{" "}
         <a
-          href="mailto:advertise@cbnads.com"
+          href="mailto:advertise@cbn.com"
           className="text-gray-900 underline hover:text-gray-700"
         >
-          advertise@cbnads.com
+          advertise@cbn.com
         </a>{" "}
         for any concerns or questions
       </div>

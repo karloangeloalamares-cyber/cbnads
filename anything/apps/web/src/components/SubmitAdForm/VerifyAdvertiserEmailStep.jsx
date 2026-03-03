@@ -86,11 +86,12 @@ export function VerifyAdvertiserEmailStep({
           Submit another ad
         </button>
         <span>or</span>
+        <span>email us at</span>
         <a
-          href="mailto:advertise@cbnads.com"
+          href="mailto:advertise@cbn.com"
           className="text-gray-900 underline hover:text-gray-700"
         >
-          advertise@cbnads.com
+          advertise@cbn.com
         </a>
       </div>
     </div>
