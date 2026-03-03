@@ -1,4 +1,55 @@
 import * as React from 'react';
+import { bucketName, getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
+
+async function uploadFileDirectly(file) {
+  const signResponse = await fetch("/api/upload/signed-url", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fileName: file.name,
+      mimeType: file.type || "application/octet-stream",
+    }),
+  });
+
+  if (!signResponse.ok) {
+    throw new Error("Upload failed");
+  }
+
+  const signedUpload = await signResponse.json();
+  const supabase = getSupabaseClient();
+  const targetBucket = String(signedUpload.bucket || "").trim() || bucketName("uploads");
+  const targetPath = String(signedUpload.path || "").trim();
+  const uploadToken = String(signedUpload.token || "").trim();
+
+  if (!targetPath || !uploadToken) {
+    throw new Error("Upload failed");
+  }
+
+  const { error } = await supabase.storage.from(targetBucket).uploadToSignedUrl(
+    targetPath,
+    uploadToken,
+    file,
+    {
+      contentType: file.type || "application/octet-stream",
+      upsert: false,
+    },
+  );
+
+  if (error) {
+    throw new Error(error.message || "Upload failed");
+  }
+
+  const publicUrl =
+    String(signedUpload.publicUrl || "").trim() ||
+    supabase.storage.from(targetBucket).getPublicUrl(targetPath).data.publicUrl;
+
+  return {
+    url: publicUrl,
+    mimeType: file.type || null,
+  };
+}
 
 function useUpload() {
   const [loading, setLoading] = React.useState(false);
@@ -8,6 +59,10 @@ function useUpload() {
       let response;
       if ("file" in input && input.file) {
         const file = input.file;
+        if (hasSupabaseConfig) {
+          return await uploadFileDirectly(file);
+        }
+
         const arrayBuffer = await file.arrayBuffer();
         response = await fetch("/api/upload", {
           method: "POST",
