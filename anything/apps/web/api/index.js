@@ -1,7 +1,7 @@
 // AUTO-GENERATED: Consolidates all React Router APIs into a single Vercel Serverless Function
 import * as route_0 from "../src/app/api/invoices/route.js";
 import * as route_1 from "../src/app/api/submissions/route.js";
-import * as route_2 from "../src/app/api/upload/route.js";
+
 import * as route_3 from "../src/app/api/admin/fix-all-spending/route.js";
 import * as route_4 from "../src/app/api/admin/members/route.js";
 import * as route_5 from "../src/app/api/admin/notification-preferences/route.js";
@@ -110,8 +110,7 @@ const routes = [
   { regex: new RegExp("^/api/submissions/(?<id>[^/]+)$"), module: route_36 },
   { regex: new RegExp("^/api/products/(?<id>[^/]+)$"), module: route_33 },
   { regex: new RegExp("^/api/submissions$"), module: route_1 },
-  { regex: new RegExp("^/api/invoices$"), module: route_0 },
-  { regex: new RegExp("^/api/upload$"), module: route_2 }
+  { regex: new RegExp("^/api/invoices$"), module: route_0 }
 ];
 
 export default async function handler(req, res) {
@@ -121,7 +120,7 @@ export default async function handler(req, res) {
   const url = new URL(req.url || "/", `${proto}://${host}`);
   let pathname = url.pathname;
   if (!pathname.startsWith("/api")) {
-      pathname = "/api" + (pathname === "/" ? "" : pathname);
+    pathname = "/api" + (pathname === "/" ? "" : pathname);
   }
 
   // Find matching route
