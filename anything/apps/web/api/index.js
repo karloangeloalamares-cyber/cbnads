@@ -54,6 +54,7 @@ import * as route_51 from "../src/app/api/public/submit-ad/resend-verification/r
 import * as route_52 from "../src/app/api/public/submit-ad/verify-account/route.js";
 import * as route_53 from "../src/app/api/reconciliation/cases/review/route.js";
 import * as route_54 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_55 from "../src/app/api/upload/route.js";
 import { handleRouteRequest } from "../vercel-api/adapter.js";
 
 const routes = [
@@ -110,7 +111,8 @@ const routes = [
   { regex: new RegExp("^/api/submissions/(?<id>[^/]+)$"), module: route_36 },
   { regex: new RegExp("^/api/products/(?<id>[^/]+)$"), module: route_33 },
   { regex: new RegExp("^/api/submissions$"), module: route_1 },
-  { regex: new RegExp("^/api/invoices$"), module: route_0 }
+  { regex: new RegExp("^/api/invoices$"), module: route_0 },
+  { regex: new RegExp("^/api/upload$"), module: route_55 }
 ];
 
 export default async function handler(req, res) {
