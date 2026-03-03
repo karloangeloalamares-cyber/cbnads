@@ -51,6 +51,8 @@ import {
   X,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
+import { Modal } from "@/components/Modal";
+import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
@@ -71,6 +73,7 @@ import {
   formatDateTimeInAppTimeZone,
   getTodayDateInAppTimeZone,
   getTodayInAppTimeZone,
+  isPastDateTimeInAppTimeZone,
 } from "@/lib/timezone";
 import {
   approvePendingAd,
@@ -99,7 +102,7 @@ import {
   upsertProduct,
 } from "@/lib/localDb";
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
-import { hasSupabaseConfig } from "@/lib/supabase";
+import { getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 
 const sections = [
   "Dashboard",
@@ -209,6 +212,42 @@ const blankInvoice = {
   amount_paid: "0.00",
   notes: "",
 };
+
+const blankSubmissionEditForm = {
+  advertiser_name: "",
+  contact_name: "",
+  email: "",
+  phone_number: "",
+  ad_name: "",
+  post_type: "One-Time Post",
+  post_date_from: "",
+  post_date_to: "",
+  custom_dates: [],
+  post_time: "",
+  reminder_minutes: 15,
+  ad_text: "",
+  media: [],
+  placement: "",
+  notes: "",
+};
+
+const toSubmissionEditForm = (item) => ({
+  advertiser_name: item?.advertiser_name || "",
+  contact_name: item?.contact_name || "",
+  email: item?.email || "",
+  phone_number: formatUSPhoneNumber(item?.phone_number || item?.phone || ""),
+  ad_name: item?.ad_name || "",
+  post_type: formatPostTypeLabel(item?.post_type || "one_time"),
+  post_date_from: item?.post_date_from || item?.post_date || "",
+  post_date_to: item?.post_date_to || "",
+  custom_dates: Array.isArray(item?.custom_dates) ? item.custom_dates : [],
+  post_time: String(item?.post_time || "").slice(0, 8),
+  reminder_minutes: Number(item?.reminder_minutes) || 15,
+  ad_text: item?.ad_text || "",
+  media: Array.isArray(item?.media) ? item.media : [],
+  placement: item?.placement || "",
+  notes: item?.notes || "",
+});
 
 const formatCurrency = (value) => {
   const amount = Number(value) || 0;
@@ -1956,9 +1995,19 @@ export default function AdsPage() {
   });
   const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
-  const [submissionPreviewModal, setSubmissionPreviewModal] = useState(null);
-  const [submissionReviewSource, setSubmissionReviewSource] = useState(null);
-  const [submissionDeleteModal, setSubmissionDeleteModal] = useState(null);
+  const [submissionEditModal, setSubmissionEditModal] = useState(null);
+  const [submissionEditForm, setSubmissionEditForm] = useState(blankSubmissionEditForm);
+  const [submissionEditCustomDate, setSubmissionEditCustomDate] = useState("");
+  const [submissionEditCustomTime, setSubmissionEditCustomTime] = useState("");
+  const [submissionEditLoading, setSubmissionEditLoading] = useState(false);
+  const [submissionEditAvailabilityError, setSubmissionEditAvailabilityError] =
+    useState(null);
+  const [submissionEditCheckingAvailability, setSubmissionEditCheckingAvailability] =
+    useState(false);
+  const [submissionEditPastTimeError, setSubmissionEditPastTimeError] = useState(null);
+  const [submissionEditFullyBookedDates, setSubmissionEditFullyBookedDates] = useState([]);
+  const submissionEditFormRef = useRef(blankSubmissionEditForm);
+  const submissionEditAvailabilityRequestIdRef = useRef(0);
   const [adDeleteModal, setAdDeleteModal] = useState(null);
   const [invoiceDeleteModal, setInvoiceDeleteModal] = useState(null);
   const [user, setUser] = useState(() => getSignedInUser());
@@ -2067,6 +2116,10 @@ export default function AdsPage() {
   useEffect(() => {
     createAdStateRef.current = ad;
   }, [ad]);
+
+  useEffect(() => {
+    submissionEditFormRef.current = submissionEditForm;
+  }, [submissionEditForm]);
 
   useEffect(() => {
     if (!settingsProfileMessage) {
@@ -3754,6 +3807,402 @@ export default function AdsPage() {
       appToast.error({
         title: error instanceof Error ? error.message : "Action failed",
       });
+    }
+  };
+
+  const fetchWithSessionAuth = async (input, init = {}) => {
+    if (!hasSupabaseConfig) {
+      return fetch(input, init);
+    }
+
+    const supabase = getSupabaseClient();
+    let {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    const expiresAtMs = Number(session?.expires_at || 0) * 1000;
+    const needsRefresh =
+      !session?.access_token ||
+      (Number.isFinite(expiresAtMs) &&
+        expiresAtMs > 0 &&
+        expiresAtMs <= Date.now() + 60_000);
+
+    if (needsRefresh) {
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      session = refreshData?.session || session || null;
+    }
+
+    const accessToken = String(session?.access_token || "").trim();
+    if (!accessToken) {
+      return fetch(input, init);
+    }
+
+    const headers = new Headers(init.headers || {});
+    headers.set("Authorization", `Bearer ${accessToken}`);
+
+    const response = await fetch(input, {
+      ...init,
+      headers,
+    });
+
+    if (response.status !== 401) {
+      return response;
+    }
+
+    const { data: refreshData } = await supabase.auth.refreshSession();
+    const refreshedToken = String(refreshData?.session?.access_token || "").trim();
+    if (!refreshedToken || refreshedToken === accessToken) {
+      return response;
+    }
+
+    const retryHeaders = new Headers(init.headers || {});
+    retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
+
+    return fetch(input, {
+      ...init,
+      headers: retryHeaders,
+    });
+  };
+
+  const resetSubmissionEditState = () => {
+    submissionEditFormRef.current = blankSubmissionEditForm;
+    submissionEditAvailabilityRequestIdRef.current += 1;
+    setSubmissionEditModal(null);
+    setSubmissionEditForm(blankSubmissionEditForm);
+    setSubmissionEditCustomDate("");
+    setSubmissionEditCustomTime("");
+    setSubmissionEditLoading(false);
+    setSubmissionEditCheckingAvailability(false);
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditPastTimeError(null);
+    setSubmissionEditFullyBookedDates([]);
+  };
+
+  const openSubmissionEditModal = (submission) => {
+    const nextForm = toSubmissionEditForm(submission);
+    submissionEditFormRef.current = nextForm;
+    submissionEditAvailabilityRequestIdRef.current += 1;
+    setSubmissionEditModal(submission);
+    setSubmissionEditForm(nextForm);
+    setSubmissionEditCustomDate("");
+    setSubmissionEditCustomTime("");
+    setSubmissionEditLoading(false);
+    setSubmissionEditCheckingAvailability(false);
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditPastTimeError(null);
+    setSubmissionEditFullyBookedDates([]);
+  };
+
+  const handleSubmissionEditChange = (field, value) => {
+    setSubmissionEditForm((current) => {
+      const normalizedValue =
+        field === "phone_number" ? formatUSPhoneNumber(value) : value;
+      const next = {
+        ...current,
+        [field]: normalizedValue,
+      };
+      submissionEditFormRef.current = next;
+
+      if (["post_date_from", "post_time"].includes(field)) {
+        const dateValue = field === "post_date_from" ? normalizedValue : current.post_date_from;
+        const timeValue = field === "post_time" ? normalizedValue : current.post_time;
+        if (dateValue && timeValue) {
+          setSubmissionEditPastTimeError(
+            isPastDateTimeInAppTimeZone(dateValue, timeValue)
+              ? "This date and time is in the past. Please choose a future time."
+              : null,
+          );
+        } else {
+          setSubmissionEditPastTimeError(null);
+        }
+      }
+
+      return next;
+    });
+
+    if (["post_type", "post_date_from", "post_date_to", "post_time", "custom_dates"].includes(field)) {
+      submissionEditAvailabilityRequestIdRef.current += 1;
+      setSubmissionEditCheckingAvailability(false);
+      setSubmissionEditAvailabilityError(null);
+      setSubmissionEditFullyBookedDates([]);
+    }
+  };
+
+  const addSubmissionEditMedia = (mediaItem) => {
+    setSubmissionEditForm((current) => {
+      const next = {
+        ...current,
+        media: [...(Array.isArray(current.media) ? current.media : []), mediaItem],
+      };
+      submissionEditFormRef.current = next;
+      return next;
+    });
+  };
+
+  const removeSubmissionEditMedia = (index) => {
+    setSubmissionEditForm((current) => {
+      const next = {
+        ...current,
+        media: (Array.isArray(current.media) ? current.media : []).filter((_, i) => i !== index),
+      };
+      submissionEditFormRef.current = next;
+      return next;
+    });
+  };
+
+  const addSubmissionEditCustomDate = () => {
+    if (!submissionEditCustomDate) {
+      return;
+    }
+
+    setSubmissionEditForm((current) => {
+      const existing = Array.isArray(current.custom_dates) ? current.custom_dates : [];
+      const exists = existing.some((entry) => {
+        const entryDate = typeof entry === "object" && entry !== null ? entry.date : entry;
+        return String(entryDate || "") === submissionEditCustomDate;
+      });
+      if (exists) {
+        return current;
+      }
+
+      const timeForDate = submissionEditCustomTime || current.post_time || "";
+      const timeWithSeconds =
+        timeForDate && timeForDate.length === 5 ? `${timeForDate}:00` : timeForDate;
+
+      const next = {
+        ...current,
+        custom_dates: [
+          ...existing,
+          {
+            date: submissionEditCustomDate,
+            time: timeWithSeconds,
+            reminder: "15-min",
+          },
+        ],
+      };
+      submissionEditFormRef.current = next;
+      return next;
+    });
+
+    setSubmissionEditCustomDate("");
+    setSubmissionEditCustomTime("");
+    submissionEditAvailabilityRequestIdRef.current += 1;
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditFullyBookedDates([]);
+  };
+
+  const removeSubmissionEditCustomDate = (dateToRemove) => {
+    setSubmissionEditForm((current) => {
+      const next = {
+        ...current,
+        custom_dates: (Array.isArray(current.custom_dates) ? current.custom_dates : []).filter(
+          (entry) => {
+            const entryDate = typeof entry === "object" && entry !== null ? entry.date : entry;
+            return entryDate !== dateToRemove;
+          },
+        ),
+      };
+      submissionEditFormRef.current = next;
+      return next;
+    });
+
+    submissionEditAvailabilityRequestIdRef.current += 1;
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditFullyBookedDates([]);
+  };
+
+  const updateSubmissionEditCustomDateTime = (dateStr, newTime) => {
+    const timeWithSeconds =
+      newTime && newTime.length === 5 ? `${newTime}:00` : newTime;
+
+    setSubmissionEditForm((current) => {
+      const next = {
+        ...current,
+        custom_dates: (Array.isArray(current.custom_dates) ? current.custom_dates : []).map(
+          (entry) => {
+            if (typeof entry === "object" && entry !== null && entry.date === dateStr) {
+              return { ...entry, time: timeWithSeconds };
+            }
+            if (typeof entry === "string" && entry === dateStr) {
+              return { date: entry, time: timeWithSeconds, reminder: "15-min" };
+            }
+            return entry;
+          },
+        ),
+      };
+      submissionEditFormRef.current = next;
+      return next;
+    });
+
+    submissionEditAvailabilityRequestIdRef.current += 1;
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditFullyBookedDates([]);
+  };
+
+  const checkSubmissionEditAvailability = async () => {
+    if (!submissionEditModal?.id) {
+      return { available: true, availabilityError: null, fullyBookedDates: [] };
+    }
+
+    const requestId = submissionEditAvailabilityRequestIdRef.current + 1;
+    submissionEditAvailabilityRequestIdRef.current = requestId;
+    setSubmissionEditCheckingAvailability(true);
+    setSubmissionEditAvailabilityError(null);
+    setSubmissionEditFullyBookedDates([]);
+
+    try {
+      const currentForm = submissionEditFormRef.current;
+      const result = await checkAdAvailability({
+        postType: currentForm.post_type,
+        postDateFrom: currentForm.post_date_from,
+        postDateTo: currentForm.post_date_to,
+        customDates: currentForm.custom_dates,
+        postTime: currentForm.post_time,
+        excludeAdId: submissionEditModal.id,
+      });
+
+      if (requestId !== submissionEditAvailabilityRequestIdRef.current) {
+        return result;
+      }
+
+      if (!result.available) {
+        setSubmissionEditAvailabilityError(result.availabilityError);
+        setSubmissionEditFullyBookedDates(result.fullyBookedDates);
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Error checking submission availability:", error);
+      if (requestId === submissionEditAvailabilityRequestIdRef.current) {
+        setSubmissionEditAvailabilityError("Could not check availability. Please try again.");
+      }
+      throw error;
+    } finally {
+      if (requestId === submissionEditAvailabilityRequestIdRef.current) {
+        setSubmissionEditCheckingAvailability(false);
+      }
+    }
+  };
+
+  const saveSubmissionEdit = async () => {
+    if (!submissionEditModal?.id) {
+      return;
+    }
+
+    const currentForm = submissionEditFormRef.current;
+
+    if (
+      !currentForm.advertiser_name ||
+      !currentForm.contact_name ||
+      !currentForm.email ||
+      !currentForm.phone_number ||
+      !currentForm.ad_name
+    ) {
+      appToast.error({
+        title: "Complete all required fields before saving.",
+      });
+      return;
+    }
+
+    if (!isCompleteUSPhoneNumber(currentForm.phone_number)) {
+      appToast.error({
+        title: "Phone number must be a complete US number.",
+      });
+      return;
+    }
+
+    if (
+      currentForm.post_type === "One-Time Post" &&
+      currentForm.post_date_from &&
+      currentForm.post_time &&
+      isPastDateTimeInAppTimeZone(currentForm.post_date_from, currentForm.post_time)
+    ) {
+      setSubmissionEditPastTimeError(
+        "This date and time is in the past. Please choose a future time.",
+      );
+      appToast.error({
+        title: "Cannot save a submission scheduled in the past.",
+      });
+      return;
+    }
+
+    if (currentForm.post_type === "Daily Run") {
+      if (!currentForm.post_date_from || !currentForm.post_date_to) {
+        appToast.error({
+          title: "Start date and end date are required.",
+        });
+        return;
+      }
+      if (currentForm.post_date_to < currentForm.post_date_from) {
+        appToast.error({
+          title: "End date must be on or after the start date.",
+        });
+        return;
+      }
+    }
+
+    if (
+      currentForm.post_type === "Custom Schedule" &&
+      (!Array.isArray(currentForm.custom_dates) || currentForm.custom_dates.length === 0)
+    ) {
+      appToast.error({
+        title: "Add at least one custom date before saving.",
+      });
+      return;
+    }
+
+    try {
+      const availability = await checkSubmissionEditAvailability();
+      if (!availability?.available) {
+        appToast.error({
+          title: availability.availabilityError || "Selected dates are unavailable.",
+        });
+        return;
+      }
+    } catch {
+      appToast.error({
+        title: "Could not check availability. Please try again.",
+      });
+      return;
+    }
+
+    setSubmissionEditLoading(true);
+
+    try {
+      const response = await fetchWithSessionAuth(`/api/submissions/${submissionEditModal.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...currentForm,
+          custom_dates: currentForm.custom_dates,
+          post_time:
+            currentForm.post_time && currentForm.post_time.length === 5
+              ? `${currentForm.post_time}:00`
+              : currentForm.post_time,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to update submission.");
+      }
+
+      resetDbCache({ emit: false });
+      await ensureDb();
+      setDb(readDb());
+      resetSubmissionEditState();
+      appToast.success({
+        title: "Submission updated.",
+      });
+    } catch (error) {
+      console.error("Failed to update submission:", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to update submission.",
+      });
+    } finally {
+      setSubmissionEditLoading(false);
     }
   };
 
@@ -6143,6 +6592,18 @@ export default function AdsPage() {
                             </td>
                             <td className="px-6 py-3.5">
                               <div className="flex gap-2">
+                                {isAdvertiser && item.status === "pending" ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-900"
+                                    title="Edit pending submission"
+                                    aria-label="Edit pending submission"
+                                    onClick={() => openSubmissionEditModal(item)}
+                                  >
+                                    <Pencil size={16} />
+                                    <span>Edit</span>
+                                  </button>
+                                ) : (
                                 <button
                                   type="button"
                                   className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
@@ -6156,6 +6617,7 @@ export default function AdsPage() {
                                 >
                                   <Eye size={16} />
                                 </button>
+                                )}
                                 {isAdmin && item.status === "pending" ? (
                                   <>
                                     <button
@@ -10036,6 +10498,112 @@ export default function AdsPage() {
             </div>
           )}
         </main>
+
+        <Modal
+          isOpen={Boolean(submissionEditModal)}
+          onClose={() => {
+            if (!submissionEditLoading) {
+              resetSubmissionEditState();
+            }
+          }}
+          size="xl"
+        >
+          {submissionEditModal ? (
+            <div className="flex max-h-[90vh] flex-col">
+              <div className="border-b border-gray-200 px-6 py-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-semibold text-gray-900">
+                      Edit pending submission
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Update this submission before the team reviews it.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!submissionEditLoading) {
+                        resetSubmissionEditState();
+                      }
+                    }}
+                    disabled={submissionEditLoading}
+                    className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Close edit submission modal"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto px-6 py-6">
+                <div className="space-y-8">
+                  <AdvertiserInfoSection
+                    formData={submissionEditForm}
+                    onChange={handleSubmissionEditChange}
+                  />
+
+                  <AdDetailsSection
+                    formData={submissionEditForm}
+                    onChange={handleSubmissionEditChange}
+                    onAddMedia={addSubmissionEditMedia}
+                    onRemoveMedia={removeSubmissionEditMedia}
+                  />
+
+                  <PostTypeSection
+                    selectedType={submissionEditForm.post_type}
+                    onChange={handleSubmissionEditChange}
+                  />
+
+                  <ScheduleSection
+                    postType={submissionEditForm.post_type}
+                    formData={submissionEditForm}
+                    onChange={handleSubmissionEditChange}
+                    customDate={submissionEditCustomDate}
+                    setCustomDate={setSubmissionEditCustomDate}
+                    customTime={submissionEditCustomTime}
+                    setCustomTime={setSubmissionEditCustomTime}
+                    onAddCustomDate={addSubmissionEditCustomDate}
+                    onRemoveCustomDate={removeSubmissionEditCustomDate}
+                    onUpdateCustomDateTime={updateSubmissionEditCustomDateTime}
+                    onCheckAvailability={checkSubmissionEditAvailability}
+                    checkingAvailability={submissionEditCheckingAvailability}
+                    availabilityError={submissionEditAvailabilityError}
+                    pastTimeError={submissionEditPastTimeError}
+                    fullyBookedDates={submissionEditFullyBookedDates}
+                    excludeAdId={submissionEditModal.id}
+                  />
+
+                  <NotesSection
+                    notes={submissionEditForm.notes}
+                    onChange={handleSubmissionEditChange}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={resetSubmissionEditState}
+                    disabled={submissionEditLoading}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveSubmissionEdit}
+                    disabled={submissionEditLoading || submissionEditCheckingAvailability}
+                    className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {submissionEditLoading ? "Saving..." : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Modal>
       </div>
     </div>
   );
