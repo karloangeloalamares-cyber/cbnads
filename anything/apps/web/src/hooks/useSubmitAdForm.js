@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   checkAdAvailability,
   normalizeCustomDateEntries,
@@ -12,6 +12,8 @@ import {
   formatUSPhoneNumber,
   isCompleteUSPhoneNumber,
 } from "@/lib/phone";
+import { appToast } from "@/lib/toast";
+import { useAccountSetup } from "./useAccountSetup";
 
 const initialFormData = {
   advertiser_name: "",
@@ -31,33 +33,22 @@ const initialFormData = {
   notes: "",
 };
 
-const initialAccountData = (email = "") => ({
-  email,
-  password: "",
-  confirmPassword: "",
-});
-
 export function useSubmitAdForm() {
   const [formData, setFormData] = useState(initialFormData);
   const [submittedData, setSubmittedData] = useState(null);
   const [pendingAdId, setPendingAdId] = useState("");
   const [phase, setPhase] = useState("form");
-  const [accountData, setAccountData] = useState(initialAccountData());
-  const [accountError, setAccountError] = useState(null);
-  const [accountLoading, setAccountLoading] = useState(false);
-  const [resendLoading, setResendLoading] = useState(false);
-  const [resendError, setResendError] = useState(null);
-  const [resendMessage, setResendMessage] = useState(null);
   const [customDate, setCustomDate] = useState("");
   const [customTime, setCustomTime] = useState("");
-  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
 
-  const handleChange = (field, value) => {
+  const account = useAccountSetup();
+
+  const handleChange = useCallback((field, value) => {
     setFormData((prev) => {
       const normalizedValue =
         field === "phone_number" ? formatUSPhoneNumber(value) : value;
@@ -85,20 +76,20 @@ export function useSubmitAdForm() {
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
-  };
+  }, []);
 
-  const handleAccountChange = (field, value) => {
-    setAccountData((prev) => ({ ...prev, [field]: value }));
-    setAccountError(null);
-    setResendError(null);
-    setResendMessage(null);
+  const showSubmitError = (message) => {
+    appToast.error({
+      title: "Unable to submit ad",
+      description: message,
+    });
   };
 
   const addCustomDate = () => {
     if (!customDate) return;
 
     if (isBeforeTodayInAppTimeZone(customDate)) {
-      setError("Cannot select past dates");
+      showSubmitError("Cannot select past dates");
       return;
     }
 
@@ -116,13 +107,12 @@ export function useSubmitAdForm() {
       const newEntry = {
         date: customDate,
         time: timeWithSeconds,
-        reminder_minutes: formData.reminder_minutes || 15,
+        reminder: "15-min",
       };
 
       handleChange("custom_dates", [...formData.custom_dates, newEntry]);
       setCustomDate("");
       setCustomTime("");
-      setError(null);
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
@@ -151,7 +141,7 @@ export function useSubmitAdForm() {
       }
 
       if (typeof entry === "string" && entry === dateStr) {
-        return { date: entry, time: timeWithSeconds, reminder_minutes: 15 };
+        return { date: entry, time: timeWithSeconds, reminder: "15-min" };
       }
 
       return entry;
@@ -160,19 +150,19 @@ export function useSubmitAdForm() {
     handleChange("custom_dates", updated);
   };
 
-  const addMedia = (mediaItem) => {
+  const addMedia = useCallback((mediaItem) => {
     setFormData((prev) => ({
       ...prev,
       media: [...prev.media, mediaItem],
     }));
-  };
+  }, []);
 
-  const removeMedia = (index) => {
+  const removeMedia = useCallback((index) => {
     setFormData((prev) => ({
       ...prev,
       media: prev.media.filter((_, i) => i !== index),
     }));
-  };
+  }, []);
 
   const checkAvailability = async () => {
     setCheckingAvailability(true);
@@ -203,7 +193,7 @@ export function useSubmitAdForm() {
   const validateDateTime = () => {
     if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
       if (isPastDateTimeInAppTimeZone(formData.post_date_from, formData.post_time)) {
-        setError("Cannot select a past date and time");
+        showSubmitError("Cannot select a past date and time");
         setPastTimeError("This date and time is in the past. Please choose a future time.");
         return false;
       }
@@ -214,7 +204,7 @@ export function useSubmitAdForm() {
       const today = getTodayInAppTimeZone();
 
       if (startDate && today && startDate < today) {
-        setError("Start date cannot be in the past");
+        showSubmitError("Start date cannot be in the past");
         setPastTimeError(null);
         return false;
       }
@@ -222,7 +212,7 @@ export function useSubmitAdForm() {
       if (formData.post_date_to) {
         const endDate = String(formData.post_date_to || "").trim();
         if (endDate < startDate) {
-          setError("End date must be after start date");
+          showSubmitError("End date must be after start date");
           setPastTimeError(null);
           return false;
         }
@@ -235,7 +225,6 @@ export function useSubmitAdForm() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    setError(null);
     setLoading(true);
 
     if (
@@ -245,19 +234,19 @@ export function useSubmitAdForm() {
       !formData.phone_number ||
       !formData.ad_name
     ) {
-      setError("Please fill in all required fields");
+      showSubmitError("Please fill in all required fields");
       setLoading(false);
       return;
     }
 
     if (!isCompleteUSPhoneNumber(formData.phone_number)) {
-      setError("Phone number must be a complete US number.");
+      showSubmitError("Phone number must be a complete US number.");
       setLoading(false);
       return;
     }
 
     if (pastTimeError) {
-      setError(pastTimeError);
+      showSubmitError(pastTimeError);
       setLoading(false);
       return;
     }
@@ -268,7 +257,7 @@ export function useSubmitAdForm() {
     }
 
     if (fullyBookedDates.length > 0) {
-      setError("Please resolve fully booked dates before submitting.");
+      showSubmitError("Please resolve fully booked dates before submitting.");
       setLoading(false);
       return;
     }
@@ -284,13 +273,13 @@ export function useSubmitAdForm() {
 
       if (!availability.available) {
         setFullyBookedDates(availability.fullyBookedDates);
-        setError(availability.availabilityError || "Selected dates are unavailable.");
+        showSubmitError(availability.availabilityError || "Selected dates are unavailable.");
         setLoading(false);
         return;
       }
     } catch (err) {
       console.error("Error checking availability:", err);
-      setError("Could not check availability. Please try again.");
+      showSubmitError("Could not check availability. Please try again.");
       setLoading(false);
       return;
     }
@@ -320,131 +309,63 @@ export function useSubmitAdForm() {
 
       setSubmittedData(nextSubmittedData);
       setPendingAdId(data?.pending_ad?.id || "");
-      setAccountData(initialAccountData(formData.email));
+      account.initAccount(formData.email);
       setPhase("account");
       setFormData(initialFormData);
-      setResendError(null);
-      setResendMessage(null);
     } catch (err) {
       console.error("Error submitting ad:", err);
-      setError(err.message || "Failed to submit ad request");
+      showSubmitError(err.message || "Failed to submit ad request");
     } finally {
       setLoading(false);
     }
   };
 
-  const submitAccountSetup = async (event) => {
-    event.preventDefault();
-    setAccountError(null);
-    setResendError(null);
-    setResendMessage(null);
-
-    if (!submittedData) {
-      setAccountError("Your submission could not be found. Please submit the ad again.");
-      return;
-    }
-
-    if (!accountData.email || !accountData.password || !accountData.confirmPassword) {
-      setAccountError("Please complete all account fields.");
-      return;
-    }
-
-    if (accountData.password.length < 8) {
-      setAccountError("Password must be at least 8 characters.");
-      return;
-    }
-
-    if (accountData.password !== accountData.confirmPassword) {
-      setAccountError("Passwords do not match.");
-      return;
-    }
-
-    setAccountLoading(true);
-
-    try {
-      const response = await fetch("/api/public/submit-ad/account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pendingAdId,
-          advertiserName: submittedData.advertiser_name,
-          contactName: submittedData.contact_name,
-          phoneNumber: submittedData.phone_number,
-          email: accountData.email,
-          password: accountData.password,
-          confirmPassword: accountData.confirmPassword,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to create advertiser account.");
-      }
-
-      setAccountData((prev) => ({
-        ...initialAccountData(data.email || prev.email),
-      }));
-      setPhase("verify");
-    } catch (err) {
-      console.error("Error creating advertiser account:", err);
-      setAccountError(err.message || "Failed to create advertiser account.");
-    } finally {
-      setAccountLoading(false);
-    }
+  const submitAccountSetup = (event) => {
+    return account.submitAccountSetup(event, {
+      pendingAdId,
+      submittedData,
+      onSuccess: () => setPhase("verify"),
+    });
   };
 
-  const resendVerification = async () => {
-    setResendLoading(true);
-    setResendError(null);
-    setResendMessage(null);
+  const continueWithGoogle = () => {
+    return account.startGoogleSignUp({
+      pendingAdId,
+      submittedData,
+    });
+  };
 
-    try {
-      const response = await fetch("/api/public/submit-ad/resend-verification", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: accountData.email || submittedData?.email || "",
-        }),
-      });
+  const completeGoogleLink = () => {
+    return account.completeGoogleSignUp({
+      onSuccess: () => {
+        // Google emails are pre-verified, skip verification step
+      },
+      onSignIn: ({ email }) => {
+        account.goToSignIn({ email });
+      },
+    });
+  };
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to resend verification email.");
-      }
-
-      setResendMessage(`Verification email sent to ${data.email}.`);
-    } catch (err) {
-      console.error("Error resending verification email:", err);
-      setResendError(err.message || "Failed to resend verification email.");
-    } finally {
-      setResendLoading(false);
-    }
+  const resendVerification = () => {
+    return account.resendVerification({
+      email: account.accountData.email || submittedData?.email || "",
+    });
   };
 
   const goToSignIn = () => {
-    const params = new URLSearchParams();
-    const email = accountData.email || submittedData?.email || "";
-    if (email) {
-      params.set("email", email);
-    }
-    params.set("forceLogin", "1");
-    params.set("audience", "advertiser");
-    params.set("callbackUrl", "/ads");
-    window.location.href = `/account/signin?${params.toString()}`;
+    return account.goToSignIn({
+      email: account.accountData.email || submittedData?.email || "",
+    });
   };
 
   const resetSuccess = () => {
     setPhase("form");
     setSubmittedData(null);
     setPendingAdId("");
-    setAccountData(initialAccountData());
-    setAccountError(null);
-    setError(null);
+    account.resetAccount();
     setAvailabilityError(null);
     setPastTimeError(null);
     setFullyBookedDates([]);
-    setResendError(null);
-    setResendMessage(null);
   };
 
   return {
@@ -452,24 +373,24 @@ export function useSubmitAdForm() {
     submittedData,
     pendingAdId,
     phase,
-    accountData,
-    accountError,
-    accountLoading,
-    resendLoading,
-    resendError,
-    resendMessage,
+    accountData: account.accountData,
+    accountError: account.accountError,
+    accountLoading: account.accountLoading,
+    googleLoading: account.googleLoading,
+    resendLoading: account.resendLoading,
+    resendError: account.resendError,
+    resendMessage: account.resendMessage,
     customDate,
     setCustomDate,
     customTime,
     setCustomTime,
-    error,
     loading,
     availabilityError,
     checkingAvailability,
     pastTimeError,
     fullyBookedDates,
     handleChange,
-    handleAccountChange,
+    handleAccountChange: account.handleAccountChange,
     addCustomDate,
     removeCustomDate,
     updateCustomDateTime,
@@ -478,8 +399,11 @@ export function useSubmitAdForm() {
     checkAvailability,
     handleSubmit,
     submitAccountSetup,
+    continueWithGoogle,
+    completeGoogleLink,
     resendVerification,
     goToSignIn,
     resetSuccess,
   };
 }
+

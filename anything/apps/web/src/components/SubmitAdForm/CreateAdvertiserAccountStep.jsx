@@ -5,9 +5,11 @@ export function CreateAdvertiserAccountStep({
   accountData,
   accountError,
   accountLoading,
+  googleLoading,
   submittedData,
   onChange,
   onSubmit,
+  onGoogleSignUp,
 }) {
   useEffect(() => {
     if (!accountError) {
@@ -19,6 +21,8 @@ export function CreateAdvertiserAccountStep({
       description: accountError,
     });
   }, [accountError]);
+
+  const isAnyLoading = accountLoading || googleLoading;
 
   return (
     <div className="max-w-[680px] mx-auto">
@@ -47,6 +51,48 @@ export function CreateAdvertiserAccountStep({
         <div className="text-sm text-gray-600">
           {submittedData?.ad_name || "Untitled ad"} for{" "}
           {submittedData?.advertiser_name || "your business"}
+        </div>
+      </div>
+
+      {/* Google Sign-Up Button */}
+      <div className="mb-6">
+        <button
+          type="button"
+          onClick={onGoogleSignUp}
+          disabled={isAnyLoading}
+          className="w-full flex items-center justify-center gap-3 border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 font-semibold py-3 px-4 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="#EA4335"
+              d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.9-5.4 3.9-3.2 0-5.8-2.7-5.8-6s2.6-6 5.8-6c1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7 6.9 2.7 2.8 6.8 2.8 12s4.1 9.3 9.2 9.3c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.1-1.5H12Z"
+            />
+            <path
+              fill="#34A853"
+              d="M3.9 7.3 7.1 9.6c.9-1.8 2.7-3 4.9-3 1.8 0 3 .8 3.7 1.5l2.5-2.4C16.6 3.6 14.5 2.7 12 2.7c-3.5 0-6.6 2-8.1 4.6Z"
+            />
+            <path
+              fill="#4A90E2"
+              d="M12 21.3c2.4 0 4.5-.8 6-2.3l-2.8-2.2c-.8.6-1.8 1.1-3.2 1.1-3.7 0-5.1-2.5-5.4-3.8l-3.1 2.4c1.5 2.7 4.4 4.8 8.5 4.8Z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M6.6 14.1c-.1-.4-.2-.9-.2-1.4s.1-1 .2-1.4L3.4 8.9C3 9.9 2.8 10.9 2.8 12s.2 2.1.6 3.1l3.2-2.5Z"
+            />
+          </svg>
+          <span>
+            {googleLoading ? "Connecting to Google..." : "Continue with Google"}
+          </span>
+        </button>
+      </div>
+
+      {/* Divider */}
+      <div className="relative mb-6">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-gray-200" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase tracking-wide text-gray-400">
+          <span className="bg-white px-3">Or create with email</span>
         </div>
       </div>
 
@@ -107,7 +153,7 @@ export function CreateAdvertiserAccountStep({
         <div className="pt-6 border-t">
           <button
             type="submit"
-            disabled={accountLoading}
+            disabled={isAnyLoading}
             className="w-full bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
           >
             {accountLoading ? "Creating account..." : "Create advertiser account"}

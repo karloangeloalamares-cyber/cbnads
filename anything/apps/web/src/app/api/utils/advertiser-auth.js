@@ -133,31 +133,21 @@ export const verifyAdvertiserVerificationToken = (token) => {
 export const findAuthUserByEmail = async (supabase, email) => {
   const normalizedEmail = normalizeEmail(email);
 
-  for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await supabase.auth.admin.listUsers({
-      page,
-      perPage: 200,
-    });
+  // Use the Supabase Admin API's built-in email filter instead of paginating
+  // through all users. The previous approach made up to 20 sequential API
+  // calls which caused connection timeouts on larger user bases.
+  const { data, error } = await supabase.auth.admin.listUsers({
+    page: 1,
+    perPage: 1,
+    filter: normalizedEmail,
+  });
 
-    if (error) {
-      throw error;
-    }
-
-    const users = Array.isArray(data?.users) ? data.users : [];
-    const match = users.find(
-      (item) => normalizeEmail(item?.email) === normalizedEmail,
-    );
-
-    if (match) {
-      return match;
-    }
-
-    if (users.length < 200) {
-      break;
-    }
+  if (error) {
+    throw error;
   }
 
-  return null;
+  const users = Array.isArray(data?.users) ? data.users : [];
+  return users.length > 0 ? users[0] : null;
 };
 
 const getDefaultTenantId = async (supabase) => {

@@ -71,6 +71,13 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      '/_create/api/upload': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        rewrite: () => '/api/upload',
+      },
+    },
     warmup: {
       clientFiles: ['./src/app/**/*', './src/app/root.tsx', './src/app/routes.ts'],
     },

@@ -5,7 +5,6 @@ import { ArrowLeft } from "lucide-react";
 import { useSubmitAdForm } from "@/hooks/useSubmitAdForm";
 import { useModal } from "@/hooks/useModal";
 import { AlertModal, ConfirmModal } from "@/components/Modal";
-import { appToast } from "@/lib/toast";
 import { FormHeader } from "@/components/SubmitAdForm/FormHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
@@ -33,7 +32,6 @@ export default function SubmitAdPage() {
     setCustomDate,
     customTime,
     setCustomTime,
-    error,
     loading,
     availabilityError,
     checkingAvailability,
@@ -49,21 +47,25 @@ export default function SubmitAdPage() {
     checkAvailability,
     handleSubmit,
     submitAccountSetup,
+    continueWithGoogle,
+    completeGoogleLink,
+    googleLoading,
     resendVerification,
     goToSignIn,
     resetSuccess,
   } = useSubmitAdForm();
 
+  // Handle Google OAuth callback when redirected back to this page
   useEffect(() => {
-    if (phase !== "form" || !error) {
-      return;
-    }
+    const params = new URLSearchParams(window.location.search);
+    const isGoogleCallback =
+      params.get("googleLink") === "1" &&
+      (params.has("code") || params.has("error") || params.get("oauth") === "google");
 
-    appToast.error({
-      title: "Unable to submit ad",
-      description: error,
-    });
-  }, [error, phase]);
+    if (isGoogleCallback) {
+      completeGoogleLink();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const previewData = phase === "form" ? formData : submittedData || formData;
   const isSubmitDisabled =
@@ -105,9 +107,11 @@ export default function SubmitAdPage() {
                 accountData={accountData}
                 accountError={accountError}
                 accountLoading={accountLoading}
+                googleLoading={googleLoading}
                 submittedData={submittedData}
                 onChange={handleAccountChange}
                 onSubmit={submitAccountSetup}
+                onGoogleSignUp={continueWithGoogle}
               />
             ) : phase === "verify" ? (
               <VerifyAdvertiserEmailStep

@@ -7,12 +7,23 @@ const readRequestBody = async (req) => {
     return JSON.stringify(req.body);
   }
 
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  if (req.complete) {
+    return undefined;
   }
-  if (chunks.length === 0) return undefined;
-  return Buffer.concat(chunks);
+
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    req.on("end", () => {
+      resolve(chunks.length === 0 ? undefined : Buffer.concat(chunks));
+    });
+    req.on("error", (err) => {
+      console.error("[api-adapter] stream error:", err);
+      reject(err);
+    });
+  });
 };
 
 const toWebRequest = async (req) => {

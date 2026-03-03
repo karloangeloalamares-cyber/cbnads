@@ -44,11 +44,11 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         value={displayHour}
         onChange={(e) => handleTimeChange("hour", e.target.value)}
         onBlur={onBlur}
-        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer"
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!displayHour ? "text-gray-400" : "text-gray-900"}`}
       >
-        <option value="" disabled>HH</option>
+        <option value="" disabled className="text-gray-400">HH</option>
         {HOURS.map((h) => (
-          <option key={h} value={h}>{h.padStart(2, "0")}</option>
+          <option key={h} value={h} className="text-gray-900">{h.padStart(2, "0")}</option>
         ))}
       </select>
       <span className="text-sm text-gray-900 font-semibold">:</span>
@@ -57,11 +57,11 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         value={currentMinute}
         onChange={(e) => handleTimeChange("minute", e.target.value)}
         onBlur={onBlur}
-        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer"
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!currentMinute ? "text-gray-400" : "text-gray-900"}`}
       >
-        <option value="" disabled>MM</option>
+        <option value="" disabled className="text-gray-400">MM</option>
         {MINUTES.map((m) => (
-          <option key={m} value={m}>{m}</option>
+          <option key={m} value={m} className="text-gray-900">{m}</option>
         ))}
       </select>
       <select
@@ -69,11 +69,11 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         value={currentPeriod}
         onChange={(e) => handleTimeChange("period", e.target.value)}
         onBlur={onBlur}
-        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none text-center cursor-pointer ml-1"
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ml-1 ${!currentPeriod ? "text-gray-400" : "text-gray-900"}`}
       >
-        <option value="" disabled>--</option>
+        <option value="" disabled className="text-gray-400">--</option>
         {PERIODS.map((p) => (
-          <option key={p} value={p}>{p}</option>
+          <option key={p} value={p} className="text-gray-900">{p}</option>
         ))}
       </select>
     </div>
@@ -458,7 +458,7 @@ export function ScheduleSection({
 
       {postType === "One-Time Post" && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-y-3 gap-x-3">
             <AvailabilityDateField
               label="Post Date"
               required
@@ -473,19 +473,43 @@ export function ScheduleSection({
               placeholder="Select date"
             />
 
-            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+            <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Post Time (ET) <span className="text-red-500">*</span>
               </label>
-              <TimeSelect
-                required
-                value={timeForInput(formData.post_time)}
-                onChange={(val) => onChange("post_time", val)}
-                onBlur={triggerAvailabilityCheck}
-              />
+              <div className="flex items-center gap-1 pr-6">
+                <TimeSelect
+                  required
+                  value={timeForInput(formData.post_time)}
+                  onChange={(val) => onChange("post_time", val)}
+                  onBlur={triggerAvailabilityCheck}
+                />
+              </div>
+              <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               {availabilityChecking ? (
                 <p className="text-xs text-gray-500 mt-1">Checking availability...</p>
               ) : null}
+            </div>
+
+            <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Reminder
+              </label>
+              <div className="relative">
+                <select
+                  value={formData.reminder_minutes}
+                  onChange={(e) => onChange("reminder_minutes", e.target.value)}
+                  className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer pr-6 font-medium"
+                >
+                  <option value="15-min">15 min before</option>
+                  <option value="30-min">30 min before</option>
+                  <option value="1-hour">1 hour before</option>
+                  <option value="custom">Custom</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                </div>
+              </div>
             </div>
           </div>
         </>
@@ -493,34 +517,74 @@ export function ScheduleSection({
 
       {postType === "Daily Run" && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <AvailabilityDateField
-              label="Start Date"
-              required
-              value={formData.post_date_from}
-              onChange={(value) => {
-                onChange("post_date_from", value);
-                triggerAvailabilityCheck();
-              }}
-              minDate={getMinDate()}
-              blockedDates={blockedDates}
-              onLoadMonth={loadMonthAvailability}
-              placeholder="Select start date"
-            />
+          <div className="space-y-4 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <AvailabilityDateField
+                label="Start Date"
+                required
+                value={formData.post_date_from}
+                onChange={(value) => {
+                  onChange("post_date_from", value);
+                  triggerAvailabilityCheck();
+                }}
+                minDate={getMinDate()}
+                blockedDates={blockedDates}
+                onLoadMonth={loadMonthAvailability}
+                placeholder="Select start date"
+              />
 
-            <AvailabilityDateField
-              label="End Date"
-              required
-              value={formData.post_date_to}
-              onChange={(value) => {
-                onChange("post_date_to", value);
-                triggerAvailabilityCheck();
-              }}
-              minDate={formData.post_date_from || getMinDate()}
-              blockedDates={blockedDates}
-              onLoadMonth={loadMonthAvailability}
-              placeholder="Select end date"
-            />
+              <AvailabilityDateField
+                label="End Date"
+                required
+                value={formData.post_date_to}
+                onChange={(value) => {
+                  onChange("post_date_to", value);
+                  triggerAvailabilityCheck();
+                }}
+                minDate={formData.post_date_from || getMinDate()}
+                blockedDates={blockedDates}
+                onLoadMonth={loadMonthAvailability}
+                placeholder="Select end date"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-y-3 gap-x-3">
+              <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Post Time (ET) <span className="text-red-500">*</span>
+                </label>
+                <div className="flex items-center gap-1 pr-6">
+                  <TimeSelect
+                    required
+                    value={timeForInput(formData.post_time)}
+                    onChange={(val) => onChange("post_time", val)}
+                    onBlur={triggerAvailabilityCheck}
+                  />
+                </div>
+                <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              </div>
+
+              <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Reminder
+                </label>
+                <div className="relative">
+                  <select
+                    value={formData.reminder_minutes}
+                    onChange={(e) => onChange("reminder_minutes", e.target.value)}
+                    className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer pr-6 font-medium"
+                  >
+                    <option value="15-min">15 min before</option>
+                    <option value="30-min">30 min before</option>
+                    <option value="1-hour">1 hour before</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {availabilityChecking ? (
