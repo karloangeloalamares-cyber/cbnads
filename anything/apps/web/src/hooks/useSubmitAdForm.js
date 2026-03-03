@@ -340,8 +340,8 @@ export function useSubmitAdForm() {
       onSuccess: () => {
         // Google emails are pre-verified, skip verification step
       },
-      onSignIn: ({ email }) => {
-        account.goToSignIn({ email });
+      onSignIn: () => {
+        window.location.href = '/submit-ad/success';
       },
     });
   };
