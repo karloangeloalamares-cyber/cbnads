@@ -1981,6 +1981,8 @@ export default function AdsPage() {
   const [createAdAvailabilityError, setCreateAdAvailabilityError] = useState(null);
   const [createAdCheckingAvailability, setCreateAdCheckingAvailability] = useState(false);
   const [createAdFullyBookedDates, setCreateAdFullyBookedDates] = useState([]);
+  const createAdStateRef = useRef(blankAd);
+  const createAdAvailabilityRequestIdRef = useRef(0);
   const [createAdSubmitting, setCreateAdSubmitting] = useState(false);
   const [createAdSubmitMode, setCreateAdSubmitMode] = useState("");
   const [createAdErrors, setCreateAdErrors] = useState({});
@@ -2061,6 +2063,10 @@ export default function AdsPage() {
       setView("list");
     },
   });
+
+  useEffect(() => {
+    createAdStateRef.current = ad;
+  }, [ad]);
 
   useEffect(() => {
     if (!settingsProfileMessage) {
@@ -4535,6 +4541,7 @@ export default function AdsPage() {
       return;
     }
     setView("list");
+    createAdStateRef.current = blankAd;
     setAd(blankAd);
     setCreateAdCustomDate("");
     setCreateAdCustomTime("");
@@ -4544,6 +4551,7 @@ export default function AdsPage() {
   };
 
   const setCreateAdPostType = (postType) => {
+    createAdAvailabilityRequestIdRef.current += 1;
     setCreateAdAvailabilityError(null);
     setCreateAdFullyBookedDates([]);
     setAd((current) => {
@@ -4564,6 +4572,7 @@ export default function AdsPage() {
         next.custom_dates = [];
       }
 
+      createAdStateRef.current = next;
       return next;
     });
   };
@@ -4574,28 +4583,41 @@ export default function AdsPage() {
       return;
     }
 
-    if (["post_date", "post_date_from", "post_date_to", "post_time"].includes(field)) {
+    if (["post_date", "post_date_from", "post_date_to", "post_time", "custom_dates"].includes(field)) {
+      createAdAvailabilityRequestIdRef.current += 1;
+      setCreateAdCheckingAvailability(false);
       setCreateAdAvailabilityError(null);
       setCreateAdFullyBookedDates([]);
     }
 
-    setAd((current) => ({ ...current, [field]: value }));
+    setAd((current) => {
+      const next = { ...current, [field]: value };
+      createAdStateRef.current = next;
+      return next;
+    });
   };
 
   const checkCreateAdAvailability = async () => {
+    const requestId = createAdAvailabilityRequestIdRef.current + 1;
+    createAdAvailabilityRequestIdRef.current = requestId;
     setCreateAdCheckingAvailability(true);
     setCreateAdAvailabilityError(null);
     setCreateAdFullyBookedDates([]);
 
     try {
+      const currentAd = createAdStateRef.current;
       const result = await checkAdAvailability({
-        postType: normalizeCreateAdPostType(ad.post_type),
-        postDateFrom: ad.post_date_from || ad.post_date || "",
-        postDateTo: ad.post_date_to || "",
-        customDates: ad.custom_dates,
-        postTime: ad.post_time,
-        excludeAdId: ad.id || null,
+        postType: normalizeCreateAdPostType(currentAd.post_type),
+        postDateFrom: currentAd.post_date_from || currentAd.post_date || "",
+        postDateTo: currentAd.post_date_to || "",
+        customDates: currentAd.custom_dates,
+        postTime: currentAd.post_time,
+        excludeAdId: currentAd.id || null,
       });
+
+      if (requestId !== createAdAvailabilityRequestIdRef.current) {
+        return result;
+      }
 
       if (!result.available) {
         setCreateAdAvailabilityError(result.availabilityError);
@@ -4605,10 +4627,14 @@ export default function AdsPage() {
       return result;
     } catch (error) {
       console.error("Error checking create-ad availability:", error);
-      setCreateAdAvailabilityError("Could not check availability. Please try again.");
+      if (requestId === createAdAvailabilityRequestIdRef.current) {
+        setCreateAdAvailabilityError("Could not check availability. Please try again.");
+      }
       throw error;
     } finally {
-      setCreateAdCheckingAvailability(false);
+      if (requestId === createAdAvailabilityRequestIdRef.current) {
+        setCreateAdCheckingAvailability(false);
+      }
     }
   };
 

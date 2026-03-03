@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkAdAvailability,
   normalizeCustomDateEntries,
@@ -45,14 +45,21 @@ export function useSubmitAdForm() {
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
+  const formDataRef = useRef(formData);
+  const availabilityRequestIdRef = useRef(0);
 
   const account = useAccountSetup();
+
+  useEffect(() => {
+    formDataRef.current = formData;
+  }, [formData]);
 
   const handleChange = useCallback((field, value) => {
     setFormData((prev) => {
       const normalizedValue =
         field === "phone_number" ? formatUSPhoneNumber(value) : value;
       const updated = { ...prev, [field]: normalizedValue };
+      formDataRef.current = updated;
 
       if (["post_date_from", "post_time"].includes(field)) {
         const dateVal = field === "post_date_from" ? normalizedValue : prev.post_date_from;
@@ -72,7 +79,9 @@ export function useSubmitAdForm() {
       return updated;
     });
 
-    if (["post_date_from", "post_date_to", "post_time", "post_type"].includes(field)) {
+    if (["post_date_from", "post_date_to", "post_time", "post_type", "custom_dates"].includes(field)) {
+      availabilityRequestIdRef.current += 1;
+      setCheckingAvailability(false);
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
@@ -165,28 +174,40 @@ export function useSubmitAdForm() {
   }, []);
 
   const checkAvailability = async () => {
+    const requestId = availabilityRequestIdRef.current + 1;
+    availabilityRequestIdRef.current = requestId;
     setCheckingAvailability(true);
     setAvailabilityError(null);
     setFullyBookedDates([]);
 
     try {
+      const currentFormData = formDataRef.current;
       const result = await checkAdAvailability({
-        postType: formData.post_type,
-        postDateFrom: formData.post_date_from,
-        postDateTo: formData.post_date_to,
-        customDates: formData.custom_dates,
-        postTime: formData.post_time,
+        postType: currentFormData.post_type,
+        postDateFrom: currentFormData.post_date_from,
+        postDateTo: currentFormData.post_date_to,
+        customDates: currentFormData.custom_dates,
+        postTime: currentFormData.post_time,
       });
+
+      if (requestId !== availabilityRequestIdRef.current) {
+        return result;
+      }
 
       if (!result.available) {
         setAvailabilityError(result.availabilityError);
         setFullyBookedDates(result.fullyBookedDates);
       }
+      return result;
     } catch (err) {
       console.error("Error checking availability:", err);
-      setAvailabilityError("Could not check availability. Please try again.");
+      if (requestId === availabilityRequestIdRef.current) {
+        setAvailabilityError("Could not check availability. Please try again.");
+      }
     } finally {
-      setCheckingAvailability(false);
+      if (requestId === availabilityRequestIdRef.current) {
+        setCheckingAvailability(false);
+      }
     }
   };
 
