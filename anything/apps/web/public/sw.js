@@ -7,7 +7,7 @@
  * - API requests (/api/*): always network-only — never cached
  */
 
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `cbn-ads-shell-${CACHE_VERSION}`;
 const ASSET_CACHE = `cbn-ads-assets-${CACHE_VERSION}`;
 
