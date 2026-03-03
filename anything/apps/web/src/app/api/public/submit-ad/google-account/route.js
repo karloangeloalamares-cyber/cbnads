@@ -7,6 +7,19 @@ import {
     upsertAdvertiserProfile,
 } from "../../../utils/advertiser-auth.js";
 
+const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
+
+const existingAdvertiserAccountPayload = (email) => ({
+    code: EXISTING_ACCOUNT_ERROR_CODE,
+    title: "You already have an advertiser account",
+    error:
+        "This email is already connected to a CBN Ads advertiser account. Sign in to your dashboard to manage submissions, ads, and billing.",
+    description:
+        "This email is already connected to a CBN Ads advertiser account. Sign in to your dashboard to manage submissions, ads, and billing.",
+    email,
+    ctaLabel: "Log in to dashboard",
+});
+
 const withRetry = async (fn, { retries = 2, delay = 500 } = {}) => {
     for (let attempt = 0; ; attempt++) {
         try {
@@ -110,10 +123,7 @@ export async function POST(request) {
 
             if (existingUser?.user_metadata?.account_verified === true) {
                 return Response.json(
-                    {
-                        error:
-                            "An advertiser account already exists for this email. Please sign in.",
-                    },
+                    existingAdvertiserAccountPayload(normalizedEmail),
                     { status: 409 },
                 );
             }

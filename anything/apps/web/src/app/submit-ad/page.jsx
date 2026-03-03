@@ -24,6 +24,7 @@ export default function SubmitAdPage() {
     phase,
     accountData,
     accountError,
+    existingAccountPrompt,
     accountLoading,
     resendLoading,
     resendError,
@@ -106,12 +107,14 @@ export default function SubmitAdPage() {
               <CreateAdvertiserAccountStep
                 accountData={accountData}
                 accountError={accountError}
+                existingAccountPrompt={existingAccountPrompt}
                 accountLoading={accountLoading}
                 googleLoading={googleLoading}
                 submittedData={submittedData}
                 onChange={handleAccountChange}
                 onSubmit={submitAccountSetup}
                 onGoogleSignUp={continueWithGoogle}
+                onGoToSignIn={goToSignIn}
               />
             ) : phase === "verify" ? (
               <VerifyAdvertiserEmailStep

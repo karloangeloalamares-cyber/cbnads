@@ -375,6 +375,7 @@ export function useSubmitAdForm() {
     phase,
     accountData: account.accountData,
     accountError: account.accountError,
+    existingAccountPrompt: account.existingAccountPrompt,
     accountLoading: account.accountLoading,
     googleLoading: account.googleLoading,
     resendLoading: account.resendLoading,
@@ -406,4 +407,3 @@ export function useSubmitAdForm() {
     resetSuccess,
   };
 }
-

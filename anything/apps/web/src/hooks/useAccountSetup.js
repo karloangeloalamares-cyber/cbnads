@@ -1,10 +1,23 @@
 import { useState } from "react";
 import { appToast } from "@/lib/toast";
 
+const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
+
 const initialAccountData = (email = "") => ({
     email,
     password: "",
     confirmPassword: "",
+});
+
+const buildExistingAccountPrompt = (payload, fallbackEmail = "") => ({
+    code: EXISTING_ACCOUNT_ERROR_CODE,
+    title:
+        String(payload?.title || "").trim() || "You already have an advertiser account",
+    description:
+        String(payload?.description || payload?.error || "").trim() ||
+        "This email is already connected to a CBN Ads advertiser account. Sign in to your dashboard to manage submissions, ads, and billing.",
+    email: String(payload?.email || fallbackEmail || "").trim(),
+    ctaLabel: String(payload?.ctaLabel || "").trim() || "Log in to dashboard",
 });
 
 const normalizeGoogleCallbackError = (value) => {
@@ -20,6 +33,7 @@ const normalizeGoogleCallbackError = (value) => {
 export function useAccountSetup() {
     const [accountData, setAccountData] = useState(initialAccountData());
     const [accountError, setAccountError] = useState(null);
+    const [existingAccountPrompt, setExistingAccountPrompt] = useState(null);
     const [accountLoading, setAccountLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
     const [resendLoading, setResendLoading] = useState(false);
@@ -29,6 +43,7 @@ export function useAccountSetup() {
     const handleAccountChange = (field, value) => {
         setAccountData((prev) => ({ ...prev, [field]: value }));
         setAccountError(null);
+        setExistingAccountPrompt(null);
         setResendError(null);
         setResendMessage(null);
     };
@@ -36,6 +51,7 @@ export function useAccountSetup() {
     const submitAccountSetup = async (event, { pendingAdId, submittedData, onSuccess }) => {
         event.preventDefault();
         setAccountError(null);
+        setExistingAccountPrompt(null);
         setResendError(null);
         setResendMessage(null);
 
@@ -87,6 +103,15 @@ export function useAccountSetup() {
 
             const data = await response.json();
             if (!response.ok) {
+                if (
+                    response.status === 409 &&
+                    data?.code === EXISTING_ACCOUNT_ERROR_CODE
+                ) {
+                    setExistingAccountPrompt(
+                        buildExistingAccountPrompt(data, accountData.email),
+                    );
+                    return;
+                }
                 throw new Error(data.error || "Failed to create advertiser account.");
             }
 
@@ -112,6 +137,7 @@ export function useAccountSetup() {
      */
     const startGoogleSignUp = async ({ pendingAdId, submittedData }) => {
         setAccountError(null);
+        setExistingAccountPrompt(null);
         setGoogleLoading(true);
 
         try {
@@ -162,6 +188,7 @@ export function useAccountSetup() {
     const completeGoogleSignUp = async ({ onSuccess, onSignIn }) => {
         setGoogleLoading(true);
         setAccountError(null);
+        setExistingAccountPrompt(null);
 
         try {
             // Restore ad context from sessionStorage
@@ -240,6 +267,16 @@ export function useAccountSetup() {
 
             const data = await response.json();
             if (!response.ok) {
+                if (
+                    response.status === 409 &&
+                    data?.code === EXISTING_ACCOUNT_ERROR_CODE
+                ) {
+                    await supabase.auth.signOut().catch(() => {});
+                    setExistingAccountPrompt(
+                        buildExistingAccountPrompt(data, session.user?.email),
+                    );
+                    return;
+                }
                 throw new Error(data.error || "Failed to link Google account.");
             }
 
@@ -317,6 +354,7 @@ export function useAccountSetup() {
     const resetAccount = () => {
         setAccountData(initialAccountData());
         setAccountError(null);
+        setExistingAccountPrompt(null);
         setGoogleLoading(false);
         setResendError(null);
         setResendMessage(null);
@@ -324,6 +362,7 @@ export function useAccountSetup() {
 
     const initAccount = (email) => {
         setAccountData(initialAccountData(email));
+        setExistingAccountPrompt(null);
         setResendError(null);
         setResendMessage(null);
     };
@@ -331,6 +370,7 @@ export function useAccountSetup() {
     return {
         accountData,
         accountError,
+        existingAccountPrompt,
         accountLoading,
         googleLoading,
         resendLoading,

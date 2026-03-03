@@ -4,15 +4,17 @@ import { appToast } from "@/lib/toast";
 export function CreateAdvertiserAccountStep({
   accountData,
   accountError,
+  existingAccountPrompt,
   accountLoading,
   googleLoading,
   submittedData,
   onChange,
   onSubmit,
   onGoogleSignUp,
+  onGoToSignIn,
 }) {
   useEffect(() => {
-    if (!accountError) {
+    if (!accountError || existingAccountPrompt) {
       return;
     }
 
@@ -20,7 +22,7 @@ export function CreateAdvertiserAccountStep({
       title: "Unable to create account",
       description: accountError,
     });
-  }, [accountError]);
+  }, [accountError, existingAccountPrompt]);
 
   const isAnyLoading = accountLoading || googleLoading;
 
@@ -45,6 +47,47 @@ export function CreateAdvertiserAccountStep({
           and track future submissions.
         </p>
       </div>
+
+      <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] p-5 mb-6">
+        <div className="text-sm font-semibold text-gray-900 mb-1">
+          Already have an advertiser account?
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          If this email is already on file, sign in instead and use your dashboard to
+          track submissions, ads, and billing.
+        </p>
+        <button
+          type="button"
+          onClick={onGoToSignIn}
+          disabled={isAnyLoading}
+          className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-900 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Log in instead
+        </button>
+      </div>
+
+      {existingAccountPrompt ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 mb-6">
+          <div className="text-sm font-semibold text-emerald-950 mb-1">
+            {existingAccountPrompt.title}
+          </div>
+          <p className="text-sm text-emerald-900 mb-2">
+            {existingAccountPrompt.description}
+          </p>
+          {existingAccountPrompt.email ? (
+            <p className="text-sm text-emerald-800 mb-4">
+              Continue with <span className="font-medium">{existingAccountPrompt.email}</span>.
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={onGoToSignIn}
+            className="inline-flex items-center justify-center rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition hover:bg-gray-800"
+          >
+            {existingAccountPrompt.ctaLabel}
+          </button>
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border border-gray-200 bg-white p-6 mb-6">
         <div className="text-sm font-semibold text-gray-900 mb-1">Submitted ad</div>
