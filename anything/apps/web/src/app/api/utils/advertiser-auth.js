@@ -7,6 +7,27 @@ import { normalizeUSPhoneNumber } from "../../../lib/phone.js";
 const TOKEN_TTL_MS = 1000 * 60 * 60 * 24;
 const TOKEN_TYPE = "advertiser_verify";
 
+const readServerEnv = (...keys) => {
+  for (const key of keys) {
+    const value = String(process.env[key] || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+};
+
+const getAdvertiserVerificationSecret = () =>
+  readServerEnv("AUTH_SECRET", "NEXTAUTH_SECRET", "SUPABASE_SERVICE_ROLE_KEY");
+
+const requireAdvertiserVerificationSecret = () => {
+  const secret = getAdvertiserVerificationSecret();
+  if (!secret) {
+    throw new Error("Missing configuration: AUTH_SECRET or SUPABASE_SERVICE_ROLE_KEY");
+  }
+  return secret;
+};
+
 const base64UrlEncode = (value) =>
   Buffer.from(value)
     .toString("base64")
@@ -25,7 +46,12 @@ const base64UrlDecode = (value) => {
 export const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
 export const getAdvertiserAuthBaseUrl = (request) => {
-  const configured = String(process.env.APP_URL || process.env.AUTH_URL || "").trim();
+  const configured = readServerEnv(
+    "APP_URL",
+    "AUTH_URL",
+    "NEXT_PUBLIC_APP_URL",
+    "VITE_APP_URL",
+  );
   if (configured) {
     try {
       return new URL(configured).toString().replace(/\/$/, "");
@@ -45,12 +71,8 @@ export const getAdvertiserAuthBaseUrl = (request) => {
 export const assertAdvertiserVerificationConfig = () => {
   const missing = [];
 
-  if (!String(process.env.AUTH_SECRET || "").trim()) {
-    missing.push("AUTH_SECRET");
-  }
-
-  if (!String(process.env.APP_URL || process.env.AUTH_URL || "").trim()) {
-    missing.push("APP_URL or AUTH_URL");
+  if (!getAdvertiserVerificationSecret()) {
+    missing.push("AUTH_SECRET or SUPABASE_SERVICE_ROLE_KEY");
   }
 
   if (missing.length > 0) {
@@ -68,7 +90,7 @@ export const assertAdvertiserEmailConfig = () => {
 
 const signValue = (value) =>
   crypto
-    .createHmac("sha256", String(process.env.AUTH_SECRET || ""))
+    .createHmac("sha256", requireAdvertiserVerificationSecret())
     .update(value)
     .digest("base64")
     .replace(/\+/g, "-")
