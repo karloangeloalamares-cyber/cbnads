@@ -38,7 +38,7 @@ import * as route_35 from "../src/app/api/reconciliation/cases/route.js";
 import * as route_36 from "../src/app/api/submissions/[id]/route.js";
 import * as route_37 from "../src/app/api/user/profile/route.js";
 import * as route_38 from "../src/app/api/user/role/route.js";
-import * as route_39 from "../src/app/api/__create/ssr-test/route.js";
+
 import * as route_40 from "../src/app/api/admin/members/[id]/route.js";
 import * as route_41 from "../src/app/api/admin/pending-ads/approve/route.js";
 import * as route_42 from "../src/app/api/admin/pending-ads/cleanup/route.js";
@@ -86,7 +86,7 @@ const routes = [
   { regex: new RegExp("^/api/reconciliation/cases$"), module: route_35 },
   { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_19 },
   { regex: new RegExp("^/api/advertisers/create$"), module: route_21 },
-  { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_39 },
+
   { regex: new RegExp("^/api/ads/availability$"), module: route_11 },
   { regex: new RegExp("^/api/advertisers/list$"), module: route_22 },
   { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_34 },
