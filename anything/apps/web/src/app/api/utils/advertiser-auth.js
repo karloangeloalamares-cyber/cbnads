@@ -154,22 +154,42 @@ export const verifyAdvertiserVerificationToken = (token) => {
 
 export const findAuthUserByEmail = async (supabase, email) => {
   const normalizedEmail = normalizeEmail(email);
-
-  // Use the Supabase Admin API's built-in email filter instead of paginating
-  // through all users. The previous approach made up to 20 sequential API
-  // calls which caused connection timeouts on larger user bases.
-  const { data, error } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 1,
-    filter: normalizedEmail,
-  });
-
-  if (error) {
-    throw error;
+  if (!normalizedEmail) {
+    return null;
   }
 
-  const users = Array.isArray(data?.users) ? data.users : [];
-  return users.length > 0 ? users[0] : null;
+  // Supabase auth-js listUsers() does not support an email filter. Passing a
+  // `filter` key is ignored, which can cause false positives if we only read
+  // the first returned user. Perform an exact email match across paginated
+  // results instead.
+  const perPage = 200;
+  let page = 1;
+
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const users = Array.isArray(data?.users) ? data.users : [];
+    const matchedUser = users.find(
+      (user) => normalizeEmail(user?.email) === normalizedEmail,
+    );
+
+    if (matchedUser) {
+      return matchedUser;
+    }
+
+    if (users.length < perPage) {
+      return null;
+    }
+
+    page += 1;
+  }
 };
 
 const getDefaultTenantId = async (supabase) => {
