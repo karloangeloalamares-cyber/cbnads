@@ -1,6 +1,6 @@
-import { db, table } from "../../../utils/supabase-db.js";
-import { requirePermission } from "../../../utils/auth-check.js";
-import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
+import { db, table } from "../../../../utils/supabase-db.js";
+import { requirePermission } from "../../../../utils/auth-check.js";
+import { updateAdvertiserNextAdDate } from "../../../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../../lib/timezone.js";
 
 const isMissingColumnError = (error) => {

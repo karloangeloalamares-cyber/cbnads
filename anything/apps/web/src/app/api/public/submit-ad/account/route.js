@@ -1,4 +1,4 @@
-import { db } from "../../../utils/supabase-db.js";
+import { db } from "../../../../utils/supabase-db.js";
 import {
   assertAdvertiserEmailConfig,
   createAdvertiserVerificationToken,
@@ -8,8 +8,8 @@ import {
   sendAdvertiserVerificationEmail,
   updatePendingAdAccountEmail,
   upsertAdvertiserProfile,
-} from "../../../utils/advertiser-auth.js";
-import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
+} from "../../../../utils/advertiser-auth.js";
+import { getTodayInAppTimeZone } from "../../../../../../lib/timezone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 8;
@@ -136,8 +136,8 @@ export async function POST(request) {
     if (existingUser) {
       const existingRole = String(
         existingUser?.user_metadata?.role ||
-          existingUser?.app_metadata?.role ||
-          "",
+        existingUser?.app_metadata?.role ||
+        "",
       ).toLowerCase();
 
       if (existingRole && existingRole !== "advertiser") {

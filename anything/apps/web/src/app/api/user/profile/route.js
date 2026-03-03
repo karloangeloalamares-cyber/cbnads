@@ -1,5 +1,5 @@
-import { db, table } from "../../utils/supabase-db.js";
-import { getSessionUser, requireAuth } from "../../utils/auth-check.js";
+import { db, table } from "../../../utils/supabase-db.js";
+import { getSessionUser, requireAuth } from "../../../utils/auth-check.js";
 
 // Update user profile
 export async function PUT(request) {

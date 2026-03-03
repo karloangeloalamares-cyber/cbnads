@@ -1,15 +1,15 @@
-import { db, table } from "../../utils/supabase-db.js";
-import { sendEmail } from "../../utils/send-email.js";
-import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
+import { db, table } from "../../../utils/supabase-db.js";
+import { sendEmail } from "../../../utils/send-email.js";
+import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
   expandDateRange,
-} from "../../utils/ad-availability.js";
+} from "../../../utils/ad-availability.js";
 import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
-} from "../../../../lib/phone.js";
+} from "../../../../../lib/phone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
@@ -155,22 +155,22 @@ export async function POST(request) {
       : [];
     const sanitizedMedia = Array.isArray(media)
       ? media
-          .map((item) => {
-            if (item && typeof item === "object") {
-              const safeUrl = toSafeHttpUrl(item.url || item.cdnUrl || "");
-              if (!safeUrl) return null;
-              return {
-                ...item,
-                url: safeUrl,
-                cdnUrl: toSafeHttpUrl(item.cdnUrl || safeUrl) || safeUrl,
-              };
-            }
-
-            const safeUrl = toSafeHttpUrl(item);
+        .map((item) => {
+          if (item && typeof item === "object") {
+            const safeUrl = toSafeHttpUrl(item.url || item.cdnUrl || "");
             if (!safeUrl) return null;
-            return { type: "link", url: safeUrl, cdnUrl: safeUrl };
-          })
-          .filter(Boolean)
+            return {
+              ...item,
+              url: safeUrl,
+              cdnUrl: toSafeHttpUrl(item.cdnUrl || safeUrl) || safeUrl,
+            };
+          }
+
+          const safeUrl = toSafeHttpUrl(item);
+          if (!safeUrl) return null;
+          return { type: "link", url: safeUrl, cdnUrl: safeUrl };
+        })
+        .filter(Boolean)
       : [];
     const safeMediaUrls = sanitizedMedia
       .map((item) => toSafeHttpUrl(item.url || item.cdnUrl || ""))
@@ -428,9 +428,8 @@ export async function POST(request) {
           ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${escaped.post_date_to}</div>` : ""}
           ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${escaped.post_time}</div>` : ""}
           ${reminder_minutes ? `<div class="info-row"><span class="label">Reminder:</span> ${escaped.reminder_minutes} minutes before</div>` : ""}
-          ${
-            safeCustomDates.length > 0
-              ? `
+          ${safeCustomDates.length > 0
+        ? `
             <div class="info-row">
               <span class="label">Custom Dates:</span>
               <ul style="margin: 5px 0;">
@@ -438,14 +437,13 @@ export async function POST(request) {
               </ul>
             </div>
           `
-              : ""
-          }
+        : ""
+      }
         </div>
       </div>
       
-      ${
-        ad_text
-          ? `
+      ${ad_text
+        ? `
         <div class="info-section">
           <div class="section-title">Ad Content</div>
           <div class="info-block">
@@ -453,32 +451,30 @@ export async function POST(request) {
           </div>
         </div>
       `
-          : ""
+        : ""
       }
       
-      ${
-        safeMediaUrls.length > 0
-          ? `
+      ${safeMediaUrls.length > 0
+        ? `
         <div class="info-section">
           <div class="section-title">Media Files (${safeMediaUrls.length})</div>
           ${safeMediaUrls
-            .map(
-              (url, index) => `
+          .map(
+            (url, index) => `
             <div class="media-item">
               <div><strong>File ${index + 1}:</strong></div>
               <div><a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a></div>
             </div>
           `,
-            )
-            .join("")}
+          )
+          .join("")}
         </div>
       `
-          : ""
+        : ""
       }
       
-      ${
-        notes
-          ? `
+      ${notes
+        ? `
         <div class="info-section">
           <div class="section-title">Additional Notes</div>
           <div class="info-block">
@@ -486,17 +482,16 @@ export async function POST(request) {
           </div>
         </div>
       `
-          : ""
+        : ""
       }
       
-      ${
-        reviewSubmissionUrl
-          ? `
+      ${reviewSubmissionUrl
+        ? `
         <div style="text-align: center; margin-top: 30px;">
           <a href="${escapeHtml(reviewSubmissionUrl)}" class="button">Review Submission</a>
         </div>
       `
-          : ""
+        : ""
       }
     </div>
     
