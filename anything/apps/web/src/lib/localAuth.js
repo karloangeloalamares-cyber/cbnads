@@ -29,6 +29,16 @@ const ALLOWED_APP_ROLES = new Set(["admin", "manager", "staff", "advertiser"]);
 
 const isAllowedAppRole = (value) => ALLOWED_APP_ROLES.has(normalizeAppRole(value));
 
+const normalizeOAuthErrorMessage = (value) => {
+  const message = decodeURIComponent(String(value || "").trim());
+
+  if (/Database error saving new user/i.test(message)) {
+    return "We couldn't find an active account for this Google email. If you are a new advertiser, please submit an application to start running ads with us.";
+  }
+
+  return message || "Google sign-in failed.";
+};
+
 const buildGoogleRedirectUrl = (callbackUrl = "") => {
   if (typeof window === "undefined") {
     return "";
@@ -191,7 +201,7 @@ export const completeOAuthSignIn = async () => {
   if (errorDescription || providerError) {
     return {
       ok: false,
-      error: decodeURIComponent(errorDescription || providerError || "Google sign-in failed."),
+      error: normalizeOAuthErrorMessage(errorDescription || providerError),
     };
   }
 
@@ -200,7 +210,7 @@ export const completeOAuthSignIn = async () => {
     if (error) {
       return {
         ok: false,
-        error: error.message || "Google sign-in failed.",
+        error: normalizeOAuthErrorMessage(error.message),
       };
     }
 

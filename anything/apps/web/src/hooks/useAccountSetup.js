@@ -7,6 +7,16 @@ const initialAccountData = (email = "") => ({
     confirmPassword: "",
 });
 
+const normalizeGoogleCallbackError = (value) => {
+    const message = decodeURIComponent(String(value || "").trim());
+
+    if (/Database error saving new user/i.test(message)) {
+        return "Use the same Google email as your ad submission email, or restart the submission and update the email before continuing with Google.";
+    }
+
+    return message || "Google sign-in failed.";
+};
+
 export function useAccountSetup() {
     const [accountData, setAccountData] = useState(initialAccountData());
     const [accountError, setAccountError] = useState(null);
@@ -128,6 +138,7 @@ export function useAccountSetup() {
                     queryParams: {
                         access_type: "offline",
                         prompt: "select_account",
+                        login_hint: String(submittedData?.email || "").trim(),
                     },
                 },
             });
@@ -172,7 +183,15 @@ export function useAccountSetup() {
             const { getSupabaseClient } = await import("@/lib/supabase");
             const supabase = getSupabaseClient();
             const url = new URL(window.location.href);
+            const callbackError =
+                url.searchParams.get("error_description") || url.searchParams.get("error");
             const code = url.searchParams.get("code");
+
+            if (callbackError) {
+                setAccountError(normalizeGoogleCallbackError(callbackError));
+                setGoogleLoading(false);
+                return;
+            }
 
             if (code) {
                 // exchangeCodeForSession may fail if Supabase's detectSessionInUrl
