@@ -34,11 +34,10 @@ export async function POST(request) {
       availabilityByDate: result.results || {},
     });
   } catch (error) {
-    console.error("[ads/availability-batch] Error checking availability", {
-      message: error?.message || String(error),
-    });
+    const message = error?.message || String(error);
+    console.error("[ads/availability-batch] Error checking availability:", message, error);
     return Response.json(
-      { error: "Failed to check availability" },
+      { error: message || "Failed to check availability" },
       { status: 500 },
     );
   }
