@@ -57,7 +57,7 @@ import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import { checkAdAvailability } from "@/lib/adAvailabilityClient";
-import { getSignedInUser, updateCurrentUser } from "@/lib/localAuth";
+import { getSignedInUser, signOut, updateCurrentUser } from "@/lib/localAuth";
 import { appToast } from "@/lib/toast";
 import { can, getVisibleSectionsForRole, isInternalRole, normalizeAppRole } from "@/lib/permissions";
 import { formatPostTypeBadgeLabel, formatPostTypeLabel, normalizePostTypeValue } from "@/lib/postType";
@@ -85,6 +85,7 @@ import {
   getReconciliationReport,
   readDb,
   rejectPendingAd,
+  resetDbCache,
   resolveSupabaseSessionUser,
   saveAdminSettings,
   saveNotificationPreferences,
@@ -98,6 +99,7 @@ import {
   upsertProduct,
 } from "@/lib/localDb";
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
+import { hasSupabaseConfig } from "@/lib/supabase";
 
 const sections = [
   "Dashboard",
@@ -2163,6 +2165,39 @@ export default function AdsPage() {
     const initialize = async () => {
       await ensureDb();
       sync();
+
+      if (!hasSupabaseConfig) {
+        return;
+      }
+
+      try {
+        const recoveredUser = await resolveSupabaseSessionUser();
+        if (cancelled) {
+          return;
+        }
+
+        if (!recoveredUser) {
+          await signOut();
+          if (!cancelled) {
+            window.location.href = "/account/signin";
+          }
+          return;
+        }
+
+        // Rehydrate from Supabase after validating the live session so the dashboard
+        // does not stay pinned to stale local cache data.
+        resetDbCache({ emit: false });
+        await ensureDb();
+        if (!cancelled) {
+          sync();
+        }
+      } catch (error) {
+        console.error("Failed to validate Supabase session:", error);
+        await signOut();
+        if (!cancelled) {
+          window.location.href = "/account/signin";
+        }
+      }
     };
 
     void initialize();
@@ -2174,35 +2209,11 @@ export default function AdsPage() {
   }, []);
 
   useEffect(() => {
-    if (!ready || user) {
+    if (!ready || user || hasSupabaseConfig) {
       return;
     }
 
-    let cancelled = false;
-    const recoverSession = async () => {
-      try {
-        const recoveredUser = await resolveSupabaseSessionUser();
-        if (cancelled) {
-          return;
-        }
-        if (recoveredUser) {
-          setUser(recoveredUser);
-          setDb(readDb());
-          return;
-        }
-      } catch (error) {
-        console.error("Failed to recover Supabase session:", error);
-      }
-
-      if (!cancelled) {
-        window.location.href = "/account/signin";
-      }
-    };
-
-    void recoverSession();
-    return () => {
-      cancelled = true;
-    };
+    window.location.href = "/account/signin";
   }, [ready, user]);
 
   useEffect(() => {
@@ -10003,4 +10014,3 @@ export default function AdsPage() {
     </div>
   );
 }
-

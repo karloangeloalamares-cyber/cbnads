@@ -1,5 +1,5 @@
 import { db, table } from "../../utils/supabase-db.js";
-import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
+import { getSessionUser, requirePermission } from "../../utils/auth-check.js";
 import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
@@ -46,9 +46,9 @@ async function findPreferenceRow(supabase, userId, email) {
 
 export async function GET(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("notifications:view", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const user = await getSessionUser(request);
@@ -68,9 +68,9 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+    const auth = await requirePermission("notifications:view", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const user = await getSessionUser(request);
