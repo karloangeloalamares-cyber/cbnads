@@ -1,9 +1,9 @@
-import { advertiserResponse, dateOnly, db, table } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import { advertiserResponse, dateOnly, db, table } from "../../../utils/supabase-db.js";
+import { requireAdmin } from "../../../utils/auth-check.js";
 import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
-} from "../../../../lib/phone.js";
+} from "../../../../../lib/phone.js";
 
 const isInactive = (value) => String(value || "").toLowerCase() === "inactive";
 

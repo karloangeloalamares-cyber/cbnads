@@ -1,6 +1,6 @@
-import { db, table } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
-import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
+import { db, table } from "../../../utils/supabase-db.js";
+import { requireAdmin } from "../../../utils/auth-check.js";
+import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
 
 export async function DELETE(request) {
   try {

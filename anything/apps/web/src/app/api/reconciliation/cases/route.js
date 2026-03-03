@@ -1,6 +1,6 @@
-import { db, table, toNumber } from "../../utils/supabase-db.js";
-import { requirePermission } from "../../utils/auth-check.js";
-import { parsePaymentAmount } from "../../utils/invoice-helpers.js";
+import { db, table, toNumber } from "../../../utils/supabase-db.js";
+import { requirePermission } from "../../../utils/auth-check.js";
+import { parsePaymentAmount } from "../../../utils/invoice-helpers.js";
 
 const isMissingRelationError = (error) => {
   const code = String(error?.code || "");
