@@ -352,10 +352,13 @@ export function ScheduleSection({
   const loadedMonthsRef = useRef(new Set());
   const loadingMonthsRef = useRef(new Set());
   const monthAbortControllerRef = useRef(null);
+  const currentMonthRef = useRef(parseDate(formData.post_date_from) || getTodayDateInAppTimeZone());
 
   const loadMonthAvailability = useCallback(
     async (monthDate) => {
       const monthKey = toMonthKey(monthDate);
+      // Track the latest requested month for retry
+      currentMonthRef.current = monthDate;
       if (
         loadedMonthsRef.current.has(monthKey) ||
         loadingMonthsRef.current.has(monthKey)
@@ -383,6 +386,7 @@ export function ScheduleSection({
         setMonthAvailability((current) => ({ ...current, ...results }));
       } catch (error) {
         if (error?.name !== "AbortError") {
+          console.error("[ScheduleSection] Failed to load monthly availability:", error?.message || error);
           setMonthAvailabilityError("Unable to load monthly availability right now.");
         }
       } finally {
@@ -739,8 +743,19 @@ export function ScheduleSection({
       ) : null}
 
       {monthAvailabilityError ? (
-        <div className="bg-amber-50 border border-amber-200 px-4 py-3 rounded-lg mt-4 text-sm text-amber-700">
-          {monthAvailabilityError}
+        <div className="bg-amber-50 border border-amber-200 px-4 py-3 rounded-lg mt-4 text-sm text-amber-700 flex items-center justify-between gap-3">
+          <span>{monthAvailabilityError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              loadedMonthsRef.current.delete(toMonthKey(currentMonthRef.current));
+              setMonthAvailabilityError("");
+              void loadMonthAvailability(currentMonthRef.current);
+            }}
+            className="shrink-0 text-xs font-semibold text-amber-800 underline hover:no-underline"
+          >
+            Retry
+          </button>
         </div>
       ) : null}
     </div>
