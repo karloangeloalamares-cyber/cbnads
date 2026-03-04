@@ -1764,7 +1764,10 @@ export const upsertInvoice = async (input) => {
 
     const payload = {
       id: invoiceId,
-      invoice_number: (input.invoice_number || '').trim() || `INV-${Date.now().toString().slice(-6)}`,
+      invoice_number:
+        existing?.invoice_number ||
+        (input.invoice_number || '').trim() ||
+        `INV-${Date.now().toString().slice(-6)}`,
       advertiser_id: input.advertiser_id || '',
       advertiser_name: advertiser?.advertiser_name || input.advertiser_name || '',
       amount: total,
@@ -1783,7 +1786,7 @@ export const upsertInvoice = async (input) => {
       contact_name: input.contact_name || advertiser?.contact_name || '',
       contact_email: input.contact_email || advertiser?.email || '',
       bill_to: input.bill_to || advertiser?.advertiser_name || input.advertiser_name || '',
-      issue_date: toDateOnly(now.slice(0, 10)),
+      issue_date: getTodayInAppTimeZone(),
       discount,
       tax,
       total,

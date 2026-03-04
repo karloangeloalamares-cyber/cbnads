@@ -215,7 +215,7 @@ const blankInvoice = {
 
 const createBlankInvoice = () => ({
   ...blankInvoice,
-  issue_date: getTodayDateInAppTimeZone(),
+  issue_date: getTodayInAppTimeZone(),
 });
 
 const blankSubmissionEditForm = {
@@ -4910,7 +4910,7 @@ export default function AdsPage() {
     setInvoice({
       ...createBlankInvoice(),
       ...item,
-      issue_date: getTodayDateInAppTimeZone(),
+      issue_date: getTodayInAppTimeZone(),
       status: normalizeInvoiceStatus(item.status),
       ad_ids: item.ad_ids || [],
     });
@@ -4969,7 +4969,7 @@ export default function AdsPage() {
       return;
     }
     return run(async () => {
-      const issueDate = getTodayDateInAppTimeZone();
+      const issueDate = getTodayInAppTimeZone();
       if (!invoice.advertiser_id) {
         throw new Error("Advertiser required");
       }
@@ -5374,7 +5374,7 @@ export default function AdsPage() {
             setInvoice({
               ...createBlankInvoice(),
               ...linkedInvoice,
-              issue_date: getTodayDateInAppTimeZone(),
+              issue_date: getTodayInAppTimeZone(),
               status: normalizeInvoiceStatus(linkedInvoice.status),
               advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
               ad_ids: Array.isArray(linkedInvoice.ad_ids)
@@ -9439,12 +9439,13 @@ export default function AdsPage() {
                       <input
                         type="text"
                         value={invoice.invoice_number}
-                        onChange={(event) =>
-                          setInvoice({ ...invoice, invoice_number: event.target.value })
-                        }
-                        placeholder="INV-000001"
-                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                        readOnly
+                        placeholder="Auto-generated on save"
+                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none transition-all"
                       />
+                      <p className="mt-2 text-xs text-gray-500">
+                        Invoice numbers are assigned automatically and cannot be edited.
+                      </p>
                     </div>
 
                     <div>
@@ -9493,7 +9494,7 @@ export default function AdsPage() {
                         </label>
                         <input
                           type="date"
-                          value={invoice.issue_date}
+                          value={invoice.issue_date || getTodayInAppTimeZone()}
                           readOnly
                           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none transition-all"
                         />

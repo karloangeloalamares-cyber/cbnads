@@ -2,6 +2,7 @@ import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
 import { adAmount, nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 export async function POST(request) {
   try {
@@ -144,7 +145,7 @@ export async function POST(request) {
         contact_name: invoiceData.contactName || advertiser?.contact_name || null,
         contact_email: invoiceData.contactEmail || advertiser?.email || null,
         bill_to: invoiceData.billTo || targetAdvertiserName || null,
-        issue_date: nowIso.slice(0, 10),
+        issue_date: getTodayInAppTimeZone(),
         status,
         discount,
         tax,

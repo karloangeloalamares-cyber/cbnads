@@ -9,6 +9,7 @@ import {
 } from "../utils/auth-check.js";
 import { recalculateAdvertiserSpend } from "../utils/recalculate-advertiser-spend.js";
 import { can } from "../../../lib/permissions.js";
+import { getTodayInAppTimeZone } from "../../../lib/timezone.js";
 
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
   if (String(currentStatus || "").toLowerCase() === "paid") return "Paid";
@@ -216,7 +217,7 @@ export async function PUT(request) {
       amount: computedTotal,
       amount_paid: nextAmountPaid,
       status: nextStatus,
-      issue_date: new Date().toISOString().slice(0, 10),
+      issue_date: getTodayInAppTimeZone(),
     };
     if (advertiser_id !== undefined) patch.advertiser_id = advertiser_id || null;
     if (advertiser_name !== undefined) patch.advertiser_name = advertiser_name;

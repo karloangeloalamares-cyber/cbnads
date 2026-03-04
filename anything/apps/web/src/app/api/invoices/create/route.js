@@ -1,6 +1,7 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 function generateInvoiceNumber() {
   const now = new Date();
@@ -67,7 +68,7 @@ export async function POST(request) {
         contact_name: contact_name || null,
         contact_email: contact_email || null,
         bill_to: bill_to || advertiser_name,
-        issue_date: nowIso.slice(0, 10),
+        issue_date: getTodayInAppTimeZone(),
         status,
         discount: toNumber(discount, 0),
         tax: toNumber(tax, 0),

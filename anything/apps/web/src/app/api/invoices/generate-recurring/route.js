@@ -1,6 +1,7 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
 import { adAmount, nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
+import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 const inRange = (value, from, to) => {
   if (!value) return false;
@@ -115,7 +116,7 @@ export async function POST(request) {
         advertiser_name: advertiser.advertiser_name,
         contact_name: advertiser.contact_name || null,
         contact_email: advertiser.email || null,
-        issue_date: nowIso.slice(0, 10),
+        issue_date: getTodayInAppTimeZone(),
         status: "Pending",
         total,
         amount: total,
