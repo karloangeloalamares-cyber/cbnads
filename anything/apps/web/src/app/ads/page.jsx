@@ -775,6 +775,8 @@ function AdsTableRow({
   onSendToTelegram,
   readOnly = false,
   canDelete = false,
+  isSelected = false,
+  onToggleSelect,
 }) {
   const [activeMenu, setActiveMenu] = useState(false);
   const [menuCoordinates, setMenuCoordinates] = useState({ top: 0, left: 0 });
@@ -841,7 +843,17 @@ function AdsTableRow({
   };
 
   return (
-    <tr className="hover:bg-gray-50 transition-colors group">
+    <tr className={`hover:bg-gray-50 transition-colors group${isSelected ? " bg-blue-50" : ""}`}>
+      {onToggleSelect && (
+        <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(ad.id)}
+            className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+          />
+        </td>
+      )}
       <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
         <div className="text-xs font-semibold text-gray-900" title={ad.ad_name || ""}>
           {truncateAdsWords(ad.ad_name)}
@@ -1955,6 +1967,7 @@ export default function AdsPage() {
   };
 
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
+  const [selectedAdIds, setSelectedAdIds] = useState(new Set());
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
       return "Dashboard";
@@ -3520,6 +3533,7 @@ export default function AdsPage() {
 
   useEffect(() => {
     setAdsCurrentPage(1);
+    setSelectedAdIds(new Set());
   }, [adsFilters, adsSortConfig]);
 
   const adsTotalPages = useMemo(
@@ -5706,6 +5720,50 @@ export default function AdsPage() {
     }
   };
 
+  const handleToggleSelectAd = (adId) => {
+    setSelectedAdIds((prev) => {
+      const next = new Set(prev);
+      next.has(String(adId)) ? next.delete(String(adId)) : next.add(String(adId));
+      return next;
+    });
+  };
+
+  const handleSelectAllAds = () => {
+    const allIds = paginatedAds.map((a) => String(a.id));
+    const allSelected = allIds.length > 0 && allIds.every((id) => selectedAdIds.has(id));
+    setSelectedAdIds(allSelected ? new Set() : new Set(allIds));
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedAdIds.size === 0) return;
+    const ids = [...selectedAdIds];
+    const confirmed = await showConfirm({
+      title: `Delete ${ids.length} ad${ids.length > 1 ? "s" : ""}?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+    });
+    if (!confirmed) return;
+    const toastId = "batch-delete-ads";
+    appToast.info({ id: toastId, title: "Deleting ads…", duration: Infinity });
+    try {
+      const res = await fetch("/api/ads/bulk-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", adIds: ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delete ads.");
+      setDb(readDb());
+      setSelectedAdIds(new Set());
+      appToast.success({ title: "Ads deleted", description: data.message });
+    } catch (err) {
+      console.error("[AdsPage] Batch delete failed", err);
+      appToast.error({ title: "Delete failed", description: err.message });
+    } finally {
+      appToast.dismiss(toastId);
+    }
+  };
+
   const handleNavigate = (section) => {
     if (!allowedSections.includes(section)) {
       return;
@@ -7478,10 +7536,45 @@ export default function AdsPage() {
                 </div>
               ) : (
                 <>
+                  {canDeleteAds && selectedAdIds.size > 0 && (
+                    <div className="mb-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
+                      <span className="text-sm text-gray-700 font-medium">
+                        {selectedAdIds.size} ad{selectedAdIds.size > 1 ? "s" : ""} selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAdIds(new Set())}
+                        className="text-xs text-gray-500 hover:text-gray-900 transition-colors"
+                      >
+                        Clear
+                      </button>
+                      <div className="ml-auto">
+                        <button
+                          type="button"
+                          onClick={handleBatchDelete}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                          Delete {selectedAdIds.size} ad{selectedAdIds.size > 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
+                          {canDeleteAds && (
+                            <th className="px-4 py-3 w-10">
+                              <input
+                                type="checkbox"
+                                checked={paginatedAds.length > 0 && paginatedAds.every((a) => selectedAdIds.has(String(a.id)))}
+                                onChange={handleSelectAllAds}
+                                className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                              />
+                            </th>
+                          )}
                           <AdsSortableHeader
                             label="Ad"
                             sortKey="ad_name"
@@ -7548,6 +7641,8 @@ export default function AdsPage() {
                             onSendToTelegram={handleSendAdToMyTelegram}
                             readOnly={isAdvertiser}
                             canDelete={canDeleteAds}
+                            isSelected={selectedAdIds.has(String(item.id))}
+                            onToggleSelect={canDeleteAds ? handleToggleSelectAd : undefined}
                           />
                         ))}
                       </tbody>
