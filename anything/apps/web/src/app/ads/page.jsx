@@ -758,6 +758,7 @@ function AdsTableRow({
   onSendToWhatsApp,
   onSendToTelegram,
   readOnly = false,
+  canDelete = false,
 }) {
   const [activeMenu, setActiveMenu] = useState(false);
   const [menuCoordinates, setMenuCoordinates] = useState({ top: 0, left: 0 });
@@ -796,7 +797,11 @@ function AdsTableRow({
     const button = event.currentTarget;
     const rect = button.getBoundingClientRect();
     const menuWidth = 192;
-    const menuHeight = ad.status === "Published" ? 258 : 304;
+    const hasPublishedAction = ad.status !== "Published";
+    const menuActionCount =
+      4 + (hasPublishedAction ? 1 : 0) + (canDelete ? 1 : 0);
+    const menuHeight =
+      menuActionCount * 46 + (canDelete ? 10 : 0);
     const gap = 6;
     const viewportPadding = 8;
 
@@ -946,18 +951,22 @@ function AdsTableRow({
                       Mark as Published
                     </button>
                   ) : null}
-                  <div className="border-t border-gray-100 my-1" />
-                  <button
-                    onClick={() => {
-                      setActiveMenu(false);
-                      onDelete(ad.id);
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                    type="button"
-                  >
-                    <Trash2 size={16} className="text-red-500" />
-                    Delete
-                  </button>
+                  {canDelete ? (
+                    <>
+                      <div className="border-t border-gray-100 my-1" />
+                      <button
+                        onClick={() => {
+                          setActiveMenu(false);
+                          onDelete(ad.id);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                        type="button"
+                      >
+                        <Trash2 size={16} className="text-red-500" />
+                        Delete
+                      </button>
+                    </>
+                  ) : null}
                 </div>,
                 document.body,
               )
@@ -5511,7 +5520,10 @@ export default function AdsPage() {
   };
 
   const deleteAdRecord = (adId) => {
-    if (!isAdmin) {
+    if (!canDeleteAds) {
+      appToast.error({
+        title: "You do not have permission to delete ads.",
+      });
       return;
     }
     return run(() => deleteAd(adId), "Ad deleted.");
@@ -7352,6 +7364,7 @@ export default function AdsPage() {
                             onSendToWhatsApp={handleSendAdToMyWhatsApp}
                             onSendToTelegram={handleSendAdToMyTelegram}
                             readOnly={isAdvertiser}
+                            canDelete={canDeleteAds}
                           />
                         ))}
                       </tbody>
