@@ -10,90 +10,51 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
   const previousCountRef = useRef(0);
   const initializedRef = useRef(false);
   const audioRef = useRef(null);
-  const pollingSuspendedRef = useRef(false);
-  const consecutiveFailureCountRef = useRef(0);
 
-  const suspendPolling = useCallback(() => {
-    pollingSuspendedRef.current = true;
-    consecutiveFailureCountRef.current = 0;
+  const resetNotificationState = useCallback(() => {
     setUnreadCount(0);
-  }, []);
-
-  const trackRequestFailure = useCallback(
-    (response) => {
-      const status = Number(response?.status || 0);
-
-      if (status === 401 || status === 403 || status === 404) {
-        suspendPolling();
-        return true;
-      }
-
-      if (status >= 500) {
-        consecutiveFailureCountRef.current += 1;
-        if (consecutiveFailureCountRef.current >= 2) {
-          suspendPolling();
-          return true;
-        }
-      }
-
-      return false;
-    },
-    [suspendPolling],
-  );
-
-  const resetFailureState = useCallback(() => {
-    consecutiveFailureCountRef.current = 0;
+    previousCountRef.current = 0;
+    initializedRef.current = false;
   }, []);
 
   useEffect(() => {
     if (!enabled) {
-      pollingSuspendedRef.current = false;
-      consecutiveFailureCountRef.current = 0;
+      audioRef.current = null;
       return undefined;
     }
+
     audioRef.current = new Audio(
       "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBjGH0fPTgjMGHm7A7+OZSA0PVKzn77BeGAg+ltrywnAjBS18zPDXijkIHWi57ueaTxALTqXh7rdgGAg7ktXvzHwmBS5+y+/ajT0HGGe26+eYTQ8LTqTi77RcGAg5jdLvynojBSl6xu7dkUELElyx6+uqVxQJQ5zd8r90IQUwgtD1w2w"
     );
+
+    return () => {
+      audioRef.current = null;
+    };
   }, [enabled]);
 
-  useEffect(() => {
+  const fetchPreferences = useCallback(async () => {
     if (!enabled) {
-      setUnreadCount(0);
-      pollingSuspendedRef.current = false;
-      consecutiveFailureCountRef.current = 0;
-      return undefined;
+      return;
     }
-    const fetchPreferences = async () => {
-      if (pollingSuspendedRef.current) {
+
+    try {
+      const response = await fetchWithAdminAuth("/api/admin/notification-preferences");
+      if (!response?.ok) {
         return;
       }
 
-      try {
-        const response = await fetchWithAdminAuth("/api/admin/notification-preferences");
-        if (!response) {
-          suspendPolling();
-          return;
-        }
-        if (!response.ok) {
-          trackRequestFailure(response);
-          return;
-        }
-
-        resetFailureState();
-        const data = await response.json();
-        setSoundEnabled(data.preferences?.sound_enabled ?? true);
-      } catch (_error) {
-        suspendPolling();
-      }
-    };
-
-    fetchPreferences();
-  }, [enabled, resetFailureState, suspendPolling, trackRequestFailure]);
+      const data = await response.json();
+      setSoundEnabled(data.preferences?.sound_enabled ?? true);
+    } catch (_error) {
+      // Preference refresh failures should not disable unread polling.
+    }
+  }, [enabled]);
 
   const markAllAsRead = useCallback(async () => {
-    if (!enabled || pollingSuspendedRef.current) {
+    if (!enabled) {
       return;
     }
+
     try {
       const response = await fetchWithAdminAuth("/api/admin/pending-ads/mark-read", {
         method: "POST",
@@ -101,47 +62,32 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
         body: JSON.stringify({}),
       });
 
-      if (response?.ok) {
-        resetFailureState();
-        setUnreadCount(0);
-        previousCountRef.current = 0;
-      } else if (response) {
-        trackRequestFailure(response);
-      } else {
-        suspendPolling();
+      if (!response?.ok) {
+        return;
       }
+
+      setUnreadCount(0);
+      previousCountRef.current = 0;
+      initializedRef.current = true;
     } catch (_error) {
-      suspendPolling();
+      // Ignore and allow the next refresh cycle to retry.
     }
-  }, [enabled, resetFailureState, suspendPolling, trackRequestFailure]);
+  }, [enabled]);
 
   const fetchUnreadCount = useCallback(async () => {
     if (!enabled) {
-      setUnreadCount(0);
-      previousCountRef.current = 0;
-      initializedRef.current = false;
-      pollingSuspendedRef.current = false;
-      consecutiveFailureCountRef.current = 0;
+      resetNotificationState();
       return;
     }
 
-    if (pollingSuspendedRef.current) {
-      return;
-    }
     try {
       const response = await fetchWithAdminAuth("/api/admin/pending-ads/unread-count");
-      if (!response) {
-        suspendPolling();
-        return;
-      }
-      if (!response.ok) {
-        trackRequestFailure(response);
+      if (!response?.ok) {
         return;
       }
 
-      resetFailureState();
       const data = await response.json();
-      const newCount = Number(data.count) || 0;
+      const newCount = Math.max(0, Number(data.count) || 0);
       const previousCount = previousCountRef.current;
 
       if (initializedRef.current && newCount > previousCount) {
@@ -165,26 +111,66 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       previousCountRef.current = newCount;
       setUnreadCount(newCount);
     } catch (_error) {
-      suspendPolling();
+      // Ignore transient auth/network issues and retry on the next poll.
     }
-  }, [
-    enabled,
-    markAllAsRead,
-    onViewPending,
-    resetFailureState,
-    soundEnabled,
-    suspendPolling,
-    trackRequestFailure,
-  ]);
+  }, [enabled, markAllAsRead, onViewPending, resetNotificationState, soundEnabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      resetNotificationState();
+      return undefined;
+    }
+
+    void fetchPreferences();
+    void fetchUnreadCount();
+
+    const interval = window.setInterval(fetchUnreadCount, 30_000);
+    return () => window.clearInterval(interval);
+  }, [enabled, fetchPreferences, fetchUnreadCount, resetNotificationState]);
 
   useEffect(() => {
     if (!enabled) {
       return undefined;
     }
-    fetchUnreadCount();
-    const interval = window.setInterval(fetchUnreadCount, 30_000);
-    return () => window.clearInterval(interval);
-  }, [enabled, fetchUnreadCount]);
+
+    const refreshNotifications = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+
+      void fetchPreferences();
+      void fetchUnreadCount();
+    };
+
+    window.addEventListener("focus", refreshNotifications);
+    document.addEventListener("visibilitychange", refreshNotifications);
+
+    return () => {
+      window.removeEventListener("focus", refreshNotifications);
+      document.removeEventListener("visibilitychange", refreshNotifications);
+    };
+  }, [enabled, fetchPreferences, fetchUnreadCount]);
+
+  useEffect(() => {
+    if (!enabled || !hasSupabaseConfig) {
+      return undefined;
+    }
+
+    const supabase = getSupabaseClient();
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        resetNotificationState();
+        return;
+      }
+
+      void fetchPreferences();
+      void fetchUnreadCount();
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, [enabled, fetchPreferences, fetchUnreadCount, resetNotificationState]);
 
   return {
     unreadCount,

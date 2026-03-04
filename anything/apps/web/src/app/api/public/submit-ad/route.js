@@ -277,6 +277,7 @@ export async function POST(request) {
         placement: placement || null,
         notes: notes || null,
         status: "pending",
+        viewed_by_admin: false,
         created_at: nowIso,
         updated_at: nowIso,
       })
