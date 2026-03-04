@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { appToast } from "@/lib/toast";
 import { formatUSPhoneNumber, US_PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+import { formatPostTypeLabel } from "@/lib/postType";
 
 export default function AdvertisersList({ onCreateNew }) {
   const [advertisers, setAdvertisers] = useState([]);
@@ -496,7 +497,7 @@ export default function AdvertisersList({ onCreateNew }) {
                               {ad.ad_name}
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {ad.post_type} • {ad.placement} •{" "}
+                              {formatPostTypeLabel(ad.post_type)} • {ad.placement} •{" "}
                               {formatDate(ad.post_date_from)}
                             </p>
                           </div>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { ArrowLeft } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Eye, X } from "lucide-react";
 import { useSubmitAdForm } from "@/hooks/useSubmitAdForm";
 import { useModal } from "@/hooks/useModal";
 import { AlertModal, ConfirmModal } from "@/components/Modal";
@@ -24,6 +24,7 @@ export function meta() {
 
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
+  const [showPreview, setShowPreview] = useState(false);
 
   const {
     formData,
@@ -102,7 +103,7 @@ export default function SubmitAdPage() {
       <div className="min-h-screen bg-white">
         <div className="flex max-w-none mx-auto">
           <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12">
-            <div className="max-w-[680px] mx-auto mb-6">
+            <div className="max-w-[680px] mx-auto mb-6 flex items-center justify-between">
               <a
                 href="/"
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
@@ -110,6 +111,16 @@ export default function SubmitAdPage() {
                 <ArrowLeft size={18} />
                 Back
               </a>
+              {phase === "form" && (
+                <button
+                  type="button"
+                  onClick={() => setShowPreview(true)}
+                  className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400"
+                >
+                  <Eye size={15} />
+                  Preview
+                </button>
+              )}
             </div>
 
             {phase === "account" ? (
@@ -202,12 +213,33 @@ export default function SubmitAdPage() {
               </div>
             )}
           </div>
-
-          <div className="hidden lg:block w-[700px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:p-12 flex-shrink-0">
-            <AdPreview formData={previewData} />
-          </div>
         </div>
       </div>
+
+      {/* Ad Preview Modal — Issue #12 */}
+      {showPreview && (
+        <div
+          className="fixed inset-0 z-50 flex"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowPreview(false); }}
+        >
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+          <div className="relative ml-auto w-full max-w-[480px] h-full bg-[#F5F5F5] shadow-2xl flex flex-col overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
+              <span className="text-sm font-semibold text-gray-900">Ad Preview</span>
+              <button
+                type="button"
+                onClick={() => setShowPreview(false)}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-900 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-6">
+              <AdPreview formData={previewData} />
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

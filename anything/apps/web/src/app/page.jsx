@@ -2,6 +2,10 @@
 
 import { Lock } from "lucide-react";
 
+export function meta() {
+  return [{ title: "CBN Ads — Reach 30,000+ Customers Daily" }];
+}
+
 export default function HomePage() {
   return (
     <div className="min-h-screen relative flex flex-col">

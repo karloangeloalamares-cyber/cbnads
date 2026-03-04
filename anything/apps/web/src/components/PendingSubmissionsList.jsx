@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { usePendingAds } from "@/hooks/usePendingAds";
 import { appToast } from "@/lib/toast";
 import { PageHeader } from "./PendingSubmissionsList/PageHeader";
-import { LoadingState } from "./PendingSubmissionsList/LoadingState";
 import { SubmissionsTable } from "./PendingSubmissionsList/SubmissionsTable";
 import { ViewModal } from "./PendingSubmissionsList/ViewModal";
 import { EditModal } from "./PendingSubmissionsList/EditModal";
@@ -119,7 +119,14 @@ export default function PendingSubmissionsList() {
   };
 
   if (loading) {
-    return <LoadingState />;
+    return (
+      <div className="p-8">
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-gray-400">
+          <Loader2 size={28} className="animate-spin" />
+          <p className="text-sm">Loading submissions...</p>
+        </div>
+      </div>
+    );
   }
 
   return (

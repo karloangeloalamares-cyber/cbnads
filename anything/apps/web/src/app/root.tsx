@@ -100,6 +100,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content="CBN Ads" />
         <meta name="twitter:description" content="Submit and manage advertising campaigns with CBN Ads." />
+        <title>CBN Ads</title>
         <Meta />
         <Links />
         {/* Favicon */}

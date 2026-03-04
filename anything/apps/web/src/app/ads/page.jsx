@@ -1,5 +1,10 @@
 "use client";
 
+export function meta() {
+  return [{ title: "Dashboard — CBN Ads" }];
+}
+
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -6779,7 +6784,7 @@ export default function AdsPage() {
                                 return `${local[0]}${"+".repeat(Math.min(local.length - 1, 5))}@${domain}`;
                               })()}
                             </td>
-                            <td className="px-6 py-3.5 text-gray-600 text-xs">
+                            <td className="px-6 py-3.5 text-gray-600 text-xs whitespace-nowrap">
                               {formatPostTypeLabel(item.post_type) || "-"}
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs">
