@@ -1989,9 +1989,9 @@ export default function AdsPage() {
     direction: null,
   });
   const [openInvoiceMenuId, setOpenInvoiceMenuId] = useState(null);
-  const [invoiceMenuPosition, setInvoiceMenuPosition] = useState({
-    vertical: "bottom",
-    horizontal: "right",
+  const [invoiceMenuCoordinates, setInvoiceMenuCoordinates] = useState({
+    top: 0,
+    left: 0,
   });
   const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
@@ -2356,9 +2356,11 @@ export default function AdsPage() {
 
   useEffect(() => {
     const onClickOutside = (event) => {
+      const invoiceMenuTrigger = event.target?.closest?.("[data-invoice-menu-trigger='true']");
       if (
         invoiceMenuRef.current &&
-        !invoiceMenuRef.current.contains(event.target)
+        !invoiceMenuRef.current.contains(event.target) &&
+        !invoiceMenuTrigger
       ) {
         setOpenInvoiceMenuId(null);
       }
@@ -2372,6 +2374,20 @@ export default function AdsPage() {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!openInvoiceMenuId) {
+      return undefined;
+    }
+
+    const closeMenu = () => setOpenInvoiceMenuId(null);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openInvoiceMenuId]);
 
   useEffect(() => {
     if (!adsShowAdvancedFilters) {
@@ -4831,13 +4847,31 @@ export default function AdsPage() {
     });
   };
 
-  const openInvoiceMenu = (invoiceId, event) => {
+  const openInvoiceMenu = (invoiceId, status, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.right;
-    setInvoiceMenuPosition({
-      vertical: spaceBelow < 350 ? "top" : "bottom",
-      horizontal: spaceRight < 200 ? "left" : "right",
+    const menuWidth = 192;
+    const menuHeight = status === "Paid" ? 150 : 194;
+    const gap = 6;
+    const viewportPadding = 8;
+
+    let top = rect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      top = rect.top - menuHeight - gap;
+    }
+    top = Math.max(
+      viewportPadding,
+      Math.min(top, window.innerHeight - menuHeight - viewportPadding),
+    );
+
+    let left = rect.right - menuWidth;
+    left = Math.max(
+      viewportPadding,
+      Math.min(left, window.innerWidth - menuWidth - viewportPadding),
+    );
+
+    setInvoiceMenuCoordinates({
+      top,
+      left,
     });
     setOpenInvoiceMenuId((current) => (current === invoiceId ? null : invoiceId));
   };
@@ -9045,59 +9079,73 @@ export default function AdsPage() {
                                   <>
                                     <button
                                       type="button"
-                                      onClick={(event) => openInvoiceMenu(item.id, event)}
+                                      onClick={(event) => openInvoiceMenu(item.id, status, event)}
+                                      data-invoice-menu-trigger="true"
                                       className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                                     >
                                       <MoreVertical size={18} className="text-gray-500" />
                                     </button>
-                                    {openInvoiceMenuId === item.id ? (
-                                      <div
-                                        ref={invoiceMenuRef}
-                                        className={`absolute ${invoiceMenuPosition.vertical === "top"
-                                          ? "bottom-full mb-1"
-                                          : "top-full mt-1"
-                                          } ${invoiceMenuPosition.horizontal === "left"
-                                            ? "right-0"
-                                            : "left-auto"
-                                          } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
-                                      >
-                                        <button
-                                          type="button"
-                                          onClick={() => openInvoicePreview(item)}
-                                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                        >
-                                          <Eye size={16} className="text-gray-400" />
-                                          View Invoice
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => openInvoiceEditor(item)}
-                                          className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                        >
-                                          <Edit2 size={16} className="text-gray-400" />
-                                          Edit Invoice
-                                        </button>
-                                        {status !== "Paid" ? (
+                                    {openInvoiceMenuId === item.id && typeof document !== "undefined"
+                                      ? createPortal(
+                                          <div
+                                            ref={invoiceMenuRef}
+                                            className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+                                            style={{
+                                              top: `${invoiceMenuCoordinates.top}px`,
+                                              left: `${invoiceMenuCoordinates.left}px`,
+                                            }}
+                                          >
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setOpenInvoiceMenuId(null);
+                                                openInvoicePreview(item);
+                                              }}
+                                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                            >
+                                              <Eye size={16} className="text-gray-400" />
+                                              View Invoice
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setOpenInvoiceMenuId(null);
+                                                openInvoiceEditor(item);
+                                              }}
+                                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                            >
+                                              <Edit2 size={16} className="text-gray-400" />
+                                              Edit Invoice
+                                            </button>
+                                            {status !== "Paid" ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setOpenInvoiceMenuId(null);
+                                                  markInvoiceAsPaid(item);
+                                                }}
+                                                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                              >
+                                                <CheckCircle size={16} className="text-gray-400" />
+                                                Mark as Paid
+                                              </button>
+                                            ) : null}
+                                            <div className="border-t border-gray-100 my-1" />
                                           <button
                                             type="button"
-                                            onClick={() => markInvoiceAsPaid(item)}
-                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                            onClick={() => {
+                                              setOpenInvoiceMenuId(null);
+                                              deleteInvoiceRecord(item.id);
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
                                           >
-                                            <CheckCircle size={16} className="text-gray-400" />
-                                            Mark as Paid
+                                            <Trash2 size={16} className="text-red-500" />
+                                            Delete
                                           </button>
-                                        ) : null}
-                                        <div className="border-t border-gray-100 my-1" />
-                                        <button
-                                          type="button"
-                                          onClick={() => deleteInvoiceRecord(item.id)}
-                                          className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                        >
-                                          <Trash2 size={16} className="text-red-500" />
-                                          Delete
-                                        </button>
-                                      </div>
-                                    ) : null}
+                                          </div>,
+                                          document.body,
+                                        )
+                                      : null}
                                   </>
                                 )}
                               </td>
