@@ -91,6 +91,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        {/* SEO — Issue #9 */}
+        <meta name="description" content="CBN Ads — Submit and manage advertising campaigns. Reach your audience with one-time, daily, or custom scheduled posts." />
+        <meta property="og:site_name" content="CBN Ads" />
+        <meta property="og:title" content="CBN Ads" />
+        <meta property="og:description" content="Submit and manage advertising campaigns with CBN Ads." />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="CBN Ads" />
+        <meta name="twitter:description" content="Submit and manage advertising campaigns with CBN Ads." />
         <Meta />
         <Links />
         {/* Favicon */}

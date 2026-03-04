@@ -117,6 +117,10 @@ const sections = [
   "Settings",
 ];
 
+const CREATE_AD_SUBMIT_TOAST_ID = "create-ad-submit-toast";
+const INVOICE_SUBMIT_TOAST_ID = "invoice-submit-toast";
+const getInvoiceActionToastId = (action, invoiceId) => `invoice-${action}-toast-${invoiceId}`;
+
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
 
@@ -2032,6 +2036,7 @@ export default function AdsPage() {
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pendingAdDeleteIdsRef = useRef(new Set());
+  const pendingInvoiceActionIdsRef = useRef(new Set());
   const dropdownRef = useRef(null);
   const notificationsDropdownRef = useRef(null);
   const advertiserMenuRef = useRef(null);
@@ -2053,6 +2058,8 @@ export default function AdsPage() {
   const [createAdErrors, setCreateAdErrors] = useState({});
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(() => createBlankInvoice());
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
+  const [pendingInvoiceActionIds, setPendingInvoiceActionIds] = useState([]);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
   const [settingsProfileImage, setSettingsProfileImage] = useState("");
@@ -2430,6 +2437,8 @@ export default function AdsPage() {
   const allPending = db.pending_ads || [];
   const allInvoices = db.invoices || [];
   const teamMembers = db.team_members || [];
+  const isInvoiceActionPending = (invoiceId) =>
+    pendingInvoiceActionIds.includes(String(invoiceId || "").trim());
   const adminSettings = db.admin_settings || {};
   const notificationPreferences = db.notification_preferences || {};
   const currentAdvertiser = useMemo(() => {
@@ -2778,8 +2787,8 @@ export default function AdsPage() {
     const invoiceNumber = invoicePreviewModal.invoice_number || invoicePreviewModal.id || "";
     const issueDate = formatInvoiceListDate(
       invoicePreviewModal.issue_date ||
-        invoicePreviewModal.due_date ||
-        invoicePreviewModal.created_at,
+      invoicePreviewModal.due_date ||
+      invoicePreviewModal.created_at,
     );
     const invoiceItems = Array.isArray(invoicePreviewModal.items) ? invoicePreviewModal.items : [];
     const linkedAds = (
@@ -4932,58 +4941,118 @@ export default function AdsPage() {
     setOpenInvoiceMenuId(null);
   };
 
-  const markInvoiceAsPaid = (item) => {
+  const markInvoiceAsPaid = async (item) => {
     if (!isAdmin) {
       return;
     }
-    return run(async () => {
-      await upsertInvoice({
-        ...item,
-        status: "Paid",
-        ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
-      });
-      setOpenInvoiceMenuId(null);
-      if (invoicePreviewModal?.id === item.id) {
-        setInvoicePreviewModal((current) =>
-          current ? { ...current, status: "Paid" } : current,
-        );
-      }
-    }, "Invoice marked as paid.");
+    const normalizedInvoiceId = String(item?.id || "").trim();
+    if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
+      return;
+    }
+
+    const toastId = getInvoiceActionToastId("paid", normalizedInvoiceId);
+    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
+    setPendingInvoiceActionIds((current) =>
+      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
+    );
+    setOpenInvoiceMenuId(null);
+    appToast.info({
+      id: toastId,
+      title: "Updating invoice...",
+      description: "Please wait while the invoice is marked as paid.",
+      duration: Infinity,
+    });
+    try {
+      await run(async () => {
+        await upsertInvoice({
+          ...item,
+          status: "Paid",
+          ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
+        });
+        if (String(invoicePreviewModal?.id || "").trim() === normalizedInvoiceId) {
+          setInvoicePreviewModal((current) =>
+            current ? { ...current, status: "Paid" } : current,
+          );
+        }
+      }, "Invoice marked as paid.");
+    } finally {
+      appToast.dismiss(toastId);
+      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
+      setPendingInvoiceActionIds((current) =>
+        current.filter((itemId) => itemId !== normalizedInvoiceId),
+      );
+    }
   };
 
-  const deleteInvoiceRecord = (invoiceId) => {
+  const deleteInvoiceRecord = async (invoiceId) => {
     if (!isAdmin) {
       return;
     }
-    return run(async () => {
-      await deleteInvoice(invoiceId);
-      setOpenInvoiceMenuId(null);
-      if (invoicePreviewModal?.id === invoiceId) {
-        setInvoicePreviewModal(null);
-      }
-    }, "Invoice deleted.");
+    const normalizedInvoiceId = String(invoiceId || "").trim();
+    if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
+      return;
+    }
+
+    const toastId = getInvoiceActionToastId("delete", normalizedInvoiceId);
+    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
+    setPendingInvoiceActionIds((current) =>
+      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
+    );
+    setOpenInvoiceMenuId(null);
+    appToast.info({
+      id: toastId,
+      title: "Deleting invoice...",
+      description: "Please wait while the invoice is removed.",
+      duration: Infinity,
+    });
+    try {
+      await run(async () => {
+        await deleteInvoice(normalizedInvoiceId);
+        if (String(invoicePreviewModal?.id || "").trim() === normalizedInvoiceId) {
+          setInvoicePreviewModal(null);
+        }
+      }, "Invoice deleted.");
+    } finally {
+      appToast.dismiss(toastId);
+      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
+      setPendingInvoiceActionIds((current) =>
+        current.filter((itemId) => itemId !== normalizedInvoiceId),
+      );
+    }
   };
 
-  const saveInvoiceForm = () => {
-    if (!isAdmin) {
+  const saveInvoiceForm = async () => {
+    if (!isAdmin || invoiceSaving) {
       return;
     }
-    return run(async () => {
-      const issueDate = getTodayInAppTimeZone();
-      if (!invoice.advertiser_id) {
-        throw new Error("Advertiser required");
-      }
-      if (!String(invoice.amount || "").trim()) {
-        throw new Error("Amount required");
-      }
-      await upsertInvoice({
-        ...invoice,
-        issue_date: issueDate,
-        status: normalizeInvoiceStatus(invoice.status),
-      });
-      setInvoice(createBlankInvoice());
-      setView("list");
-    }, "Invoice saved.");
+    setInvoiceSaving(true);
+    appToast.info({
+      id: INVOICE_SUBMIT_TOAST_ID,
+      title: "Submitting invoice...",
+      description: "Please wait while the invoice is saved.",
+      duration: Infinity,
+    });
+    try {
+      await run(async () => {
+        const issueDate = getTodayInAppTimeZone();
+        if (!invoice.advertiser_id) {
+          throw new Error("Advertiser required");
+        }
+        if (!String(invoice.amount || "").trim()) {
+          throw new Error("Amount required");
+        }
+        await upsertInvoice({
+          ...invoice,
+          issue_date: issueDate,
+          status: normalizeInvoiceStatus(invoice.status),
+        });
+        setInvoice(createBlankInvoice());
+        setView("list");
+      }, "Invoice saved.");
+    } finally {
+      appToast.dismiss(INVOICE_SUBMIT_TOAST_ID);
+      setInvoiceSaving(false);
+    }
   };
 
   const clearAdsAdvancedFilters = () => {
@@ -5263,8 +5332,28 @@ export default function AdsPage() {
       return;
     }
 
+    const submitToast =
+      mode === "draft"
+        ? {
+          title: "Saving draft...",
+          description: "Please wait while the draft is saved.",
+        }
+        : {
+          title: ad.id ? "Saving ad..." : "Creating ad...",
+          description:
+            mode === "continue"
+              ? "Please wait while the ad is saved and billing is prepared."
+              : "Please wait while the ad is saved.",
+        };
+
     setCreateAdSubmitting(true);
     setCreateAdSubmitMode(mode);
+    appToast.info({
+      id: CREATE_AD_SUBMIT_TOAST_ID,
+      title: submitToast.title,
+      description: submitToast.description,
+      duration: Infinity,
+    });
 
     try {
       await run(async () => {
@@ -5404,6 +5493,7 @@ export default function AdsPage() {
         setCreateAdFullyBookedDates([]);
       }, mode === "continue" ? "Ad saved. Continue to billing." : "Ad saved.");
     } finally {
+      appToast.dismiss(CREATE_AD_SUBMIT_TOAST_ID);
       setCreateAdSubmitting(false);
       setCreateAdSubmitMode("");
     }
@@ -6423,7 +6513,7 @@ export default function AdsPage() {
                           <span className="text-sm text-gray-600">Most Popular Type</span>
                         </div>
                         <span className="text-sm font-semibold text-gray-900">
-                          {dashboardInsights.mostPopularType}
+                          {formatPostTypeLabel(dashboardInsights.mostPopularType)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -6658,7 +6748,7 @@ export default function AdsPage() {
                           <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
                             Submitted
                           </th>
-                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
+                          <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase sticky right-0 bg-gray-50 shadow-[-8px_0_8px_-4px_rgba(0,0,0,0.04)]">
                             Actions
                           </th>
                         </tr>
@@ -6682,15 +6772,20 @@ export default function AdsPage() {
                               {item.advertiser_name || "-"}
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs">
-                              {item.email || "-"}
+                              {(() => {
+                                const email = item.email || "";
+                                if (!email || !email.includes("@")) return email || "-";
+                                const [local, domain] = email.split("@");
+                                return `${local[0]}${"+".repeat(Math.min(local.length - 1, 5))}@${domain}`;
+                              })()}
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs">
-                              {item.post_type || "-"}
+                              {formatPostTypeLabel(item.post_type) || "-"}
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs">
                               {formatSubmissionDate(item.created_at)}
                             </td>
-                            <td className="px-6 py-3.5">
+                            <td className="px-6 py-3.5 sticky right-0 bg-white shadow-[-8px_0_8px_-4px_rgba(0,0,0,0.04)]">
                               <div className="flex gap-2">
                                 {isAdvertiser && item.status === "pending" ? (
                                   <button
@@ -6704,19 +6799,19 @@ export default function AdsPage() {
                                     <span>Edit</span>
                                   </button>
                                 ) : (
-                                <button
-                                  type="button"
-                                  className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                                  title="View Details"
-                                  onClick={() => {
-                                    appToast.info({
-                                      title: item.ad_name || "Submission",
-                                      description: `Submitted by ${item.advertiser_name || "unknown advertiser"}`,
-                                    });
-                                  }}
-                                >
-                                  <Eye size={16} />
-                                </button>
+                                  <button
+                                    type="button"
+                                    className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                                    title="View Details"
+                                    onClick={() => {
+                                      appToast.info({
+                                        title: item.ad_name || "Submission",
+                                        description: `Submitted by ${item.advertiser_name || "unknown advertiser"}`,
+                                      });
+                                    }}
+                                  >
+                                    <Eye size={16} />
+                                  </button>
                                 )}
                                 {isAdmin && item.status === "pending" ? (
                                   <>
@@ -6811,16 +6906,12 @@ export default function AdsPage() {
                     </div>
                   )}
                 </div>
-                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <p className="text-sm font-semibold text-blue-900">Webhook URL</p>
-                  <p className="text-sm text-blue-700 mt-1">
-                    Configure this endpoint in your WhatsApp provider:
-                  </p>
-                  <code className="block mt-2 bg-white px-3 py-2 rounded text-sm text-blue-900 border border-blue-200">
-                    {typeof window !== "undefined"
-                      ? `${window.location.origin}/api/whatsapp/webhook`
-                      : "/api/whatsapp/webhook"}
-                  </code>
+                <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-green-900">Webhook is active</p>
+                    <p className="text-xs text-green-700 mt-0.5">The WhatsApp webhook endpoint is configured and receiving messages.</p>
+                  </div>
                 </div>
               </div>
 
@@ -9145,71 +9236,74 @@ export default function AdsPage() {
                                     <button
                                       type="button"
                                       onClick={(event) => openInvoiceMenu(item.id, status, event)}
+                                      disabled={isInvoiceActionPending(item.id)}
                                       data-invoice-menu-trigger="true"
-                                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                      className="rounded-lg p-2 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                       <MoreVertical size={18} className="text-gray-500" />
                                     </button>
                                     {openInvoiceMenuId === item.id && typeof document !== "undefined"
                                       ? createPortal(
-                                          <div
-                                            ref={invoiceMenuRef}
-                                            className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
-                                            style={{
-                                              top: `${invoiceMenuCoordinates.top}px`,
-                                              left: `${invoiceMenuCoordinates.left}px`,
+                                        <div
+                                          ref={invoiceMenuRef}
+                                          className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+                                          style={{
+                                            top: `${invoiceMenuCoordinates.top}px`,
+                                            left: `${invoiceMenuCoordinates.left}px`,
+                                          }}
+                                        >
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setOpenInvoiceMenuId(null);
+                                              openInvoicePreview(item);
                                             }}
+                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
                                           >
+                                            <Eye size={16} className="text-gray-400" />
+                                            View Invoice
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setOpenInvoiceMenuId(null);
+                                              openInvoiceEditor(item);
+                                            }}
+                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                          >
+                                            <Edit2 size={16} className="text-gray-400" />
+                                            Edit Invoice
+                                          </button>
+                                          {status !== "Paid" ? (
                                             <button
                                               type="button"
                                               onClick={() => {
                                                 setOpenInvoiceMenuId(null);
-                                                openInvoicePreview(item);
+                                                markInvoiceAsPaid(item);
                                               }}
-                                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                              disabled={isInvoiceActionPending(item.id)}
+                                              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                                             >
-                                              <Eye size={16} className="text-gray-400" />
-                                              View Invoice
+                                              <CheckCircle size={16} className="text-gray-400" />
+                                              Mark as Paid
                                             </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setOpenInvoiceMenuId(null);
-                                                openInvoiceEditor(item);
-                                              }}
-                                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                            >
-                                              <Edit2 size={16} className="text-gray-400" />
-                                              Edit Invoice
-                                            </button>
-                                            {status !== "Paid" ? (
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  setOpenInvoiceMenuId(null);
-                                                  markInvoiceAsPaid(item);
-                                                }}
-                                                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                              >
-                                                <CheckCircle size={16} className="text-gray-400" />
-                                                Mark as Paid
-                                              </button>
-                                            ) : null}
-                                            <div className="border-t border-gray-100 my-1" />
+                                          ) : null}
+                                          <div className="border-t border-gray-100 my-1" />
                                           <button
                                             type="button"
                                             onClick={() => {
                                               setOpenInvoiceMenuId(null);
                                               deleteInvoiceRecord(item.id);
                                             }}
-                                            className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                            disabled={isInvoiceActionPending(item.id)}
+                                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                           >
                                             <Trash2 size={16} className="text-red-500" />
                                             Delete
                                           </button>
-                                          </div>,
-                                          document.body,
-                                        )
+                                        </div>,
+                                        document.body,
+                                      )
                                       : null}
                                   </>
                                 )}
@@ -9416,7 +9510,8 @@ export default function AdsPage() {
                   setView("list");
                   setInvoice(createBlankInvoice());
                 }}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all mb-6"
+                disabled={invoiceSaving}
+                className="mb-6 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <ChevronLeft size={16} />
                 Back to Billing
@@ -9556,14 +9651,16 @@ export default function AdsPage() {
                       <button
                         type="button"
                         onClick={saveInvoiceForm}
-                        className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all"
+                        disabled={invoiceSaving}
+                        className="rounded-lg bg-black px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Save Invoice
+                        {invoiceSaving ? "Submitting..." : "Save Invoice"}
                       </button>
                       <button
                         type="button"
                         onClick={() => setInvoice(createBlankInvoice())}
-                        className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all"
+                        disabled={invoiceSaving}
+                        className="rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Reset
                       </button>

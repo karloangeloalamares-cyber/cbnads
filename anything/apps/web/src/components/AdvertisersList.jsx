@@ -6,6 +6,7 @@ import {
   Plus,
   MoreVertical,
   Eye,
+  EyeOff,
   Edit2,
   Trash2,
   X,
@@ -26,7 +27,24 @@ export default function AdvertisersList({ onCreateNew }) {
     vertical: "bottom",
     horizontal: "right",
   });
+  const [revealedPii, setRevealedPii] = useState({});
   const menuRef = useRef(null);
+
+  const maskEmail = (email) => {
+    if (!email || !email.includes("@")) return email || "—";
+    const [local, domain] = email.split("@");
+    return `${local[0]}${"+".repeat(Math.min(local.length - 1, 5))}@${domain}`;
+  };
+
+  const maskPhone = (phone) => {
+    if (!phone) return "—";
+    const digits = phone.replace(/\D/g, "");
+    return `(***) ***-${digits.slice(-4) || "????"}`;
+  };
+
+  const toggleReveal = (id) => {
+    setRevealedPii((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   useEffect(() => {
     fetchAdvertisers();
@@ -297,13 +315,23 @@ export default function AdvertisersList({ onCreateNew }) {
                     </div>
                   </td>
                   <td className="px-6 py-3.5">
-                    <div className="text-xs text-gray-600">
-                      {advertiser.email}
+                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <span>
+                        {revealedPii[advertiser.id] ? advertiser.email : maskEmail(advertiser.email)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleReveal(advertiser.id)}
+                        className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
+                        title={revealedPii[advertiser.id] ? "Hide" : "Reveal"}
+                      >
+                        {revealedPii[advertiser.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                      </button>
                     </div>
                   </td>
                   <td className="px-6 py-3.5">
                     <div className="text-xs text-gray-600">
-                      {advertiser.phone_number || "—"}
+                      {revealedPii[advertiser.id] ? (advertiser.phone_number || "—") : maskPhone(advertiser.phone_number)}
                     </div>
                   </td>
                   <td className="px-6 py-3.5">
@@ -318,11 +346,10 @@ export default function AdvertisersList({ onCreateNew }) {
                   </td>
                   <td className="px-6 py-3.5">
                     <span
-                      className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${
-                        advertiser.status === "active"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-600"
-                      }`}
+                      className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${advertiser.status === "active"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-gray-100 text-gray-600"
+                        }`}
                     >
                       {advertiser.status === "active" ? "Active" : "Inactive"}
                     </span>
@@ -434,11 +461,10 @@ export default function AdvertisersList({ onCreateNew }) {
                   <div>
                     <p className="text-xs text-gray-500">Status</p>
                     <span
-                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${
-                        viewModal.advertiser.status === "active"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-600"
-                      }`}
+                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${viewModal.advertiser.status === "active"
+                        ? "bg-green-100 text-green-800"
+                        : "bg-gray-100 text-gray-600"
+                        }`}
                     >
                       {viewModal.advertiser.status === "active"
                         ? "Active"
@@ -475,13 +501,12 @@ export default function AdvertisersList({ onCreateNew }) {
                             </p>
                           </div>
                           <span
-                            className={`text-xs px-2 py-1 rounded-full ${
-                              ad.status === "scheduled"
-                                ? "bg-blue-100 text-blue-800"
-                                : ad.status === "completed"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-gray-100 text-gray-600"
-                            }`}
+                            className={`text-xs px-2 py-1 rounded-full ${ad.status === "scheduled"
+                              ? "bg-blue-100 text-blue-800"
+                              : ad.status === "completed"
+                                ? "bg-green-100 text-green-800"
+                                : "bg-gray-100 text-gray-600"
+                              }`}
                           >
                             {ad.status}
                           </span>

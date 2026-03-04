@@ -51,6 +51,7 @@ export function AdDetailsSection({
           </label>
           <input
             type="text"
+            name="ad_name"
             required
             value={formData.ad_name}
             onChange={(e) => onChange("ad_name", e.target.value)}
@@ -62,7 +63,9 @@ export function AdDetailsSection({
 
       <div className="border border-gray-200 rounded-lg bg-white overflow-hidden hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 mb-4">
         <div className="flex items-center justify-between px-4 pt-4 border-b border-gray-100 pb-3">
-          <label className="text-xs font-semibold text-gray-700">Ad Text</label>
+          <label className="text-xs font-semibold text-gray-700">
+            Ad Text <span className={`ml-1 font-normal ${(formData.ad_text?.length || 0) >= 1400 ? "text-red-500" : "text-gray-400"}`}>{formData.ad_text?.length || 0}/1500</span>
+          </label>
 
           <div className="flex items-center gap-1">
             <button
@@ -104,9 +107,11 @@ export function AdDetailsSection({
 
         <textarea
           ref={textareaRef}
+          name="ad_text"
           value={formData.ad_text}
           onChange={(event) => onChange("ad_text", event.target.value)}
           rows={4}
+          maxLength={1500}
           placeholder="Enter your ad copy... Use *bold*, _italic_, ~strikethrough~, or ```code```"
           className="w-full px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-y"
         />

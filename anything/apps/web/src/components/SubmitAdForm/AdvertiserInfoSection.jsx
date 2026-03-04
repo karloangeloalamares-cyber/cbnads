@@ -14,6 +14,7 @@ export function AdvertiserInfoSection({ formData, onChange }) {
           </label>
           <input
             type="text"
+            name="advertiser_name"
             required
             value={formData.advertiser_name}
             onChange={(e) => onChange("advertiser_name", e.target.value)}
@@ -28,6 +29,7 @@ export function AdvertiserInfoSection({ formData, onChange }) {
           </label>
           <input
             type="text"
+            name="contact_name"
             required
             value={formData.contact_name}
             onChange={(e) => onChange("contact_name", e.target.value)}
@@ -42,6 +44,7 @@ export function AdvertiserInfoSection({ formData, onChange }) {
           </label>
           <input
             type="email"
+            name="email"
             required
             value={formData.email}
             onChange={(e) => onChange("email", e.target.value)}
@@ -56,12 +59,15 @@ export function AdvertiserInfoSection({ formData, onChange }) {
           </label>
           <input
             type="tel"
+            name="phone_number"
             required
             value={formData.phone_number}
             onChange={(e) => onChange("phone_number", e.target.value)}
             inputMode="tel"
             autoComplete="tel-national"
             maxLength={US_PHONE_INPUT_MAX_LENGTH}
+            pattern="[\d\s\(\)\-\+]+"
+            title="Please enter a valid phone number (digits, spaces, dashes, and parentheses only)"
             placeholder="(123) 456-7890"
             className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
           />

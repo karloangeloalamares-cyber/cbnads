@@ -32,6 +32,9 @@ type Pages = {
   "/pending-submissions": {
     params: {};
   };
+  "/privacy": {
+    params: {};
+  };
   "/reconciliation": {
     params: {};
   };
@@ -39,6 +42,9 @@ type Pages = {
     params: {};
   };
   "/submit-ad/success": {
+    params: {};
+  };
+  "/terms": {
     params: {};
   };
   "/*": {
@@ -51,7 +57,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/account/logout" | "/account/signin" | "/account/signup" | "/account/verify-advertiser" | "/ads" | "/pending-submissions" | "/reconciliation" | "/submit-ad" | "/submit-ad/success" | "/*";
+    page: "/" | "/account/logout" | "/account/signin" | "/account/signup" | "/account/verify-advertiser" | "/ads" | "/pending-submissions" | "/privacy" | "/reconciliation" | "/submit-ad" | "/submit-ad/success" | "/terms" | "/*";
   };
   "./page.jsx": {
     id: "page";
@@ -81,6 +87,10 @@ type RouteFiles = {
     id: "pending-submissions/page";
     page: "/pending-submissions";
   };
+  "./privacy/page.jsx": {
+    id: "privacy/page";
+    page: "/privacy";
+  };
   "./reconciliation/page.jsx": {
     id: "reconciliation/page";
     page: "/reconciliation";
@@ -92,6 +102,10 @@ type RouteFiles = {
   "./submit-ad/success/page.jsx": {
     id: "submit-ad/success/page";
     page: "/submit-ad/success";
+  };
+  "./terms/page.jsx": {
+    id: "terms/page";
+    page: "/terms";
   };
   "./__create/not-found.tsx": {
     id: "__create/not-found";
@@ -108,8 +122,10 @@ type RouteModules = {
   "account/verify-advertiser/page": typeof import("./src/app/./account/verify-advertiser/page.jsx");
   "ads/page": typeof import("./src/app/./ads/page.jsx");
   "pending-submissions/page": typeof import("./src/app/./pending-submissions/page.jsx");
+  "privacy/page": typeof import("./src/app/./privacy/page.jsx");
   "reconciliation/page": typeof import("./src/app/./reconciliation/page.jsx");
   "submit-ad/page": typeof import("./src/app/./submit-ad/page.jsx");
   "submit-ad/success/page": typeof import("./src/app/./submit-ad/success/page.jsx");
+  "terms/page": typeof import("./src/app/./terms/page.jsx");
   "__create/not-found": typeof import("./src/app/./__create/not-found.tsx");
 };

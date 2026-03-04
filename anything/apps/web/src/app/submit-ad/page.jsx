@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useSubmitAdForm } from "@/hooks/useSubmitAdForm";
 import { useModal } from "@/hooks/useModal";
@@ -14,6 +14,13 @@ import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { CreateAdvertiserAccountStep } from "@/components/SubmitAdForm/CreateAdvertiserAccountStep";
 import { VerifyAdvertiserEmailStep } from "@/components/SubmitAdForm/VerifyAdvertiserEmailStep";
+
+export function meta() {
+  return [
+    { title: "Submit an Ad Request — CBN Ads" },
+    { name: "description", content: "Submit your ad request to CBN Ads. Reach your audience with one-time, daily, or custom scheduled posts." },
+  ];
+}
 
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
@@ -72,12 +79,15 @@ export default function SubmitAdPage() {
   const isSubmitDisabled =
     loading || checkingAvailability || !!availabilityError || !!pastTimeError;
 
-  const handleBack = () => {
-    if (window.history.length > 1) {
-      window.history.back();
+  const honeypotRef = useRef(null);
+
+  const handleHoneypotSubmit = (e) => {
+    // If honeypot field is filled, a bot submitted the form — silently abort
+    if (honeypotRef.current && honeypotRef.current.value) {
+      e.preventDefault();
       return;
     }
-    window.location.href = "/";
+    handleSubmit(e);
   };
 
   return (
@@ -93,14 +103,13 @@ export default function SubmitAdPage() {
         <div className="flex max-w-none mx-auto">
           <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12">
             <div className="max-w-[680px] mx-auto mb-6">
-              <button
-                type="button"
-                onClick={handleBack}
+              <a
+                href="/"
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
               >
                 <ArrowLeft size={18} />
                 Back
-              </button>
+              </a>
             </div>
 
             {phase === "account" ? (
@@ -130,7 +139,7 @@ export default function SubmitAdPage() {
               <div className="max-w-[680px] mx-auto">
                 <FormHeader />
 
-                <form onSubmit={handleSubmit} className="space-y-8">
+                <form onSubmit={handleHoneypotSubmit} method="post" className="space-y-8">
                   <AdvertiserInfoSection
                     formData={formData}
                     onChange={handleChange}
@@ -168,6 +177,17 @@ export default function SubmitAdPage() {
                   />
 
                   <NotesSection notes={formData.notes} onChange={handleChange} />
+
+                  {/* Honeypot field — hidden from real users, catches bots */}
+                  <input
+                    ref={honeypotRef}
+                    type="text"
+                    name="website"
+                    tabIndex={-1}
+                    autoComplete="off"
+                    aria-hidden="true"
+                    style={{ position: "absolute", left: "-9999px", opacity: 0, pointerEvents: "none" }}
+                  />
 
                   <div className="pt-6 border-t">
                     <button

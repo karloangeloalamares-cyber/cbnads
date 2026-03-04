@@ -86,6 +86,7 @@ function showToast({
 
 export const appToast = {
   show: showToast,
+  dismiss: (id) => toast.dismiss(id),
   info: (options) => showToast({ ...options, variant: "info" }),
   success: (options) => showToast({ ...options, variant: "success" }),
   error: (options) => showToast({ ...options, variant: "error" }),

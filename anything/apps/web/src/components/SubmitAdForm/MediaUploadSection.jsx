@@ -7,19 +7,33 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
   const [playingVideo, setPlayingVideo] = useState(null);
   const [upload, { loading: uploading }] = useUpload();
 
+  const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov"];
+  const IMAGE_MAX_SIZE = 20 * 1024 * 1024; // 20 MB
+
   const handleMediaUpload = async (event) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
     for (const file of files) {
       try {
-        const isVideo = file.type.startsWith("video/");
-        const maxSize = 250 * 1024 * 1024;
+        const ext = "." + file.name.split(".").pop().toLowerCase();
+        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+          await notifyUploadResult({
+            title: "Unsupported File Type",
+            message: `${file.name} is not supported. Please upload PNG, JPG, GIF, MP4, or MOV files only.`,
+            variant: "warning",
+          });
+          continue;
+        }
 
-        if (isVideo && file.size > maxSize) {
+        const isVideo = file.type.startsWith("video/");
+        const maxSize = isVideo ? 250 * 1024 * 1024 : IMAGE_MAX_SIZE;
+        const maxLabel = isVideo ? "250 MB" : "20 MB";
+
+        if (file.size > maxSize) {
           await notifyUploadResult({
             title: "File Too Large",
-            message: `${file.name} is too large. Videos must be under 250 MB. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
+            message: `${file.name} is too large. ${isVideo ? "Videos" : "Images"} must be under ${maxLabel}. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
             variant: "warning",
           });
           continue;
@@ -103,7 +117,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
             type="file"
             id="media-upload"
             onChange={handleMediaUpload}
-            accept="image/*,video/*"
+            accept=".png,.jpg,.jpeg,.gif,.mp4,.mov"
             multiple
             className="hidden"
             disabled={uploading}
@@ -120,7 +134,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
           </label>
 
           <p className="text-xs text-gray-400 mt-2">
-            Supports: Images (PNG, JPG, GIF) and Videos (MP4, MOV). Videos must be under 250 MB.
+            Supports: PNG, JPG, GIF (max 20 MB) and MP4, MOV (max 250 MB).
           </p>
         </div>
       </div>

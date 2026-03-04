@@ -9,6 +9,7 @@ export function NotesSection({ notes, onChange }) {
           Notes (Optional)
         </label>
         <textarea
+          name="notes"
           value={notes}
           onChange={(e) => onChange("notes", e.target.value)}
           rows={3}

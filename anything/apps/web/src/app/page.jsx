@@ -4,13 +4,10 @@ import { Lock } from "lucide-react";
 
 export default function HomePage() {
   return (
-    <div
-      className="h-screen relative overflow-hidden"
-      style={{ height: "100dvh" }}
-    >
+    <div className="min-h-screen relative flex flex-col">
       {/* Background Image */}
       <div
-        className="absolute inset-0 bg-cover bg-center"
+        className="fixed inset-0 bg-cover bg-center -z-10"
         style={{
           backgroundImage:
             "url('https://ucarecdn.com/9281fa72-0274-41d4-a9b2-9f04d72418e6/-/format/auto/')",
@@ -19,7 +16,7 @@ export default function HomePage() {
       ></div>
 
       {/* Content Overlay */}
-      <div className="relative z-10 h-full flex flex-col">
+      <div className="relative z-10 flex flex-col flex-1">
         {/* Header */}
         <header className="flex items-center justify-between px-8 py-6">
           {/* Logo */}
@@ -42,7 +39,7 @@ export default function HomePage() {
         </header>
 
         {/* Main Content */}
-        <main className="flex-1 flex items-center px-8 md:px-16 lg:px-24">
+        <main className="flex-1 flex items-center px-8 md:px-16 lg:px-24 min-h-[calc(100vh-160px)]">
           <div className="max-w-3xl">
             {/* Heading */}
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight mb-12">
@@ -72,7 +69,20 @@ export default function HomePage() {
             </a>
           </div>
         </main>
+
+        {/* Footer — Issue #20 */}
+        <footer className="px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10 bg-black/30 backdrop-blur-sm">
+          <p className="text-xs text-white/60">
+            &copy; {new Date().getFullYear()} CBN Ads. All rights reserved.
+          </p>
+          <nav className="flex items-center gap-5 text-xs text-white/70">
+            <a href="/privacy" className="hover:text-white transition-colors">Privacy Policy</a>
+            <a href="/terms" className="hover:text-white transition-colors">Terms of Service</a>
+            <a href="/submit-ad" className="hover:text-white transition-colors">Advertise with Us</a>
+          </nav>
+        </footer>
       </div>
     </div>
   );
 }
+

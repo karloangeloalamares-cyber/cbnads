@@ -407,6 +407,16 @@ export function ScheduleSection({
     );
   }, [excludeAdId, formData.post_date_from, loadMonthAvailability]);
 
+  // Auto-seed one empty slot when switching to Custom Schedule (Issue #11)
+  useEffect(() => {
+    if (
+      postType === "Custom Schedule" &&
+      (!formData.custom_dates || formData.custom_dates.length === 0)
+    ) {
+      onChange("custom_dates", [{ date: "", time: "", reminder: "15-min" }]);
+    }
+  }, [postType]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     return () => {
       if (monthAbortControllerRef.current) {
