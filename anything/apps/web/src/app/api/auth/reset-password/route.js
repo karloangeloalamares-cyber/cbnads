@@ -1,4 +1,6 @@
-import { getSupabaseClient, hasSupabaseConfig, publicAppUrl } from "@/lib/supabase";
+import { getSupabaseAdmin, hasSupabaseAdminConfig } from "../../../../lib/supabaseAdmin.js";
+
+const APP_URL = process.env.APP_URL || process.env.VITE_PUBLIC_APP_URL || "";
 
 export async function POST(request) {
     try {
@@ -10,10 +12,13 @@ export async function POST(request) {
             return Response.json({ success: true });
         }
 
-        if (hasSupabaseConfig) {
-            const supabase = getSupabaseClient();
-            const redirectTo = `${process.env.APP_URL || publicAppUrl}/account/reset-password`;
+        if (hasSupabaseAdminConfig) {
+            const supabase = getSupabaseAdmin();
+            const origin = request.headers?.get("origin") || APP_URL;
+            const redirectTo = `${origin}/account/reset-password`;
             await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+        } else {
+            console.warn("[reset-password] Supabase admin not configured — email not sent.");
         }
 
         // Always return success — never reveal whether an email is registered

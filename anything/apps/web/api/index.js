@@ -17,8 +17,8 @@ import * as route_14 from "../src/app/api/ads/calendar/route.js";
 import * as route_15 from "../src/app/api/ads/create/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
 import * as route_17 from "../src/app/api/ads/export/route.js";
-import * as route_18 from "../src/app/api/ads/list/route.js";
-import * as route_19 from "../src/app/api/ads/mark-published/route.js";
+import * as route_18 from "../src/app/api/ads/mark-published/route.js";
+import * as route_19 from "../src/app/api/ads/list/route.js";
 import * as route_20 from "../src/app/api/ads/update/route.js";
 import * as route_21 from "../src/app/api/advertisers/create/route.js";
 import * as route_22 from "../src/app/api/advertisers/list/route.js";
@@ -34,8 +34,8 @@ import * as route_31 from "../src/app/api/invoices/validate-amounts/route.js";
 import * as route_32 from "../src/app/api/products/create/route.js";
 import * as route_33 from "../src/app/api/products/list/route.js";
 import * as route_34 from "../src/app/api/products/[id]/route.js";
-import * as route_35 from "../src/app/api/public/submit-ad/route.js";
-import * as route_36 from "../src/app/api/reconciliation/cases/route.js";
+import * as route_35 from "../src/app/api/reconciliation/cases/route.js";
+import * as route_36 from "../src/app/api/public/submit-ad/route.js";
 import * as route_37 from "../src/app/api/submissions/[id]/route.js";
 import * as route_38 from "../src/app/api/upload/signed-url/route.js";
 import * as route_39 from "../src/app/api/user/profile/route.js";
@@ -50,27 +50,27 @@ import * as route_47 from "../src/app/api/admin/pending-ads/reject/route.js";
 import * as route_48 from "../src/app/api/admin/pending-ads/unread-count/route.js";
 import * as route_49 from "../src/app/api/admin/pending-ads/[id]/route.js";
 import * as route_50 from "../src/app/api/ads/[id]/invoices/route.js";
-import * as route_51 from "../src/app/api/public/submit-ad/account/route.js";
-import * as route_52 from "../src/app/api/public/submit-ad/google-account/route.js";
-import * as route_53 from "../src/app/api/public/submit-ad/resend-verification/route.js";
-import * as route_54 from "../src/app/api/public/submit-ad/verify-account/route.js";
-import * as route_55 from "../src/app/api/reconciliation/cases/review/route.js";
-import * as route_56 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_51 from "../src/app/api/reconciliation/cases/review/route.js";
+import * as route_52 from "../src/app/api/public/submit-ad/account/route.js";
+import * as route_53 from "../src/app/api/public/submit-ad/google-account/route.js";
+import * as route_54 from "../src/app/api/public/submit-ad/resend-verification/route.js";
+import * as route_55 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_56 from "../src/app/api/public/submit-ad/verify-account/route.js";
 import { handleRouteRequest } from "../vercel-api/adapter.js";
 
 const routes = [
-  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_53 },
-  { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_52 },
-  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_54 },
+  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_54 },
+  { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_53 },
+  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_56 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_48 },
   { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_46 },
-  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_55 },
+  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_51 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_43 },
   { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_44 },
   { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_47 },
-  { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_51 },
+  { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_52 },
   { regex: new RegExp("^/api/admin/pending\\-ads/list$"), module: route_45 },
-  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_56 },
+  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_55 },
   { regex: new RegExp("^/api/admin/pending\\-ads/(?<id>[^/]+)$"), module: route_49 },
   { regex: new RegExp("^/api/admin/members/(?<id>[^/]+)$"), module: route_42 },
   { regex: new RegExp("^/api/ads/(?<id>[^/]+)/invoices$"), module: route_50 },
@@ -85,15 +85,15 @@ const routes = [
   { regex: new RegExp("^/api/auth/expo\\-web\\-success$"), module: route_24 },
   { regex: new RegExp("^/api/invoices/batch\\-create$"), module: route_27 },
   { regex: new RegExp("^/api/admin/send\\-reminders$"), module: route_6 },
-  { regex: new RegExp("^/api/reconciliation/cases$"), module: route_36 },
+  { regex: new RegExp("^/api/reconciliation/cases$"), module: route_35 },
   { regex: new RegExp("^/api/auth/reset\\-password$"), module: route_25 },
-  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_19 },
+  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_18 },
   { regex: new RegExp("^/api/advertisers/create$"), module: route_21 },
   { regex: new RegExp("^/api/upload/signed\\-url$"), module: route_38 },
   { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_41 },
   { regex: new RegExp("^/api/ads/availability$"), module: route_11 },
   { regex: new RegExp("^/api/advertisers/list$"), module: route_22 },
-  { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_35 },
+  { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_36 },
   { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_13 },
   { regex: new RegExp("^/api/invoices/create$"), module: route_28 },
   { regex: new RegExp("^/api/products/create$"), module: route_32 },
@@ -109,7 +109,7 @@ const routes = [
   { regex: new RegExp("^/api/ads/update$"), module: route_20 },
   { regex: new RegExp("^/api/auth/token$"), module: route_26 },
   { regex: new RegExp("^/api/user/role$"), module: route_40 },
-  { regex: new RegExp("^/api/ads/list$"), module: route_18 },
+  { regex: new RegExp("^/api/ads/list$"), module: route_19 },
   { regex: new RegExp("^/api/advertisers/(?<id>[^/]+)$"), module: route_23 },
   { regex: new RegExp("^/api/submissions/(?<id>[^/]+)$"), module: route_37 },
   { regex: new RegExp("^/api/products/(?<id>[^/]+)$"), module: route_34 },
