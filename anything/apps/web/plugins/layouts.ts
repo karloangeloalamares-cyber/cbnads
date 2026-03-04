@@ -146,28 +146,29 @@ export function layoutWrapperPlugin(userOpts: HierarchicalLayoutOptions = {}): P
     return `
 ${imports.join('\n')}
 
+export * from ${JSON.stringify(pagePath + NO_LAYOUT_QUERY)};
+
 export default function WrappedPage(props) {
   ${routeParams.length > 0 ? 'const params = useParams();' : ''}
   ${hasSpreadParams ? 'const location = useLocation();' : ''}
   return (
     ${opening.join('\n    ')}
-      <Page {...props}${
-        routeParams.length > 0
-          ? routeParams
-              .map((param) =>
-                pagePath.includes(`[...${param}]`)
-                  ? // collect the rest of the path for spread params
-                    `${param}={location.pathname
+      <Page {...props}${routeParams.length > 0
+        ? routeParams
+          .map((param) =>
+            pagePath.includes(`[...${param}]`)
+              ? // collect the rest of the path for spread params
+              `${param}={location.pathname
                       .split('/')
                       .slice(
                         location.pathname
                           .split('/')
                           .findIndex(Boolean) + 1
                       )}`
-                  : `${param}={params.${param}}`
-              )
-              .join(' ')
-          : ''
+              : `${param}={params.${param}}`
+          )
+          .join(' ')
+        : ''
       } />
     ${closing.join('\n    ')}
   );

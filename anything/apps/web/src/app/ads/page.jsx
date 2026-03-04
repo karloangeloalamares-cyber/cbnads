@@ -54,6 +54,8 @@ import {
   Link,
   Volume2,
   X,
+  EyeOff,
+  Loader2,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { Modal } from "@/components/Modal";
@@ -1933,6 +1935,25 @@ function InvoiceSortableHeader({ label, sortKey, onSort }) {
 
 export default function AdsPage() {
   const [db, setDb] = useState(() => readDb());
+  const [revealedPii, setRevealedPii] = useState({});
+
+  const maskEmail = (email) => {
+    if (!email || !email.includes("@")) return email || "—";
+    const [local, domain] = email.split("@");
+    return `${local[0]}${"+".repeat(Math.min(local.length - 1, 5))}@${domain}`;
+  };
+
+  const maskPhone = (phone) => {
+    if (!phone) return "—";
+    const digits = phone.replace(/\D/g, "");
+    return `(***) ***-${digits.slice(-4) || "????"}`;
+  };
+
+  const toggleReveal = (id, e) => {
+    if (e) e.stopPropagation();
+    setRevealedPii((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
@@ -6728,7 +6749,12 @@ export default function AdsPage() {
               </div>
 
               <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                {filteredPendingSubmissions.length === 0 ? (
+                {!ready ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+                    <Loader2 className="w-8 h-8 animate-spin text-gray-400 mb-3" />
+                    <p className="text-sm font-medium">Loading submissions...</p>
+                  </div>
+                ) : filteredPendingSubmissions.length === 0 ? (
                   <div className="text-center py-12 text-gray-500">No submissions</div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -8237,13 +8263,25 @@ export default function AdsPage() {
                                   </div>
                                 </td>
                                 <td className="px-6 py-3.5">
-                                  <div className="text-xs text-gray-600">
-                                    {item.email || "\u2014"}
+                                  <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                    <span>
+                                      {revealedPii[item.id] ? (item.email || "—") : maskEmail(item.email)}
+                                    </span>
+                                    {item.email && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => toggleReveal(item.id, e)}
+                                        className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
+                                        title={revealedPii[item.id] ? "Hide" : "Reveal"}
+                                      >
+                                        {revealedPii[item.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                                      </button>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="px-6 py-3.5">
                                   <div className="text-xs text-gray-600">
-                                    {item.phone_number || item.phone || "\u2014"}
+                                    {revealedPii[item.id] ? (item.phone_number || item.phone || "—") : maskPhone(item.phone_number || item.phone)}
                                   </div>
                                 </td>
                                 <td className="px-6 py-3.5">
@@ -8359,16 +8397,25 @@ export default function AdsPage() {
                           </div>
                           <div>
                             <p className="text-xs text-gray-500">Email</p>
-                            <p className="text-sm font-medium text-gray-900">
-                              {advertiserViewModal.advertiser.email || "\u2014"}
-                            </p>
+                            <div className="flex items-center gap-1.5 text-sm font-medium text-gray-900">
+                              <span>
+                                {revealedPii[advertiserViewModal.advertiser.id] ? (advertiserViewModal.advertiser.email || "—") : maskEmail(advertiserViewModal.advertiser.email)}
+                              </span>
+                              {advertiserViewModal.advertiser.email && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => toggleReveal(advertiserViewModal.advertiser.id, e)}
+                                  className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
+                                >
+                                  {revealedPii[advertiserViewModal.advertiser.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <p className="text-xs text-gray-500">Phone Number</p>
                             <p className="text-sm font-medium text-gray-900">
-                              {advertiserViewModal.advertiser.phone_number ||
-                                advertiserViewModal.advertiser.phone ||
-                                "\u2014"}
+                              {revealedPii[advertiserViewModal.advertiser.id] ? (advertiserViewModal.advertiser.phone_number || advertiserViewModal.advertiser.phone || "—") : maskPhone(advertiserViewModal.advertiser.phone_number || advertiserViewModal.advertiser.phone)}
                             </p>
                           </div>
                           <div>
@@ -8420,8 +8467,8 @@ export default function AdsPage() {
                                       <p className="text-sm font-medium text-gray-900">
                                         {adItem.ad_name || "\u2014"}
                                       </p>
-                                      <p className="text-xs text-gray-500 mt-1">
-                                        {adItem.post_type || "\u2014"} • {adItem.placement || "\u2014"} •{" "}
+                                      <p className="text-xs text-gray-500 mt-1 whitespace-nowrap overflow-hidden text-ellipsis">
+                                        {formatPostTypeLabel(adItem.post_type) || "—"} • {adItem.placement || "—"} •{" "}
                                         {formatAdvertiserDate(
                                           adItem.post_date_from || adItem.post_date,
                                         )}
