@@ -127,6 +127,7 @@ const sections = [
 const CREATE_AD_SUBMIT_TOAST_ID = "create-ad-submit-toast";
 const INVOICE_SUBMIT_TOAST_ID = "invoice-submit-toast";
 const getInvoiceActionToastId = (action, invoiceId) => `invoice-${action}-toast-${invoiceId}`;
+const getSubmissionApproveToastId = (pendingAdId) => `submission-approve-${pendingAdId}`;
 
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
@@ -1967,6 +1968,7 @@ export default function AdsPage() {
   };
 
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
+  const [pendingSubmissionApproveIds, setPendingSubmissionApproveIds] = useState([]);
   const [selectedAdIds, setSelectedAdIds] = useState(new Set());
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
@@ -3355,6 +3357,10 @@ export default function AdsPage() {
     () => new Set(pendingAdDeleteIds),
     [pendingAdDeleteIds],
   );
+  const pendingSubmissionApproveIdSet = useMemo(
+    () => new Set(pendingSubmissionApproveIds.map((id) => String(id))),
+    [pendingSubmissionApproveIds],
+  );
 
   const filteredAds = useMemo(() => {
     const query = String(adsFilters.search || "").toLowerCase().trim();
@@ -3756,7 +3762,13 @@ export default function AdsPage() {
       .slice(0, 5);
   }, [ads]);
 
-  const filteredPendingSubmissions = useMemo(() => pending, [pending]);
+  const filteredPendingSubmissions = useMemo(
+    () =>
+      pending.filter((item) =>
+        ["pending", "not_approved"].includes(String(item.status || "").toLowerCase()),
+      ),
+    [pending],
+  );
 
   const filteredAdvertisers = useMemo(() => {
     return advertisers.filter((item) => {
@@ -3899,6 +3911,45 @@ export default function AdsPage() {
       appToast.error({
         title: error instanceof Error ? error.message : "Action failed",
       });
+    }
+  };
+
+  const handleApprovePendingAd = async (pendingAdId) => {
+    const normalizedPendingAdId = String(pendingAdId || "").trim();
+    if (!normalizedPendingAdId || pendingSubmissionApproveIdSet.has(normalizedPendingAdId)) {
+      return;
+    }
+
+    const toastId = getSubmissionApproveToastId(normalizedPendingAdId);
+    setPendingSubmissionApproveIds((current) =>
+      current.includes(normalizedPendingAdId)
+        ? current
+        : [...current, normalizedPendingAdId],
+    );
+    appToast.info({
+      id: toastId,
+      title: "Approving Ad",
+      description: "Please wait while the submission is converted into an ad.",
+      duration: Infinity,
+    });
+
+    try {
+      await approvePendingAd(normalizedPendingAdId);
+      setDb(readDb());
+      appToast.success({
+        title: "Ad Approved",
+        description: "The submission was moved out of pending items.",
+      });
+    } catch (error) {
+      console.error("[AdsPage] Approve submission failed", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to approve ad.",
+      });
+    } finally {
+      appToast.dismiss(toastId);
+      setPendingSubmissionApproveIds((current) =>
+        current.filter((id) => id !== normalizedPendingAdId),
+      );
     }
   };
 
@@ -6852,8 +6903,13 @@ export default function AdsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-200">
-                        {filteredPendingSubmissions.map((item) => (
-                          <tr key={item.id} className="hover:bg-gray-50">
+                        {filteredPendingSubmissions.map((item) => {
+                          const isApprovingSubmission = pendingSubmissionApproveIdSet.has(
+                            String(item.id || ""),
+                          );
+
+                          return (
+                            <tr key={item.id} className="hover:bg-gray-50">
                             <td className="px-6 py-3.5">
                               <span
                                 className={`px-3 py-1 rounded-full text-xs font-medium ${getSubmissionStatusBadgeClass(
@@ -6936,14 +6992,10 @@ export default function AdsPage() {
                                     <button
                                       type="button"
                                       className="px-2.5 py-1 bg-black text-white rounded hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:text-gray-300 text-xs font-medium"
-                                      onClick={() =>
-                                        run(
-                                          () => approvePendingAd(item.id),
-                                          "Submission approved.",
-                                        )
-                                      }
+                                      onClick={() => void handleApprovePendingAd(item.id)}
+                                      disabled={isApprovingSubmission}
                                     >
-                                      Approve
+                                      {isApprovingSubmission ? "Approving..." : "Approve"}
                                     </button>
                                     <button
                                       type="button"
@@ -6954,6 +7006,7 @@ export default function AdsPage() {
                                           "Submission rejected.",
                                         )
                                       }
+                                      disabled={isApprovingSubmission}
                                     >
                                       Reject
                                     </button>
@@ -6975,8 +7028,9 @@ export default function AdsPage() {
                                 ) : null}
                               </div>
                             </td>
-                          </tr>
-                        ))}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

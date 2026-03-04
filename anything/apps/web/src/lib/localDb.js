@@ -1672,8 +1672,7 @@ export const approvePendingAd = async (pendingAdId) => {
       updated_at: nowIso(),
     });
 
-    pending.status = 'approved';
-    pending.updated_at = nowIso();
+    db.pending_ads = db.pending_ads.filter((item) => item.id !== pendingAdId);
     return db;
   });
 };
