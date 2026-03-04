@@ -1,7 +1,17 @@
 import { db, normalizePostType } from "../../utils/supabase-db.js";
 import { checkBatchAvailability } from "../../utils/ad-availability.js";
+import { hasSupabaseAdminConfig } from "../../../../lib/supabaseAdmin.js";
 
 export async function POST(request) {
+  // Surface configuration errors clearly
+  if (!hasSupabaseAdminConfig) {
+    console.error("[ads/availability-batch] Supabase admin not configured — missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+    return Response.json(
+      { error: "Service not configured" },
+      { status: 503 },
+    );
+  }
+
   try {
     const supabase = db();
     const body = await request.json();
@@ -35,9 +45,16 @@ export async function POST(request) {
     });
   } catch (error) {
     const message = error?.message || String(error);
-    console.error("[ads/availability-batch] Error checking availability:", message, error);
+    const code = error?.code;
+    const hint = error?.hint;
+    const details = error?.details;
+    console.error(
+      "[ads/availability-batch] Runtime error:",
+      { message, code, hint, details },
+      error?.stack || "",
+    );
     return Response.json(
-      { error: message || "Failed to check availability" },
+      { error: message || "Failed to check availability", code },
       { status: 500 },
     );
   }
