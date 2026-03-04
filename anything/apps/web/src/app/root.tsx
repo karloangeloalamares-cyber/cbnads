@@ -2,6 +2,9 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 import './global.css';
 import AppToaster from "@/components/AppToaster";
 
+const SITE_DESCRIPTION =
+  'Get your product or services seen by over 30,000 customers daily.';
+
 export const links = () => [];
 
 function AppHydrationFallback() {
@@ -91,15 +94,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {/* SEO — Issue #9 */}
-        <meta name="description" content="CBN Ads — Submit and manage advertising campaigns. Reach your audience with one-time, daily, or custom scheduled posts." />
+        {/* SEO - Issue #9 */}
+        <meta name="description" content={SITE_DESCRIPTION} />
         <meta property="og:site_name" content="CBN Ads" />
         <meta property="og:title" content="CBN Ads" />
-        <meta property="og:description" content="Submit and manage advertising campaigns with CBN Ads." />
+        <meta property="og:description" content={SITE_DESCRIPTION} />
         <meta property="og:type" content="website" />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content="CBN Ads" />
-        <meta name="twitter:description" content="Submit and manage advertising campaigns with CBN Ads." />
+        <meta name="twitter:description" content={SITE_DESCRIPTION} />
         <title>CBN Ads</title>
         <Meta />
         <Links />
@@ -123,7 +126,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <AppToaster />
         <ScrollRestoration />
         <Scripts />
-        {/* Service Worker registration — runs after page load, never blocks rendering */}
+        {/* Service Worker registration - runs after page load, never blocks rendering */}
         <script
           dangerouslySetInnerHTML={{
             __html: `

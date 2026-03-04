@@ -17,6 +17,9 @@ type Pages = {
   "/account/logout": {
     params: {};
   };
+  "/account/reset-password": {
+    params: {};
+  };
   "/account/signin": {
     params: {};
   };
@@ -57,7 +60,7 @@ type Pages = {
 type RouteFiles = {
   "root.tsx": {
     id: "root";
-    page: "/" | "/account/logout" | "/account/signin" | "/account/signup" | "/account/verify-advertiser" | "/ads" | "/pending-submissions" | "/privacy" | "/reconciliation" | "/submit-ad" | "/submit-ad/success" | "/terms" | "/*";
+    page: "/" | "/account/logout" | "/account/reset-password" | "/account/signin" | "/account/signup" | "/account/verify-advertiser" | "/ads" | "/pending-submissions" | "/privacy" | "/reconciliation" | "/submit-ad" | "/submit-ad/success" | "/terms" | "/*";
   };
   "./page.jsx": {
     id: "page";
@@ -66,6 +69,10 @@ type RouteFiles = {
   "./account/logout/page.jsx": {
     id: "account/logout/page";
     page: "/account/logout";
+  };
+  "./account/reset-password/page.jsx": {
+    id: "account/reset-password/page";
+    page: "/account/reset-password";
   };
   "./account/signin/page.jsx": {
     id: "account/signin/page";
@@ -117,6 +124,7 @@ type RouteModules = {
   "root": typeof import("./src/app/root.tsx");
   "page": typeof import("./src/app/./page.jsx");
   "account/logout/page": typeof import("./src/app/./account/logout/page.jsx");
+  "account/reset-password/page": typeof import("./src/app/./account/reset-password/page.jsx");
   "account/signin/page": typeof import("./src/app/./account/signin/page.jsx");
   "account/signup/page": typeof import("./src/app/./account/signup/page.jsx");
   "account/verify-advertiser/page": typeof import("./src/app/./account/verify-advertiser/page.jsx");

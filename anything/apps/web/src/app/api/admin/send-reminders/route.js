@@ -1,5 +1,6 @@
 import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
+import { sendEmail } from "../../utils/send-email.js";
 
 function getNowInET() {
   const now = new Date();
@@ -125,7 +126,7 @@ function buildMediaFields(media) {
 
 async function sendZapier(payload) {
   if (!process.env.ZAPIER_WEBHOOK_URL) {
-    throw new Error("ZAPIER_WEBHOOK_URL is not configured");
+    return; // graceful degradation since we are using native Resend emails
   }
 
   const response = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
@@ -136,8 +137,88 @@ async function sendZapier(payload) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Zapier webhook returned status ${response.status}: ${text}`);
+    console.error(`Zapier webhook returned status ${response.status}: ${text}`);
   }
+}
+
+function generateReminderHtml(payload, isAdmin = false) {
+  const escapeHtml = (value) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
+  const mediaLinks = [];
+  for (let i = 1; i <= payload.imageCount; i++) {
+    const url = payload[`image${i}Url`];
+    if (url) mediaLinks.push(`<div style="margin: 10px 0;"><strong>Image ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`);
+  }
+  for (let i = 1; i <= payload.videoCount; i++) {
+    const url = payload[`video${i}Url`];
+    if (url) mediaLinks.push(`<div style="margin: 10px 0;"><strong>Video ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`);
+  }
+
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; padding: 20px 0; border-bottom: 3px solid #3b82f6; }
+    .logo { max-width: 200px; }
+    .content { padding: 30px 0; }
+    .alert { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; }
+    .info-block { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 5px; }
+    .info-row { margin: 10px 0; }
+    .label { font-weight: bold; color: #555; display: inline-block; min-width: 120px; }
+    .media-section { margin-top: 20px; padding: 15px; background: #fff; border: 1px solid #ddd; border-radius: 5px; }
+    .footer { text-align: center; padding: 20px 0; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/" alt="Logo" class="logo">
+    </div>
+    <div class="content">
+      <div class="alert">
+        <h2 style="margin-top: 0; color: #1d4ed8;">${isAdmin ? '🔔 Internal Admin Reminder' : '🔔 Upcoming Ad Reminder'}</h2>
+        <p style="margin-bottom: 0;">${escapeHtml(payload.greeting)}, this is a reminder that an ad is scheduled to run ${escapeHtml(payload.timeUntilText)}.</p>
+      </div>
+      
+      <div class="info-block">
+        <div class="info-row"><span class="label">Ad Name:</span> ${escapeHtml(payload.adName)}</div>
+        <div class="info-row"><span class="label">Advertiser:</span> ${escapeHtml(payload.advertiser)}</div>
+        ${isAdmin ? `<div class="info-row"><span class="label">Contact:</span> <a href="mailto:${escapeHtml(payload.advertiserEmail)}">${escapeHtml(payload.advertiserEmail)}</a> ${payload.advertiserPhone ? `| ${escapeHtml(payload.advertiserPhone)}` : ''}</div>` : ''}
+        ${payload.placement ? `<div class="info-row"><span class="label">Placement:</span> ${escapeHtml(payload.placement)}</div>` : ''}
+        <div class="info-row"><span class="label">Scheduled For:</span> ${escapeHtml(payload.formattedDate)} at ${escapeHtml(payload.formattedTime)}</div>
+      </div>
+      
+      ${payload.adText ? `
+      <div class="info-block">
+        <div class="label" style="margin-bottom: 5px;">Ad Content:</div>
+        <div style="white-space: pre-wrap;">${escapeHtml(payload.adText)}</div>
+      </div>
+      ` : ''}
+      
+      ${mediaLinks.length > 0 ? `
+      <div class="media-section">
+        <div class="label" style="margin-bottom: 10px;">Media Files (${mediaLinks.length})</div>
+        ${mediaLinks.join('')}
+      </div>
+      ` : ''}
+      
+    </div>
+    <div class="footer">
+      <p>System Notification | ${new Date().toLocaleString()}</p>
+    </div>
+  </div>
+</body>
+</html>
+  `;
 }
 
 export async function POST(request) {
@@ -280,7 +361,7 @@ export async function POST(request) {
 
         if (pref.email_enabled && pref.email_address) {
           try {
-            await sendZapier({
+            const payload = {
               recipientType: "admin",
               to: pref.email_address,
               from: "Ad Manager <advertise@cbnads.com>",
@@ -299,6 +380,14 @@ export async function POST(request) {
               imageCount: media.images.length,
               videoCount: media.videos.length,
               ...media.fields,
+            };
+
+            await sendZapier(payload).catch(console.error);
+
+            await sendEmail({
+              to: pref.email_address,
+              subject: payload.subject,
+              html: generateReminderHtml(payload, true),
             });
 
             await storeReminder(supabase, ad.id, "email", "admin");
@@ -408,7 +497,7 @@ export async function POST(request) {
         .filter(Boolean)[0];
 
       try {
-        await sendZapier({
+        const payload = {
           recipientType: "advertiser",
           to: advertiserInfo.email,
           advertiserEmail: advertiserInfo.email,
@@ -428,6 +517,14 @@ export async function POST(request) {
           imageCount: media.images.length,
           videoCount: media.videos.length,
           ...media.fields,
+        };
+
+        await sendZapier(payload).catch(console.error);
+
+        await sendEmail({
+          to: advertiserInfo.email,
+          subject: payload.subject,
+          html: generateReminderHtml(payload, false),
         });
 
         await storeReminder(supabase, ad.id, "email", "advertiser");

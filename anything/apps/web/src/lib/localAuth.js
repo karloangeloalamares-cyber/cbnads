@@ -316,3 +316,38 @@ export const updateCurrentUser = async (updates) => {
   });
   return sanitizeUser(updated);
 };
+
+/**
+ * Trigger a Supabase password-reset email for the given address.
+ * Always resolves successfully to prevent email enumeration.
+ */
+export const requestPasswordReset = async ({ email }) => {
+  if (!hasSupabaseConfig) {
+    return { ok: false, error: "Supabase auth is not configured." };
+  }
+  const supabase = getSupabaseClient();
+  const redirectTo =
+    (typeof window !== "undefined"
+      ? `${window.location.origin}/account/reset-password`
+      : null) ||
+    `${publicAppUrl}/account/reset-password`;
+
+  await supabase.auth.resetPasswordForEmail(normalizeEmail(email), { redirectTo });
+  return { ok: true };
+};
+
+/**
+ * Update the signed-in user's password (called from the reset-password page
+ * after Supabase has already verified the recovery token via the URL fragment).
+ */
+export const updatePassword = async ({ newPassword }) => {
+  if (!hasSupabaseConfig) {
+    return { ok: false, error: "Supabase auth is not configured." };
+  }
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) {
+    return { ok: false, error: error.message || "Failed to update password." };
+  }
+  return { ok: true };
+};
