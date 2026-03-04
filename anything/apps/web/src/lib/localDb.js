@@ -470,8 +470,60 @@ const normalizeDb = (rawValue) => {
   };
 };
 
-const refreshDerivedFields = (inputDb) => {
+const repairDbReferences = (inputDb) => {
   const db = normalizeDb(inputDb);
+  const invoiceIds = new Set(
+    db.invoices
+      .map((invoice) => String(invoice?.id || '').trim())
+      .filter(Boolean),
+  );
+  const adIds = new Set(
+    db.ads
+      .map((ad) => String(ad?.id || '').trim())
+      .filter(Boolean),
+  );
+  const productIds = new Set(
+    db.products
+      .map((product) => String(product?.id || '').trim())
+      .filter(Boolean),
+  );
+
+  db.ads = db.ads.map((ad) => {
+    const invoiceId = String(ad?.invoice_id || '').trim();
+    const paidViaInvoiceId = String(ad?.paid_via_invoice_id || '').trim();
+    const linkedInvoiceId = paidViaInvoiceId || invoiceId;
+
+    if (!linkedInvoiceId || invoiceIds.has(linkedInvoiceId)) {
+      return ad;
+    }
+
+    return {
+      ...ad,
+      invoice_id: null,
+      paid_via_invoice_id: null,
+    };
+  });
+
+  db.invoices = db.invoices.map((invoice) => ({
+    ...invoice,
+    ad_ids: toArray(invoice?.ad_ids).filter((id) =>
+      adIds.has(String(id || '').trim()),
+    ),
+    items: toArray(invoice?.items).map((item) => ({
+      ...item,
+      invoice_id: invoice.id,
+      ad_id: adIds.has(String(item?.ad_id || '').trim()) ? item.ad_id : null,
+      product_id: productIds.has(String(item?.product_id || '').trim())
+        ? item.product_id
+        : null,
+    })),
+  }));
+
+  return db;
+};
+
+const refreshDerivedFields = (inputDb) => {
+  const db = repairDbReferences(inputDb);
   const today = new Date();
   const spendByAdvertiser = new Map();
   const nextDateByAdvertiser = new Map();
@@ -1156,8 +1208,8 @@ const persistDbToSupabase = async (value) => {
   await syncIdTable(supabase, 'team_members', db.team_members.map(toTeamMemberRow));
   await syncIdTable(supabase, 'pending_ads', db.pending_ads.map(toPendingAdRow));
   await syncIdTable(supabase, 'invoices', invoiceRows);
-  await syncIdTable(supabase, 'invoice_items', invoiceItemRows, { optional: true });
   await syncIdTable(supabase, 'ads', db.ads.map(toAdRow));
+  await syncIdTable(supabase, 'invoice_items', invoiceItemRows, { optional: true });
 
   await syncSingletonTable(
     supabase,
@@ -1430,6 +1482,11 @@ export const upsertAd = async (input) => {
   let saved = null;
   await updateDb((db) => {
     const now = nowIso();
+    const hasInvoiceId = Object.prototype.hasOwnProperty.call(input, 'invoice_id');
+    const hasPaidViaInvoiceId = Object.prototype.hasOwnProperty.call(
+      input,
+      'paid_via_invoice_id',
+    );
     const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
     const product = db.products.find((item) => item.id === input.product_id);
     const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
@@ -1474,7 +1531,11 @@ export const upsertAd = async (input) => {
       db.ads.unshift(payload);
     } else {
       payload.created_at = db.ads[index].created_at ?? payload.created_at;
-      payload.invoice_id = db.ads[index].invoice_id ?? payload.invoice_id;
+      if (!hasInvoiceId && !hasPaidViaInvoiceId) {
+        payload.invoice_id = db.ads[index].invoice_id ?? payload.invoice_id;
+        payload.paid_via_invoice_id =
+          db.ads[index].paid_via_invoice_id ?? payload.paid_via_invoice_id;
+      }
       db.ads[index] = { ...db.ads[index], ...payload };
     }
     saved = payload;
@@ -1636,13 +1697,16 @@ export const deletePendingAd = async (pendingAdId) => {
 const applyInvoiceLinks = (db, invoiceId, previousAdIds, nextAdIds, invoiceStatus) => {
   const previous = new Set(previousAdIds);
   const next = new Set(nextAdIds);
+  const nextPaymentStatus =
+    normalizeText(invoiceStatus) === 'paid' ? 'Paid' : 'Pending';
 
   db.ads = db.ads.map((ad) => {
     if (next.has(ad.id)) {
       return {
         ...ad,
         invoice_id: invoiceId,
-        payment: normalizeText(invoiceStatus) === 'paid' ? 'Paid' : 'Pending',
+        paid_via_invoice_id: invoiceId,
+        payment: nextPaymentStatus,
         updated_at: nowIso(),
       };
     }
@@ -1651,6 +1715,7 @@ const applyInvoiceLinks = (db, invoiceId, previousAdIds, nextAdIds, invoiceStatu
       return {
         ...ad,
         invoice_id: null,
+        paid_via_invoice_id: null,
         payment: ad.payment === 'Paid' ? 'Unpaid' : ad.payment,
         updated_at: nowIso(),
       };

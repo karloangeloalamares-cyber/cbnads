@@ -4,9 +4,23 @@ import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
+import { hasSupabaseAdminConfig } from "../../../../lib/supabaseAdmin.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isRecoverablePreferencesError = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || error || "").trim();
+  return (
+    !hasSupabaseAdminConfig ||
+    code === "42P01" ||
+    code === "42703" ||
+    code === "PGRST205" ||
+    /does not exist/i.test(message) ||
+    /Supabase admin is not configured/i.test(message)
+  );
+};
 
 const normalizePreferences = (row, fallbackEmail = "") => ({
   email_enabled: row?.email_enabled ?? true,
@@ -45,14 +59,22 @@ async function findPreferenceRow(supabase, userId, email) {
 }
 
 export async function GET(request) {
+  let email = "";
   try {
+    if (!hasSupabaseAdminConfig) {
+      return Response.json({
+        preferences: normalizePreferences(null, ""),
+        degraded: true,
+      });
+    }
+
     const auth = await requirePermission("notifications:view", request);
     if (!auth.authorized) {
       return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const user = await getSessionUser(request);
-    const email = String(user?.email || "").trim();
+    email = String(user?.email || "").trim();
     const userId = UUID_REGEX.test(String(user?.id || "")) ? String(user.id) : null;
     const supabase = db();
 
@@ -61,6 +83,13 @@ export async function GET(request) {
       preferences: normalizePreferences(row, email),
     });
   } catch (err) {
+    if (isRecoverablePreferencesError(err)) {
+      return Response.json({
+        preferences: normalizePreferences(null, email),
+        degraded: true,
+      });
+    }
+
     console.error("GET /api/admin/notification-preferences error", err);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
@@ -68,6 +97,13 @@ export async function GET(request) {
 
 export async function POST(request) {
   try {
+    if (!hasSupabaseAdminConfig) {
+      return Response.json(
+        { error: "Admin notification preferences are unavailable in this environment" },
+        { status: 503 },
+      );
+    }
+
     const auth = await requirePermission("notifications:view", request);
     if (!auth.authorized) {
       return Response.json({ error: auth.error }, { status: auth.status || 401 });
@@ -140,6 +176,13 @@ export async function POST(request) {
 
     return Response.json({ success: true, preferences: normalizePreferences(saved, email) });
   } catch (err) {
+    if (isRecoverablePreferencesError(err)) {
+      return Response.json(
+        { error: "Admin notification preferences schema is unavailable" },
+        { status: 503 },
+      );
+    }
+
     console.error("POST /api/admin/notification-preferences error", err);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }

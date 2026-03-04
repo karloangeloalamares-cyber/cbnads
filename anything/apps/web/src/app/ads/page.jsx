@@ -5850,6 +5850,8 @@ export default function AdsPage() {
         userRole={userRole}
         mobileOpen={mobileSidebarOpen}
         onClose={() => setMobileSidebarOpen(false)}
+        unreadCount={unreadCount}
+        onMarkAllAsRead={markAllAsRead}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">

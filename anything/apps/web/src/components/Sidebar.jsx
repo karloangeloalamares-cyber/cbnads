@@ -36,6 +36,8 @@ export default function Sidebar({
   userRole = "admin",
   mobileOpen = false,
   onClose,
+  unreadCount: externalUnreadCount,
+  onMarkAllAsRead,
 }) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
@@ -43,19 +45,29 @@ export default function Sidebar({
   const isInternal = normalizedRole !== "advertiser";
   const canViewSettings = can(normalizedRole, "settings:view");
   const markAllAsReadRef = useRef(async () => {});
+  const useInternalNotifications =
+    typeof externalUnreadCount !== "number" || typeof onMarkAllAsRead !== "function";
   const handleViewPendingFromToast = useCallback(async () => {
     await markAllAsReadRef.current();
     if (onNavigate) {
       onNavigate("Submissions");
     }
   }, [onNavigate]);
-  const { unreadCount, markAllAsRead } = useSubmissionNotifications(
-    can(normalizedRole, "notifications:view"),
+  const internalNotifications = useSubmissionNotifications(
+    useInternalNotifications && can(normalizedRole, "notifications:view"),
     {
-    onViewPending: handleViewPendingFromToast,
+      onViewPending: handleViewPendingFromToast,
     },
   );
-  markAllAsReadRef.current = markAllAsRead;
+  const unreadCount = useInternalNotifications
+    ? internalNotifications.unreadCount
+    : externalUnreadCount;
+  const markAllAsRead = useInternalNotifications
+    ? internalNotifications.markAllAsRead
+    : onMarkAllAsRead;
+  markAllAsReadRef.current = async () => {
+    await markAllAsRead?.();
+  };
   const visibleSections = new Set(getVisibleSectionsForRole(normalizedRole));
   const menuItems = menuItemsCatalog.filter((item) => visibleSections.has(item.id));
 
@@ -73,7 +85,7 @@ export default function Sidebar({
 
   const handleNavigate = (item) => {
     if (isInternal && item.id === "Submissions" && unreadCount > 0) {
-      markAllAsRead();
+      void markAllAsRead?.();
     }
 
     if (onNavigate) {
