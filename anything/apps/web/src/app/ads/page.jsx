@@ -5678,6 +5678,14 @@ export default function AdsPage() {
       String(current?.id || "").trim() === normalizedAdId ? null : current,
     );
 
+    const toastId = `delete-ad-${normalizedAdId}`;
+    appToast.info({
+      id: toastId,
+      title: "Deleting ad...",
+      description: "Please wait while the ad is removed.",
+      duration: Infinity,
+    });
+
     try {
       await deleteAd(normalizedAdId);
       setDb(readDb());
@@ -5690,6 +5698,7 @@ export default function AdsPage() {
         title: error instanceof Error ? error.message : "Failed to delete ad",
       });
     } finally {
+      appToast.dismiss(toastId);
       pendingAdDeleteIdsRef.current.delete(normalizedAdId);
       setPendingAdDeleteIds((current) =>
         current.filter((itemId) => itemId !== normalizedAdId),
