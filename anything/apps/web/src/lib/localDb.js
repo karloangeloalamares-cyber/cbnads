@@ -1791,7 +1791,7 @@ export const upsertInvoice = async (input) => {
       tax,
       total,
       notes: String(input.notes || '').trim(),
-      amount_paid,
+      amount_paid: amountPaid,
       created_at: existing?.created_at || now,
       updated_at: now,
     };
