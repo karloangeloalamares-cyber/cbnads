@@ -1783,7 +1783,7 @@ export const upsertInvoice = async (input) => {
       contact_name: input.contact_name || advertiser?.contact_name || '',
       contact_email: input.contact_email || advertiser?.email || '',
       bill_to: input.bill_to || advertiser?.advertiser_name || input.advertiser_name || '',
-      issue_date: toDateOnly(input.issue_date || input.due_date || now.slice(0, 10)),
+      issue_date: toDateOnly(now.slice(0, 10)),
       discount,
       tax,
       total,

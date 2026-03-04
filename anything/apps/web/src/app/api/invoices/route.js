@@ -216,13 +216,13 @@ export async function PUT(request) {
       amount: computedTotal,
       amount_paid: nextAmountPaid,
       status: nextStatus,
+      issue_date: new Date().toISOString().slice(0, 10),
     };
     if (advertiser_id !== undefined) patch.advertiser_id = advertiser_id || null;
     if (advertiser_name !== undefined) patch.advertiser_name = advertiser_name;
     if (contact_name !== undefined) patch.contact_name = contact_name;
     if (contact_email !== undefined) patch.contact_email = contact_email;
     if (bill_to !== undefined) patch.bill_to = bill_to;
-    if (issue_date !== undefined) patch.issue_date = issue_date;
     if (discount !== undefined) patch.discount = toNumber(discount, 0);
     if (tax !== undefined) patch.tax = toNumber(tax, 0);
     if (notes !== undefined) patch.notes = notes;

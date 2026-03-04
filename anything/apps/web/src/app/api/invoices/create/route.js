@@ -67,7 +67,7 @@ export async function POST(request) {
         contact_name: contact_name || null,
         contact_email: contact_email || null,
         bill_to: bill_to || advertiser_name,
-        issue_date: issue_date || nowIso.slice(0, 10),
+        issue_date: nowIso.slice(0, 10),
         status,
         discount: toNumber(discount, 0),
         tax: toNumber(tax, 0),

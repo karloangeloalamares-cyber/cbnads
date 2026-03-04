@@ -144,7 +144,7 @@ export async function POST(request) {
         contact_name: invoiceData.contactName || advertiser?.contact_name || null,
         contact_email: invoiceData.contactEmail || advertiser?.email || null,
         bill_to: invoiceData.billTo || targetAdvertiserName || null,
-        issue_date: invoiceData.issueDate || nowIso.slice(0, 10),
+        issue_date: nowIso.slice(0, 10),
         status,
         discount,
         tax,

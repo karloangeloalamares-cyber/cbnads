@@ -213,6 +213,11 @@ const blankInvoice = {
   notes: "",
 };
 
+const createBlankInvoice = () => ({
+  ...blankInvoice,
+  issue_date: getTodayDateInAppTimeZone(),
+});
+
 const blankSubmissionEditForm = {
   advertiser_name: "",
   contact_name: "",
@@ -2047,7 +2052,7 @@ export default function AdsPage() {
   const [createAdSubmitMode, setCreateAdSubmitMode] = useState("");
   const [createAdErrors, setCreateAdErrors] = useState({});
   const [product, setProduct] = useState(blankProduct);
-  const [invoice, setInvoice] = useState(blankInvoice);
+  const [invoice, setInvoice] = useState(() => createBlankInvoice());
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
   const [settingsProfileImage, setSettingsProfileImage] = useState("");
@@ -2300,7 +2305,7 @@ export default function AdsPage() {
     if (view === "createAd" || view === "newInvoice") {
       setView("list");
       setAd(blankAd);
-      setInvoice(blankInvoice);
+      setInvoice(createBlankInvoice());
       setShowInvoiceCreateMenu(false);
       setOpenInvoiceMenuId(null);
     }
@@ -2772,7 +2777,9 @@ export default function AdsPage() {
     const status = normalizeInvoiceStatus(invoicePreviewModal.status);
     const invoiceNumber = invoicePreviewModal.invoice_number || invoicePreviewModal.id || "";
     const issueDate = formatInvoiceListDate(
-      invoicePreviewModal.due_date || invoicePreviewModal.created_at,
+      invoicePreviewModal.issue_date ||
+        invoicePreviewModal.due_date ||
+        invoicePreviewModal.created_at,
     );
     const invoiceItems = Array.isArray(invoicePreviewModal.items) ? invoicePreviewModal.items : [];
     const linkedAds = (
@@ -4901,8 +4908,9 @@ export default function AdsPage() {
       return;
     }
     setInvoice({
-      ...blankInvoice,
+      ...createBlankInvoice(),
       ...item,
+      issue_date: getTodayDateInAppTimeZone(),
       status: normalizeInvoiceStatus(item.status),
       ad_ids: item.ad_ids || [],
     });
@@ -4961,6 +4969,7 @@ export default function AdsPage() {
       return;
     }
     return run(async () => {
+      const issueDate = getTodayDateInAppTimeZone();
       if (!invoice.advertiser_id) {
         throw new Error("Advertiser required");
       }
@@ -4969,9 +4978,10 @@ export default function AdsPage() {
       }
       await upsertInvoice({
         ...invoice,
+        issue_date: issueDate,
         status: normalizeInvoiceStatus(invoice.status),
       });
-      setInvoice(blankInvoice);
+      setInvoice(createBlankInvoice());
       setView("list");
     }, "Invoice saved.");
   };
@@ -5362,8 +5372,9 @@ export default function AdsPage() {
 
           if (linkedInvoice) {
             setInvoice({
-              ...blankInvoice,
+              ...createBlankInvoice(),
               ...linkedInvoice,
+              issue_date: getTodayDateInAppTimeZone(),
               status: normalizeInvoiceStatus(linkedInvoice.status),
               advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
               ad_ids: Array.isArray(linkedInvoice.ad_ids)
@@ -5374,7 +5385,7 @@ export default function AdsPage() {
             });
           } else {
             setInvoice({
-              ...blankInvoice,
+              ...createBlankInvoice(),
               advertiser_id: payload.advertiser_id || "",
               amount: savedAd?.price || payload.price || "",
               ad_ids: savedAd?.id ? [savedAd.id] : [],
@@ -5578,7 +5589,7 @@ export default function AdsPage() {
     setView("list");
     setAd(blankAd);
     setProduct(blankProduct);
-    setInvoice(blankInvoice);
+    setInvoice(createBlankInvoice());
     setAdvertiserCreateOpen(false);
     setProductCreateOpen(false);
     setOpenProductMenuId(null);
@@ -8884,7 +8895,7 @@ export default function AdsPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setInvoice(blankInvoice);
+                            setInvoice(createBlankInvoice());
                             setView("newInvoice");
                             setShowInvoiceCreateMenu(false);
                           }}
@@ -9021,7 +9032,7 @@ export default function AdsPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setInvoice(blankInvoice);
+                        setInvoice(createBlankInvoice());
                         setView("newInvoice");
                       }}
                       className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
@@ -9403,7 +9414,7 @@ export default function AdsPage() {
                 type="button"
                 onClick={() => {
                   setView("list");
-                  setInvoice(blankInvoice);
+                  setInvoice(createBlankInvoice());
                 }}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all mb-6"
               >
@@ -9482,11 +9493,9 @@ export default function AdsPage() {
                         </label>
                         <input
                           type="date"
-                          value={invoice.due_date}
-                          onChange={(event) =>
-                            setInvoice({ ...invoice, due_date: event.target.value })
-                          }
-                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                          value={invoice.issue_date}
+                          readOnly
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none transition-all"
                         />
                       </div>
                     </div>
@@ -9552,7 +9561,7 @@ export default function AdsPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setInvoice(blankInvoice)}
+                        onClick={() => setInvoice(createBlankInvoice())}
                         className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all"
                       >
                         Reset
@@ -9620,7 +9629,7 @@ export default function AdsPage() {
                           Issue Date
                         </div>
                         <div className="text-sm font-semibold text-gray-900">
-                          {formatInvoiceListDate(invoice.due_date) || "—"}
+                          {formatInvoiceListDate(invoice.issue_date) || "—"}
                         </div>
                       </div>
                       <div>
