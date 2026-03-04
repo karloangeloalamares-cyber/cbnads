@@ -1,7 +1,3 @@
-import React from 'react';
-import path from 'node:path';
-import { renderToString } from 'react-dom/server';
-import routes from '../../../routes';
 import { serializeError } from 'serialize-error';
 import cleanStack from 'clean-stack';
 import { requireAdmin } from '../../utils/auth-check.js';
@@ -22,7 +18,7 @@ function serializeClean(err) {
 
 	return serializeError(err);
 }
-const getHTMLOrError = (component) => {
+const getHTMLOrError = (React, renderToString, component) => {
 	try {
 		const html = renderToString(React.createElement(component, {}));
 		return { html, error: null };
@@ -40,6 +36,18 @@ export async function GET(request) {
 		return Response.json({ error: 'Not Found' }, { status: 404 });
 	}
 
+	const [
+		{ default: React },
+		{ renderToString },
+		path,
+		{ default: routes },
+	] = await Promise.all([
+		import('react'),
+		import('react-dom/server'),
+		import('node:path'),
+		import('../../../routes'),
+	]);
+
 	const results = await Promise.allSettled(
 		routes.map(async (route) => {
 			let component = null;
@@ -54,11 +62,10 @@ export async function GET(request) {
 			if (!component) {
 				return null;
 			}
-			const rendered = getHTMLOrError(component);
 			return {
 				route: route.file,
 				path: route.path,
-				...getHTMLOrError(component),
+				...getHTMLOrError(React, renderToString, component),
 			};
 		})
 	);
