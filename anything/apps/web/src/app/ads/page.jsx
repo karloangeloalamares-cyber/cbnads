@@ -1919,6 +1919,7 @@ function InvoiceSortableHeader({ label, sortKey, onSort }) {
 
 export default function AdsPage() {
   const [db, setDb] = useState(() => readDb());
+  const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
       return "Dashboard";
@@ -2025,6 +2026,7 @@ export default function AdsPage() {
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const pendingAdDeleteIdsRef = useRef(new Set());
   const dropdownRef = useRef(null);
   const notificationsDropdownRef = useRef(null);
   const advertiserMenuRef = useRef(null);
@@ -3294,6 +3296,11 @@ export default function AdsPage() {
     return count;
   }, [adsFilters]);
 
+  const pendingAdDeleteIdSet = useMemo(
+    () => new Set(pendingAdDeleteIds),
+    [pendingAdDeleteIds],
+  );
+
   const filteredAds = useMemo(() => {
     const query = String(adsFilters.search || "").toLowerCase().trim();
     const today = getTodayDateInAppTimeZone();
@@ -3304,6 +3311,10 @@ export default function AdsPage() {
     weekEnd.setHours(23, 59, 59, 999);
 
     return adsNormalized.filter((item) => {
+      if (pendingAdDeleteIdSet.has(String(item.id || ""))) {
+        return false;
+      }
+
       const adName = String(item.ad_name || "").toLowerCase();
       const advertiser = String(item.advertiser || "").toLowerCase();
       const placement = String(item.placement || "").toLowerCase();
@@ -3372,7 +3383,7 @@ export default function AdsPage() {
 
       return true;
     });
-  }, [adsFilters, adsNormalized]);
+  }, [adsFilters, adsNormalized, pendingAdDeleteIdSet]);
 
   const sortedAds = useMemo(() => {
     if (!adsSortConfig.key) {
@@ -5519,14 +5530,44 @@ export default function AdsPage() {
     return run(() => updateAdStatus(adId, "Published"), "Ad marked as published.");
   };
 
-  const deleteAdRecord = (adId) => {
+  const deleteAdRecord = async (adId) => {
     if (!canDeleteAds) {
       appToast.error({
         title: "You do not have permission to delete ads.",
       });
       return;
     }
-    return run(() => deleteAd(adId), "Ad deleted.");
+
+    const normalizedAdId = String(adId || "").trim();
+    if (!normalizedAdId || pendingAdDeleteIdsRef.current.has(normalizedAdId)) {
+      return;
+    }
+
+    pendingAdDeleteIdsRef.current.add(normalizedAdId);
+    setPendingAdDeleteIds((current) =>
+      current.includes(normalizedAdId) ? current : [...current, normalizedAdId],
+    );
+    setAdsPreviewAd((current) =>
+      String(current?.id || "").trim() === normalizedAdId ? null : current,
+    );
+
+    try {
+      await deleteAd(normalizedAdId);
+      setDb(readDb());
+      appToast.success({
+        title: "Ad deleted.",
+      });
+    } catch (error) {
+      console.error("[AdsPage] Delete ad failed", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to delete ad",
+      });
+    } finally {
+      pendingAdDeleteIdsRef.current.delete(normalizedAdId);
+      setPendingAdDeleteIds((current) =>
+        current.filter((itemId) => itemId !== normalizedAdId),
+      );
+    }
   };
 
   const handleNavigate = (section) => {
