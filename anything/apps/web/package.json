@@ -3,6 +3,9 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
+		"sync:vercel-api": "node ./scripts/consolidate-vercel-api.mjs",
+		"predev": "npm run sync:vercel-api",
+		"prebuild": "npm run sync:vercel-api",
 		"dev": "react-router dev",
 		"build": "react-router build",
 		"preview": "vite preview",

@@ -1,30 +1,167 @@
 import * as React from 'react';
 import { bucketName, getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 
-async function uploadFileDirectly(file) {
-  const signResponse = await fetch("/api/upload/signed-url", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      fileName: file.name,
-      mimeType: file.type || "application/octet-stream",
-    }),
-  });
+const FILE_UPLOAD_ENDPOINTS = ["/api/upload", "/_create/api/upload", "/_create/api/upload/"];
+const SIGNED_UPLOAD_ENDPOINT = "/api/upload/signed-url";
 
-  if (!signResponse.ok) {
-    throw new Error("Upload failed");
+let preferredFileUploadEndpoint = null;
+let signedUploadEndpointAvailable = null;
+
+function getOrderedFileUploadEndpoints() {
+  if (!preferredFileUploadEndpoint) {
+    return FILE_UPLOAD_ENDPOINTS;
   }
 
-  const signedUpload = await signResponse.json();
+  return [
+    preferredFileUploadEndpoint,
+    ...FILE_UPLOAD_ENDPOINTS.filter((endpoint) => endpoint !== preferredFileUploadEndpoint),
+  ];
+}
+
+async function readUploadErrorMessage(response, fallbackMessage) {
+  if (response.status === 413) {
+    return "Upload failed: File too large.";
+  }
+
+  try {
+    const contentType = String(response.headers.get("content-type") || "");
+
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      const message =
+        typeof payload?.error === "string"
+          ? payload.error
+          : typeof payload?.message === "string"
+            ? payload.message
+            : "";
+
+      if (message.trim()) {
+        return message.trim();
+      }
+    } else {
+      const text = String(await response.text()).trim();
+      if (text) {
+        if (/^<!doctype html/i.test(text) || /^<html[\s>]/i.test(text)) {
+          return "Upload failed: upload endpoint returned HTML instead of JSON.";
+        }
+        return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+      }
+    }
+  } catch {
+    // Ignore response parsing issues and fall back to a generic message.
+  }
+
+  return fallbackMessage;
+}
+
+async function fetchUploadResponse(init, fallbackMessage = "Upload failed") {
+  const failures = [];
+
+  for (const endpoint of getOrderedFileUploadEndpoints()) {
+    let response;
+
+    try {
+      response = await fetch(endpoint, init);
+    } catch (error) {
+      failures.push({
+        endpoint,
+        status: 0,
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : fallbackMessage,
+      });
+
+      continue;
+    }
+
+    if (response.ok) {
+      preferredFileUploadEndpoint = endpoint;
+      return response;
+    }
+
+    const message = await readUploadErrorMessage(response, fallbackMessage);
+    failures.push({
+      endpoint,
+      status: response.status,
+      message,
+    });
+
+    if (response.status === 413) {
+      throw new Error(message);
+    }
+  }
+
+  const bestFailure =
+    failures.find((failure) => failure.status && failure.status !== 404) ||
+    failures.find((failure) => failure.message) ||
+    null;
+
+  throw new Error(bestFailure?.message || fallbackMessage);
+}
+
+async function uploadFileViaApi(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const response = await fetchUploadResponse({
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name),
+      "X-Mime-Type": file.type,
+    },
+    body: arrayBuffer,
+  });
+
+  const data = await response.json();
+  return { url: data.url, mimeType: data.mimeType || null };
+}
+
+async function getSignedUploadPayload(file) {
+  if (signedUploadEndpointAvailable === false) {
+    return null;
+  }
+
+  let signResponse;
+
+  try {
+    signResponse = await fetch(SIGNED_UPLOAD_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+      }),
+    });
+  } catch {
+    return null;
+  }
+
+  if (!signResponse.ok) {
+    if (signResponse.status === 404 || signResponse.status === 405) {
+      signedUploadEndpointAvailable = false;
+    }
+    return null;
+  }
+
+  signedUploadEndpointAvailable = true;
+  return signResponse.json();
+}
+
+async function uploadFileDirectly(file) {
+  const signedUpload = await getSignedUploadPayload(file);
+  if (!signedUpload) {
+    return uploadFileViaApi(file);
+  }
+
   const supabase = getSupabaseClient();
   const targetBucket = String(signedUpload.bucket || "").trim() || bucketName("uploads");
   const targetPath = String(signedUpload.path || "").trim();
   const uploadToken = String(signedUpload.token || "").trim();
 
   if (!targetPath || !uploadToken) {
-    throw new Error("Upload failed");
+    return uploadFileViaApi(file);
   }
 
   const { error } = await supabase.storage.from(targetBucket).uploadToSignedUrl(
@@ -62,19 +199,9 @@ function useUpload() {
         if (hasSupabaseConfig) {
           return await uploadFileDirectly(file);
         }
-
-        const arrayBuffer = await file.arrayBuffer();
-        response = await fetch("/api/upload", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/octet-stream",
-            "X-File-Name": encodeURIComponent(file.name),
-            "X-Mime-Type": file.type
-          },
-          body: arrayBuffer
-        });
+        return await uploadFileViaApi(file);
       } else if ("url" in input) {
-        response = await fetch("/api/upload", {
+        response = await fetchUploadResponse({
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -82,7 +209,7 @@ function useUpload() {
           body: JSON.stringify({ url: input.url })
         });
       } else if ("base64" in input) {
-        response = await fetch("/api/upload", {
+        response = await fetchUploadResponse({
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -90,19 +217,13 @@ function useUpload() {
           body: JSON.stringify({ base64: input.base64 })
         });
       } else {
-        response = await fetch("/api/upload", {
+        response = await fetchUploadResponse({
           method: "POST",
           headers: {
             "Content-Type": "application/octet-stream"
           },
           body: input.buffer
         });
-      }
-      if (!response.ok) {
-        if (response.status === 413) {
-          throw new Error("Upload failed: File too large.");
-        }
-        throw new Error("Upload failed");
       }
       const data = await response.json();
       return { url: data.url, mimeType: data.mimeType || null };
