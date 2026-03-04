@@ -37,14 +37,11 @@ export async function GET(request) {
 
     return Response.json({ count: Number(count) || 0 });
   } catch (error) {
-    if (isRecoverableUnreadCountError(error)) {
-      return Response.json({ count: 0, degraded: true });
-    }
-
     console.error("GET /api/admin/pending-ads/unread-count error", error);
-    return Response.json(
-      { error: "Failed to fetch unread submission count" },
-      { status: 500 },
-    );
+    return Response.json({
+      count: 0,
+      degraded: true,
+      recoverable: isRecoverableUnreadCountError(error),
+    });
   }
 }

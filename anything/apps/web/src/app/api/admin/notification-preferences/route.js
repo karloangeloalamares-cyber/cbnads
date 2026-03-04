@@ -83,15 +83,12 @@ export async function GET(request) {
       preferences: normalizePreferences(row, email),
     });
   } catch (err) {
-    if (isRecoverablePreferencesError(err)) {
-      return Response.json({
-        preferences: normalizePreferences(null, email),
-        degraded: true,
-      });
-    }
-
     console.error("GET /api/admin/notification-preferences error", err);
-    return Response.json({ error: "Internal Server Error" }, { status: 500 });
+    return Response.json({
+      preferences: normalizePreferences(null, email),
+      degraded: true,
+      recoverable: isRecoverablePreferencesError(err),
+    });
   }
 }
 

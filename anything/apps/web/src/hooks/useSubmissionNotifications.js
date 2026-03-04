@@ -10,9 +10,45 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
   const previousCountRef = useRef(0);
   const initializedRef = useRef(false);
   const audioRef = useRef(null);
+  const pollingSuspendedRef = useRef(false);
+  const consecutiveFailureCountRef = useRef(0);
+
+  const suspendPolling = useCallback(() => {
+    pollingSuspendedRef.current = true;
+    consecutiveFailureCountRef.current = 0;
+    setUnreadCount(0);
+  }, []);
+
+  const trackRequestFailure = useCallback(
+    (response) => {
+      const status = Number(response?.status || 0);
+
+      if (status === 401 || status === 403 || status === 404) {
+        suspendPolling();
+        return true;
+      }
+
+      if (status >= 500) {
+        consecutiveFailureCountRef.current += 1;
+        if (consecutiveFailureCountRef.current >= 2) {
+          suspendPolling();
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [suspendPolling],
+  );
+
+  const resetFailureState = useCallback(() => {
+    consecutiveFailureCountRef.current = 0;
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
+      pollingSuspendedRef.current = false;
+      consecutiveFailureCountRef.current = 0;
       return undefined;
     }
     audioRef.current = new Audio(
@@ -23,29 +59,39 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
   useEffect(() => {
     if (!enabled) {
       setUnreadCount(0);
+      pollingSuspendedRef.current = false;
+      consecutiveFailureCountRef.current = 0;
       return undefined;
     }
     const fetchPreferences = async () => {
+      if (pollingSuspendedRef.current) {
+        return;
+      }
+
       try {
         const response = await fetchWithAdminAuth("/api/admin/notification-preferences");
         if (!response) {
+          suspendPolling();
           return;
         }
         if (!response.ok) {
+          trackRequestFailure(response);
           return;
         }
+
+        resetFailureState();
         const data = await response.json();
         setSoundEnabled(data.preferences?.sound_enabled ?? true);
       } catch (_error) {
-        // Non-blocking for layout; keep defaults when endpoint is unavailable.
+        suspendPolling();
       }
     };
 
     fetchPreferences();
-  }, [enabled]);
+  }, [enabled, resetFailureState, suspendPolling, trackRequestFailure]);
 
   const markAllAsRead = useCallback(async () => {
-    if (!enabled) {
+    if (!enabled || pollingSuspendedRef.current) {
       return;
     }
     try {
@@ -56,30 +102,44 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       });
 
       if (response?.ok) {
+        resetFailureState();
         setUnreadCount(0);
         previousCountRef.current = 0;
+      } else if (response) {
+        trackRequestFailure(response);
+      } else {
+        suspendPolling();
       }
     } catch (_error) {
-      // Do nothing on failure; navigation can still continue.
+      suspendPolling();
     }
-  }, [enabled]);
+  }, [enabled, resetFailureState, suspendPolling, trackRequestFailure]);
 
   const fetchUnreadCount = useCallback(async () => {
     if (!enabled) {
       setUnreadCount(0);
       previousCountRef.current = 0;
       initializedRef.current = false;
+      pollingSuspendedRef.current = false;
+      consecutiveFailureCountRef.current = 0;
+      return;
+    }
+
+    if (pollingSuspendedRef.current) {
       return;
     }
     try {
       const response = await fetchWithAdminAuth("/api/admin/pending-ads/unread-count");
       if (!response) {
+        suspendPolling();
         return;
       }
       if (!response.ok) {
+        trackRequestFailure(response);
         return;
       }
 
+      resetFailureState();
       const data = await response.json();
       const newCount = Number(data.count) || 0;
       const previousCount = previousCountRef.current;
@@ -105,9 +165,17 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       previousCountRef.current = newCount;
       setUnreadCount(newCount);
     } catch (_error) {
-      // Keep the UI working even if unread-count endpoint isn't available.
+      suspendPolling();
     }
-  }, [enabled, markAllAsRead, onViewPending, soundEnabled]);
+  }, [
+    enabled,
+    markAllAsRead,
+    onViewPending,
+    resetFailureState,
+    soundEnabled,
+    suspendPolling,
+    trackRequestFailure,
+  ]);
 
   useEffect(() => {
     if (!enabled) {
