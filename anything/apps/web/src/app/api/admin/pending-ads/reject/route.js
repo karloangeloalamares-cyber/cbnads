@@ -1,6 +1,7 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
 import { sendEmail } from "../../../utils/send-email.js";
+import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 
 const isMissingColumnError = (error) => {
   const code = String(error?.code || "");
@@ -143,26 +144,6 @@ export async function POST(request) {
 
     // Send denial emails
     try {
-      const { data: adminPrefs } = await supabase
-        .from(table("admin_notification_preferences"))
-        .select("email_address, email_enabled")
-        .eq("email_enabled", true);
-
-      const { data: globalPrefs } = await supabase
-        .from(table("notification_preferences"))
-        .select("reminder_email, email_enabled")
-        .order("id", { ascending: true })
-        .limit(1);
-
-      const adminEmails = Array.from(
-        new Set(
-          [
-            ...(adminPrefs || []).map((item) => item.email_address),
-            ...(globalPrefs?.[0]?.email_enabled ? [globalPrefs?.[0]?.reminder_email] : []),
-          ].filter(Boolean),
-        ),
-      );
-
       const reasonSectionHtml = buildReasonSectionHtml(rejectionReasons);
       const reviewerNoteSectionHtml = buildReviewerNoteSectionHtml(reviewerNote);
 
@@ -261,12 +242,31 @@ export async function POST(request) {
         }).catch((error) => console.error("[reject] Advertiser email failed:", error));
       }
 
-      if (adminEmails.length > 0) {
-        await sendEmail({
-          to: adminEmails,
-          subject: `Ad Not Approved - ${ad.ad_name} (${ad.advertiser_name})`,
-          html: adminEmailHTML,
-        }).catch((error) => console.error("[reject] Admin email failed:", error));
+      const internalTelegramText = [
+        "<b>Ad Not Approved</b>",
+        "",
+        `<b>Advertiser:</b> ${escapeHtml(ad.advertiser_name || "N/A")}`,
+        `<b>Ad:</b> ${escapeHtml(ad.ad_name || "N/A")}`,
+        `<b>Contact:</b> ${escapeHtml(ad.email || "N/A")}`,
+        rejectionReasons.length > 0
+          ? `<b>Reasons:</b> ${escapeHtml(rejectionReasons.join("; "))}`
+          : "",
+        reviewerNote
+          ? `<b>Reviewer Note:</b> ${escapeHtml(reviewerNote.slice(0, 250))}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const internalNotification = await notifyInternalChannels({
+        supabase,
+        emailSubject: `Ad Not Approved - ${ad.ad_name} (${ad.advertiser_name})`,
+        emailHtml: adminEmailHTML,
+        telegramText: internalTelegramText,
+        excludeEmails: [ad.email],
+      });
+      if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
+        console.warn("[reject] Internal notifications were not sent:", internalNotification);
       }
     } catch (emailError) {
       console.error("Error sending rejection emails:", emailError);

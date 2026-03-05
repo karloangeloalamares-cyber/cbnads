@@ -1,7 +1,7 @@
 import { requireAdmin } from "../../../utils/auth-check.js";
 import { db, table } from "../../../utils/supabase-db.js";
 import { sendEmail } from "../../../utils/send-email.js";
-import { resolveInternalNotificationEmails } from "../../../utils/internal-notification-emails.js";
+import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 import {
   fallbackInvoiceNumber,
   nextSequentialInvoiceNumber,
@@ -321,10 +321,6 @@ export async function POST(request) {
       fallbackInvoiceNumber();
     const amountDueText = formatCurrency(readInvoiceAmount(invoice, resolvedAd));
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
-    const internalEmails = (
-      await resolveInternalNotificationEmails(supabase)
-    ).filter((email) => email !== advertiserEmail);
-
     const contactName = String(
       advertiser?.contact_name || body?.contact_name || "there",
     ).trim();
@@ -441,18 +437,33 @@ export async function POST(request) {
       html: advertiserEmailHTML,
     });
 
-    if (internalEmails.length > 0) {
-      await sendEmail({
-        to: internalEmails,
-        subject: `Ad Created - ${String(ad?.ad_name || "Ad").trim()} | Invoice ${invoiceNumberText}`,
-        html: internalEmailHTML,
-      });
+    const internalTelegramText = [
+      "<b>Ad Created and Approved</b>",
+      "",
+      `<b>Advertiser:</b> ${escapeHtml(advertiserNameText || "N/A")}`,
+      `<b>Contact:</b> ${escapeHtml(contactName || "N/A")} (${escapeHtml(advertiserEmail)})`,
+      `<b>Ad:</b> ${adName}`,
+      `<b>Invoice:</b> ${escapeHtml(invoiceNumberText)}`,
+      `<b>Amount Due:</b> ${escapeHtml(amountDueText)}`,
+      `<b>Status:</b> ${statusText}`,
+    ].join("\n");
+
+    const internalNotification = await notifyInternalChannels({
+      supabase,
+      emailSubject: `Ad Created - ${String(ad?.ad_name || "Ad").trim()} | Invoice ${invoiceNumberText}`,
+      emailHtml: internalEmailHTML,
+      telegramText: internalTelegramText,
+      excludeEmails: [advertiserEmail],
+    });
+    if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
+      console.warn("[admin/ads/send-approval-email] Internal notifications were not sent:", internalNotification);
     }
 
     return Response.json({
       success: true,
       email: advertiserEmail,
-      internal_emails: internalEmails,
+      internal_emails: internalNotification.emails,
+      internal_telegram_chat_ids: internalNotification.telegram_chat_ids,
       ad_id: resolvedAd.id,
       invoice_id: invoice?.id || null,
       invoice_number: invoiceNumberText,

@@ -1,6 +1,6 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { sendEmail } from "../../utils/send-email.js";
-import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
+import { notifyInternalChannels } from "../../utils/internal-notification-channels.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
@@ -291,8 +291,6 @@ export async function POST(request) {
       insertedPendingAd.post_date_from,
     );
 
-    const internalEmails = await resolveInternalNotificationEmails(supabase);
-
     // Create advertiser confirmation email
     const advertiserEmailHTML = `
 <!DOCTYPE html>
@@ -497,21 +495,43 @@ export async function POST(request) {
       // Don't fail the whole request if email fails
     }
 
-    // Send notification to internal roles (admin/manager/staff).
-    if (internalEmails.length > 0) {
-      try {
-        await sendEmail({
-          to: internalEmails,
-          subject: `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
-          html: adminEmailHTML,
+    const internalTelegramText = [
+      "<b>New Ad Submission Received</b>",
+      "",
+      `<b>Advertiser:</b> ${escapeHtml(advertiser_name)}`,
+      `<b>Contact:</b> ${escapeHtml(contact_name)} (${escapeHtml(normalizedEmail)})`,
+      `<b>Ad:</b> ${escapeHtml(ad_name)}`,
+      `<b>Post Type:</b> ${escapeHtml(post_type)}`,
+      placement ? `<b>Placement:</b> ${escapeHtml(placement)}` : "",
+      post_date_from ? `<b>Start Date:</b> ${escapeHtml(post_date_from)}` : "",
+      post_date_to ? `<b>End Date:</b> ${escapeHtml(post_date_to)}` : "",
+      post_time ? `<b>Post Time:</b> ${escapeHtml(post_time)}` : "",
+      reviewSubmissionUrl ? `<b>Review:</b> ${escapeHtml(reviewSubmissionUrl)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    try {
+      const internalNotification = await notifyInternalChannels({
+        supabase,
+        emailSubject: `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
+        emailHtml: adminEmailHTML,
+        telegramText: internalTelegramText,
+      });
+
+      if (internalNotification.email_sent || internalNotification.telegram_sent) {
+        console.log("[submit-ad] Internal notifications sent:", {
+          email_sent: internalNotification.email_sent,
+          telegram_sent: internalNotification.telegram_sent,
+          email_recipients: internalNotification.emails.length,
+          telegram_recipients: internalNotification.telegram_chat_ids.length,
         });
-        console.log("[submit-ad] Notification sent to internal recipients:", internalEmails);
-      } catch (emailError) {
-        console.error("[submit-ad] Failed to send internal notification email:", emailError);
-        // Don't fail the whole request if email fails
+      } else {
+        console.warn("[submit-ad] Internal notifications were not sent:", internalNotification);
       }
-    } else {
-      console.warn("[submit-ad] No internal recipient emails configured for notifications");
+    } catch (internalNotificationError) {
+      console.error("[submit-ad] Failed to send internal notifications:", internalNotificationError);
+      // Don't fail the whole request if notifications fail.
     }
 
     return Response.json({

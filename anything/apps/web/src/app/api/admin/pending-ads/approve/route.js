@@ -9,7 +9,7 @@ import {
 } from "../../../utils/ad-availability.js";
 import { sendEmail } from "../../../utils/send-email.js";
 import { adAmount, nextSequentialInvoiceNumber } from "../../../utils/invoice-helpers.js";
-import { resolveInternalNotificationEmails } from "../../../utils/internal-notification-emails.js";
+import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
   process.env.APPROVAL_ZELLE_NUMBER || "(555) 010-2026",
@@ -454,8 +454,6 @@ export async function POST(request) {
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
 
     try {
-      const internalEmails = await resolveInternalNotificationEmails(supabase);
-
       const advertiserEmailHTML = `
 <!DOCTYPE html>
 <html>
@@ -561,12 +559,24 @@ export async function POST(request) {
         }).catch((err) => console.error("[approve] Advertiser email failed:", err));
       }
 
-      if (internalEmails.length > 0) {
-        await sendEmail({
-          to: internalEmails,
-          subject: `Ad Approved - ${ad.ad_name} | ${invoiceNumberText}`,
-          html: adminEmailHTML,
-        }).catch((err) => console.error("[approve] Internal email failed:", err));
+      const internalTelegramText = [
+        "<b>Ad Approved</b>",
+        "",
+        `<b>Advertiser:</b> ${escapeHtml(ad.advertiser_name || advertiserName || "N/A")}`,
+        `<b>Ad:</b> ${escapeHtml(ad.ad_name || "N/A")}`,
+        `<b>Invoice:</b> ${escapeHtml(invoiceNumberText)}`,
+        `<b>Amount Due:</b> ${escapeHtml(amountDueText)}`,
+        `<b>Status:</b> ${escapeHtml(adStatus)}`,
+      ].join("\n");
+
+      const internalNotification = await notifyInternalChannels({
+        supabase,
+        emailSubject: `Ad Approved - ${ad.ad_name} | ${invoiceNumberText}`,
+        emailHtml: adminEmailHTML,
+        telegramText: internalTelegramText,
+      });
+      if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
+        console.warn("[approve] Internal notifications were not sent:", internalNotification);
       }
     } catch (emailErr) {
       console.error("Error sending approval emails:", emailErr);

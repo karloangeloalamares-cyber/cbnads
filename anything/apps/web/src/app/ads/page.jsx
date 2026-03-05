@@ -2525,17 +2525,17 @@ export default function AdsPage() {
   }, [navigate, ready, user]);
 
   useEffect(() => {
-    if (!ready || !user || !isAdvertiser) {
+    if (!ready || !user) {
       return;
     }
 
     if (!allowedSections.includes(activeSection)) {
-      setActiveSection("Dashboard");
+      setActiveSection(allowedSections[0] || "Dashboard");
       setView("list");
       return;
     }
 
-    if (view === "createAd" || view === "newInvoice") {
+    if (isAdvertiser && (view === "createAd" || view === "newInvoice")) {
       setView("list");
       setAd(blankAd);
       setInvoice(createBlankInvoice());
@@ -10939,7 +10939,7 @@ export default function AdsPage() {
             </div>
           )}
 
-          {activeSection === "Settings" && (
+          {activeSection === "Settings" && canViewSettings && (
             <div className="max-w-[1200px] mx-auto">
               <div className="mb-8">
                 <h1 className="text-2xl font-semibold text-gray-900 mb-2">
