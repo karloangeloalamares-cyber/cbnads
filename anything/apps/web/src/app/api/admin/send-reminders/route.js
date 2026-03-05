@@ -2,6 +2,7 @@ import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/su
 import { requireInternalUser } from "../../utils/auth-check.js";
 import { sendEmail } from "../../utils/send-email.js";
 import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
+import { sendTelegramToMany, resolveActiveTelegramChatIds } from "../../utils/send-telegram.js";
 
 const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -429,8 +430,17 @@ export async function POST(request) {
       ]),
     );
 
-    const internalEmails = normalizeInternalEmails(
-      await resolveInternalNotificationEmails(supabase),
+    const [internalEmailsResolved, telegramPrefsResult] = await Promise.all([
+      resolveInternalNotificationEmails(supabase),
+      supabase
+        .from(table("admin_notification_preferences"))
+        .select("telegram_chat_ids"),
+    ]);
+
+    const internalEmails = normalizeInternalEmails(internalEmailsResolved);
+
+    const activeTelegramChatIds = resolveActiveTelegramChatIds(
+      telegramPrefsResult.data || [],
     );
 
     const results = [];
@@ -504,12 +514,25 @@ export async function POST(request) {
               html: generateReminderHtml(payload, true),
             });
 
+            if (activeTelegramChatIds.length > 0) {
+              const telegramText =
+                `<b>Ad Reminder</b>\n\n` +
+                `<b>${ad.ad_name}</b>\n` +
+                `Advertiser: ${ad.advertiser}\n` +
+                `Placement: ${ad.placement}\n` +
+                `Scheduled: ${scheduleMeta.formattedDate} at ${scheduleMeta.formattedTime} ET\n` +
+                `${untilText ? `Due: ${untilText}` : ""}`.trim();
+              await sendTelegramToMany({ chatIds: activeTelegramChatIds, text: telegramText })
+                .catch((err) => console.error("[send-reminders] Telegram send failed:", err));
+            }
+
             await storeReminder(supabase, ad.id, "email", "internal");
             results.push({
               type: "internal_email",
               to: internalEmails,
               ad_name: ad.ad_name,
               status: "sent",
+              telegram_sent: activeTelegramChatIds.length > 0,
             });
           } catch (error) {
             results.push({

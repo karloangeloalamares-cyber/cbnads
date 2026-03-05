@@ -5356,28 +5356,53 @@ export default function AdsPage() {
     });
   };
 
-  const handleSettingsTestTelegram = (chatId, label) => {
+  const handleSettingsTestTelegram = async (chatId, label) => {
     setSettingsTelegramTesting(chatId);
     setSettingsNotificationMessage(null);
-    window.setTimeout(() => {
-      setSettingsTelegramTesting(null);
+    try {
+      const response = await fetch("/api/admin/telegram/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: `✅ <b>CBN Ads Manager</b>\n\nTest message received! Telegram notifications are working for "<b>${label}</b>".`,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Failed to send");
       setSettingsNotificationMessage({
         type: "success",
         text: `Test message sent to "${label}"!`,
       });
-    }, 500);
+    } catch (err) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text: `Failed to send test message: ${err.message}`,
+      });
+    } finally {
+      setSettingsTelegramTesting(null);
+    }
   };
 
-  const handleSettingsSetupTelegramWebhook = () => {
+  const handleSettingsSetupTelegramWebhook = async () => {
     setSettingsTelegramWebhookLoading(true);
     setSettingsTelegramWebhookStatus(null);
-    window.setTimeout(() => {
-      setSettingsTelegramWebhookLoading(false);
+    try {
+      const response = await fetch("/api/admin/telegram/verify");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Verification failed");
       setSettingsTelegramWebhookStatus({
         type: "success",
-        text: "Webhook registered. Telegram quick actions are ready.",
+        text: `Bot verified: @${data.bot?.username || "unknown"} is connected and ready.`,
       });
-    }, 600);
+    } catch (err) {
+      setSettingsTelegramWebhookStatus({
+        type: "error",
+        text: `Bot verification failed: ${err.message}`,
+      });
+    } finally {
+      setSettingsTelegramWebhookLoading(false);
+    }
   };
 
   const handleSettingsCheckReminders = async () => {
@@ -6457,7 +6482,11 @@ export default function AdsPage() {
   };
 
   const handleSendAdToMyTelegram = async (adItem) => {
-    if (settingsActiveTelegramCount === 0) {
+    const activeChatIds = settingsTelegramChatIds
+      .filter((item) => item.is_active !== false && String(item.chat_id || "").trim())
+      .map((item) => String(item.chat_id).trim());
+
+    if (activeChatIds.length === 0) {
       appToast.warning({
         title: "Telegram Chat ID missing",
         description: "Please add at least one Telegram Chat ID in Settings > Notifications first.",
@@ -6466,19 +6495,23 @@ export default function AdsPage() {
     }
 
     const messageText = buildAdsShareMessage(adItem);
-    if (navigator?.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(messageText);
-      } catch {
-        // Clipboard permission may be unavailable; continue with share link.
-      }
+    try {
+      const response = await fetch("/api/admin/telegram/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_ids: activeChatIds, text: messageText }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || "Failed to send");
+      appToast.success({
+        title: `Ad sent to ${activeChatIds.length} Telegram chat${activeChatIds.length !== 1 ? "s" : ""}.`,
+      });
+    } catch (err) {
+      appToast.error({
+        title: "Failed to send to Telegram",
+        description: err.message,
+      });
     }
-
-    const shareUrl = `https://t.me/share/url?url=&text=${encodeURIComponent(messageText)}`;
-    window.open(shareUrl, "_blank", "noopener,noreferrer");
-    appToast.info({
-      title: "Opened Telegram share and copied message.",
-    });
   };
 
   const markAdAsPublished = (adId) => {
@@ -11386,7 +11419,7 @@ export default function AdsPage() {
                                     </p>
                                   </div>
                                   <p className="text-xs text-gray-500 mt-1">
-                                    Required for Approve/Reject buttons to work in Telegram.
+                                    Verify that the bot token is valid and connected.
                                   </p>
                                 </div>
                                 <button
@@ -11396,8 +11429,8 @@ export default function AdsPage() {
                                   className="px-3 py-2 bg-gray-100 text-gray-700 text-xs font-medium rounded-lg border border-gray-300 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                 >
                                   {settingsTelegramWebhookLoading
-                                    ? "Setting up..."
-                                    : "Setup Webhook"}
+                                    ? "Verifying..."
+                                    : "Verify Bot"}
                                 </button>
                               </div>
                               {settingsTelegramWebhookStatus && (
