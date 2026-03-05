@@ -15,6 +15,7 @@ const normalizeTime = (value) => {
 };
 
 const activePendingStatuses = new Set(["pending"]);
+const activeAdStatuses = new Set(["scheduled", "approved", "posted", "published", "active"]);
 
 const isExcluded = (item, excludeId) => String(item?.id || "") === String(excludeId || "");
 
@@ -22,7 +23,10 @@ const includesDate = (item, date) => adDatesForDayCheck(item).includes(date);
 
 const isCountableAd = (item) => {
   const status = String(item?.status || "").trim().toLowerCase();
-  return status !== "archived" && status !== "deleted";
+  if (!status || status === "archived" || status === "deleted") {
+    return false;
+  }
+  return activeAdStatuses.has(status);
 };
 
 const isCountablePendingAd = (item) =>

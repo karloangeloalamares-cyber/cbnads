@@ -59,6 +59,7 @@ export const checkAdAvailability = async ({
   if (postType === "One-Time Post" && postDateFrom && postTime) {
     const response = await fetch("/api/ads/availability", {
       method: "POST",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         date: postDateFrom,
@@ -99,6 +100,7 @@ export const checkAdAvailability = async ({
 
     const response = await fetch("/api/ads/availability-batch", {
       method: "POST",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         dates,
@@ -136,6 +138,7 @@ export const checkAdAvailability = async ({
 
     const response = await fetch("/api/ads/availability-batch", {
       method: "POST",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         dates,
@@ -191,6 +194,7 @@ export const fetchMonthAvailability = async ({ monthDate, excludeAdId, signal })
 
   const response = await fetch("/api/ads/availability-batch", {
     method: "POST",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     signal,
     body: JSON.stringify({

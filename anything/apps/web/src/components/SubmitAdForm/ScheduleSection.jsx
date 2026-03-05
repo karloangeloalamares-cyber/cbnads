@@ -349,7 +349,6 @@ export function ScheduleSection({
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [monthAvailability, setMonthAvailability] = useState({});
   const [monthAvailabilityError, setMonthAvailabilityError] = useState("");
-  const loadedMonthsRef = useRef(new Set());
   const loadingMonthsRef = useRef(new Set());
   const monthAbortControllerRef = useRef(null);
   const currentMonthRef = useRef(parseDate(formData.post_date_from) || getTodayDateInAppTimeZone());
@@ -359,10 +358,7 @@ export function ScheduleSection({
       const monthKey = toMonthKey(monthDate);
       // Track the latest requested month for retry
       currentMonthRef.current = monthDate;
-      if (
-        loadedMonthsRef.current.has(monthKey) ||
-        loadingMonthsRef.current.has(monthKey)
-      ) {
+      if (loadingMonthsRef.current.has(monthKey)) {
         return;
       }
 
@@ -382,7 +378,6 @@ export function ScheduleSection({
           excludeAdId,
           signal: controller.signal,
         });
-        loadedMonthsRef.current.add(monthKey);
         setMonthAvailability((current) => ({ ...current, ...results }));
       } catch (error) {
         if (error?.name !== "AbortError") {
@@ -398,7 +393,6 @@ export function ScheduleSection({
   );
 
   useEffect(() => {
-    loadedMonthsRef.current.clear();
     loadingMonthsRef.current.clear();
     setMonthAvailability({});
     setMonthAvailabilityError("");
