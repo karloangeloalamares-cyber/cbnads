@@ -5119,14 +5119,42 @@ export default function AdsPage() {
         throw new Error("A team member with this email already exists.");
       }
 
-      await upsertTeamMember({
-        id: createId("member"),
-        name,
-        email,
-        role: "admin",
-      });
+      if (hasSupabaseConfig) {
+        const response = await fetchWithSessionAuth("/api/admin/members", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name,
+            email,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to add team member.");
+        }
 
-      setDb(readDb());
+        invalidateDbCache();
+        await ensureDb();
+        setDb(readDb());
+
+        appToast.success({
+          title: "Team member added",
+          description: data?.email_sent
+            ? "Invite email sent with a verify and password setup link."
+            : "Team member added successfully.",
+        });
+      } else {
+        await upsertTeamMember({
+          id: createId("member"),
+          name,
+          email,
+          role: "admin",
+        });
+        setDb(readDb());
+      }
+
       setSettingsTeamModalOpen(false);
       setSettingsTeamName("");
       setSettingsTeamEmail("");
@@ -11157,8 +11185,8 @@ export default function AdsPage() {
                         />
                       </div>
                       <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600">
-                        This adds the email to the admin members list stored in Supabase.
-                        Authentication for that email must already exist in Supabase Auth.
+                        We will create this team account and email them a secure link to verify
+                        and set their password.
                       </div>
                       <div className="flex gap-3">
                         <button
