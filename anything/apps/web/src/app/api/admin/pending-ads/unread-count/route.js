@@ -30,7 +30,7 @@ export async function GET(request) {
     const { count, error } = await supabase
       .from(table("pending_ads"))
       .select("id", { count: "exact", head: true })
-      .eq("status", "pending")
+      .in("status", ["pending", "Pending"])
       .eq("viewed_by_admin", false);
 
     if (error) throw error;

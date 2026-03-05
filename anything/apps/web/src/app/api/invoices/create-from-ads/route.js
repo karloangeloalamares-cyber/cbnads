@@ -142,6 +142,7 @@ export async function POST(request) {
         invoice_number: invoiceNumber,
         advertiser_id: advertiser?.id || null,
         advertiser_name: targetAdvertiserName,
+        ad_ids: uniqueAdIds,
         contact_name: invoiceData.contactName || advertiser?.contact_name || null,
         contact_email: invoiceData.contactEmail || advertiser?.email || null,
         bill_to: invoiceData.billTo || targetAdvertiserName || null,
@@ -174,17 +175,19 @@ export async function POST(request) {
       if (itemError) throw itemError;
     }
 
-    if (String(status).toLowerCase() === "paid") {
-      const { error: adUpdateError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: "Paid",
-          paid_via_invoice_id: invoice.id,
-          updated_at: nowIso,
-        })
-        .in("id", uniqueAdIds);
-      if (adUpdateError) throw adUpdateError;
+    const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
+    const { error: adUpdateError } = await supabase
+      .from(table("ads"))
+      .update({
+        payment: nextPaymentStatus,
+        invoice_id: invoice.id,
+        paid_via_invoice_id: invoice.id,
+        updated_at: nowIso,
+      })
+      .in("id", uniqueAdIds);
+    if (adUpdateError) throw adUpdateError;
 
+    if (String(status).toLowerCase() === "paid") {
       if (advertiser?.id) {
         await recalculateAdvertiserSpend(advertiser.id);
       }

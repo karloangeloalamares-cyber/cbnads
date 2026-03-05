@@ -4,17 +4,43 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 import { appToast } from "@/lib/toast";
 
+const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
+const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
+const ADMIN_CREATED_AD_NOTIFICATION_SOURCE = "admin-created-ad";
+
+const parseNotificationSignal = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value || ""));
+  } catch {
+    return null;
+  }
+};
+
 export function useSubmissionNotifications(enabled = true, { onViewPending } = {}) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const previousCountRef = useRef(0);
   const initializedRef = useRef(false);
   const audioRef = useRef(null);
+  const localUnreadDeltaRef = useRef(0);
+
+  const playSound = useCallback(() => {
+    if (soundEnabled && audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  }, [soundEnabled]);
 
   const resetNotificationState = useCallback(() => {
     setUnreadCount(0);
     previousCountRef.current = 0;
     initializedRef.current = false;
+    localUnreadDeltaRef.current = 0;
   }, []);
 
   useEffect(() => {
@@ -69,10 +95,27 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       setUnreadCount(0);
       previousCountRef.current = 0;
       initializedRef.current = true;
+      localUnreadDeltaRef.current = 0;
     } catch (_error) {
       // Ignore and allow the next refresh cycle to retry.
     }
   }, [enabled]);
+
+  const showSubmissionToast = useCallback(
+    (count = 1) => {
+      appToast.submissionReceived({
+        count,
+        onView:
+          typeof onViewPending === "function"
+            ? async () => {
+                await markAllAsRead();
+                onViewPending();
+              }
+            : undefined,
+      });
+    },
+    [markAllAsRead, onViewPending],
+  );
 
   const fetchUnreadCount = useCallback(async () => {
     if (!enabled) {
@@ -91,29 +134,17 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       const previousCount = previousCountRef.current;
 
       if (initializedRef.current && newCount > previousCount) {
-        if (soundEnabled && audioRef.current) {
-          audioRef.current.play().catch(() => {});
-        }
-
-        appToast.submissionReceived({
-          count: newCount - previousCount,
-          onView:
-            typeof onViewPending === "function"
-              ? async () => {
-                  await markAllAsRead();
-                  onViewPending();
-                }
-              : undefined,
-        });
+        playSound();
+        showSubmissionToast(newCount - previousCount);
       }
 
       initializedRef.current = true;
       previousCountRef.current = newCount;
-      setUnreadCount(newCount);
+      setUnreadCount(newCount + localUnreadDeltaRef.current);
     } catch (_error) {
       // Ignore transient auth/network issues and retry on the next poll.
     }
-  }, [enabled, markAllAsRead, onViewPending, resetNotificationState, soundEnabled]);
+  }, [enabled, playSound, resetNotificationState, showSubmissionToast]);
 
   useEffect(() => {
     if (!enabled) {
@@ -124,7 +155,7 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
     void fetchPreferences();
     void fetchUnreadCount();
 
-    const interval = window.setInterval(fetchUnreadCount, 30_000);
+    const interval = window.setInterval(fetchUnreadCount, 10_000);
     return () => window.clearInterval(interval);
   }, [enabled, fetchPreferences, fetchUnreadCount, resetNotificationState]);
 
@@ -171,6 +202,43 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       data.subscription.unsubscribe();
     };
   }, [enabled, fetchPreferences, fetchUnreadCount, resetNotificationState]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return undefined;
+    }
+
+    const applyNotificationSignal = (signal) => {
+      const source = String(signal?.source || "").trim().toLowerCase();
+      if (source === ADMIN_CREATED_AD_NOTIFICATION_SOURCE) {
+        localUnreadDeltaRef.current += 1;
+        setUnreadCount((current) => current + 1);
+        playSound();
+        showSubmissionToast(1);
+        return;
+      }
+
+      void fetchUnreadCount();
+    };
+
+    const handleSignalEvent = (event) => {
+      applyNotificationSignal(parseNotificationSignal(event?.detail));
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === SUBMISSION_NOTIFICATION_STORAGE_KEY && event.newValue) {
+        applyNotificationSignal(parseNotificationSignal(event.newValue));
+      }
+    };
+
+    window.addEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [enabled, fetchUnreadCount, playSound, showSubmissionToast]);
 
   return {
     unreadCount,

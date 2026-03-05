@@ -58,6 +58,13 @@ export async function POST(request) {
     const total = subtotal - toNumber(discount, 0) + toNumber(tax, 0);
     const nowIso = new Date().toISOString();
     const invoiceNumber = generateInvoiceNumber();
+    const linkedAdIds = [
+      ...new Set(
+        items
+          .map((item) => String(item?.ad_id || "").trim())
+          .filter(Boolean),
+      ),
+    ];
 
     const { data: invoice, error: invoiceError } = await supabase
       .from(table("invoices"))
@@ -65,6 +72,7 @@ export async function POST(request) {
         invoice_number: invoiceNumber,
         advertiser_id: advertiser_id || null,
         advertiser_name,
+        ad_ids: linkedAdIds,
         contact_name: contact_name || null,
         contact_email: contact_email || null,
         bill_to: bill_to || advertiser_name,
@@ -98,6 +106,20 @@ export async function POST(request) {
         created_at: nowIso,
       });
       if (itemError) throw itemError;
+    }
+
+    if (linkedAdIds.length > 0) {
+      const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
+      const { error: adUpdateError } = await supabase
+        .from(table("ads"))
+        .update({
+          payment: nextPaymentStatus,
+          invoice_id: invoice.id,
+          paid_via_invoice_id: invoice.id,
+          updated_at: nowIso,
+        })
+        .in("id", linkedAdIds);
+      if (adUpdateError) throw adUpdateError;
     }
 
     const { data: invoiceItems, error: itemsError } = await supabase

@@ -128,6 +128,33 @@ const CREATE_AD_SUBMIT_TOAST_ID = "create-ad-submit-toast";
 const INVOICE_SUBMIT_TOAST_ID = "invoice-submit-toast";
 const getInvoiceActionToastId = (action, invoiceId) => `invoice-${action}-toast-${invoiceId}`;
 const getSubmissionApproveToastId = (pendingAdId) => `submission-approve-${pendingAdId}`;
+const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
+const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
+const ADMIN_CREATED_AD_NOTIFICATION_SOURCE = "admin-created-ad";
+
+const emitSubmissionNotificationSignal = ({ source = "", id = "" } = {}) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const payload = {
+    source: String(source || "").trim(),
+    id: String(id || "").trim() || null,
+    timestamp: Date.now(),
+  };
+
+  try {
+    window.dispatchEvent(new CustomEvent(SUBMISSION_NOTIFICATION_EVENT, { detail: payload }));
+  } catch {
+    // Ignore local event dispatch failures.
+  }
+
+  try {
+    window.localStorage.setItem(SUBMISSION_NOTIFICATION_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage write failures (private mode/quota/etc).
+  }
+};
 
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
@@ -2694,11 +2721,16 @@ export default function AdsPage() {
     if (!invoice.advertiser_id) {
       return ads;
     }
-    return ads.filter((item) => item.advertiser_id === invoice.advertiser_id);
+    return ads.filter(
+      (item) => String(item.advertiser_id || "") === String(invoice.advertiser_id || ""),
+    );
   }, [ads, invoice.advertiser_id]);
 
   const selectedInvoiceAdvertiser = useMemo(
-    () => advertisers.find((item) => item.id === invoice.advertiser_id) || null,
+    () =>
+      advertisers.find(
+        (item) => String(item.id || "") === String(invoice.advertiser_id || ""),
+      ) || null,
     [advertisers, invoice.advertiser_id],
   );
 
@@ -2823,7 +2855,10 @@ export default function AdsPage() {
     }
 
     const advertiser =
-      advertisers.find((item) => item.id === invoicePreviewModal.advertiser_id) || null;
+      advertisers.find(
+        (item) =>
+          String(item.id || "") === String(invoicePreviewModal.advertiser_id || ""),
+      ) || null;
     const status = normalizeInvoiceStatus(invoicePreviewModal.status);
     const invoiceNumber = invoicePreviewModal.invoice_number || invoicePreviewModal.id || "";
     const issueDate = formatInvoiceListDate(
@@ -3794,7 +3829,9 @@ export default function AdsPage() {
       const normalizedStatus = normalizeInvoiceStatus(item.status);
       const advertiserName =
         item.advertiser_name ||
-        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name ||
+        advertisers.find(
+          (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+        )?.advertiser_name ||
         "";
 
       if (invoiceFilters.status !== "All" && normalizedStatus !== invoiceFilters.status) {
@@ -4485,17 +4522,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsRemoveMember = async (member) => {
-    const memberEmail = String(member.email || "").toLowerCase();
-    if (memberEmail && memberEmail === String(user?.email || "").toLowerCase()) {
-      setSettingsTeamError("You cannot remove the currently signed-in account.");
-      return;
-    }
-
-    if (!window.confirm("Are you sure you want to remove this team member?")) {
-      return;
-    }
-
+  const executeSettingsRemoveMember = async (member) => {
     try {
       await deleteTeamMember(member.id);
       setDb(readDb());
@@ -4505,6 +4532,33 @@ export default function AdsPage() {
         error instanceof Error ? error.message : "Failed to remove member",
       );
     }
+  };
+
+  const handleSettingsRemoveMember = (member) => {
+    const memberEmail = String(member.email || "").toLowerCase();
+    if (memberEmail && memberEmail === String(user?.email || "").toLowerCase()) {
+      setSettingsTeamError("You cannot remove the currently signed-in account.");
+      return;
+    }
+
+    const memberLabel = String(member.name || member.email || "this team member").trim();
+    const memberId = String(member.id || member.email || "member").trim();
+    if (!memberId) {
+      return;
+    }
+
+    appToast.warning({
+      id: `confirm-remove-member-${memberId}`,
+      title: "Remove team member?",
+      description: `This will remove ${memberLabel}.`,
+      duration: 8000,
+      action: {
+        label: "Remove",
+        onClick: () => {
+          void executeSettingsRemoveMember(member);
+        },
+      },
+    });
   };
 
   const handleSettingsSaveNotifications = async () => {
@@ -4639,10 +4693,7 @@ export default function AdsPage() {
     }
   };
 
-  const handleSettingsDeleteTelegramChatId = async (id) => {
-    if (!window.confirm("Delete this Telegram chat ID?")) {
-      return;
-    }
+  const executeSettingsDeleteTelegramChatId = async (id) => {
     try {
       await updateDb((currentDb) => {
         const list = Array.isArray(currentDb.telegram_chat_ids)
@@ -4665,6 +4716,26 @@ export default function AdsPage() {
             : "Failed to remove Telegram chat ID.",
       });
     }
+  };
+
+  const handleSettingsDeleteTelegramChatId = (id) => {
+    const chatId = String(id || "").trim();
+    if (!chatId) {
+      return;
+    }
+
+    appToast.warning({
+      id: `confirm-delete-telegram-chat-${chatId}`,
+      title: "Delete Telegram chat ID?",
+      description: "This cannot be undone.",
+      duration: 8000,
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void executeSettingsDeleteTelegramChatId(id);
+        },
+      },
+    });
   };
 
   const handleSettingsTestTelegram = (chatId, label) => {
@@ -4903,6 +4974,26 @@ export default function AdsPage() {
       setWhatsAppSelectedMessageId((current) => (current === messageId ? null : current));
     }, "Message deleted.");
 
+  const handleConfirmWhatsAppDelete = (messageId) => {
+    const normalizedMessageId = String(messageId || "").trim();
+    if (!normalizedMessageId) {
+      return;
+    }
+
+    appToast.warning({
+      id: `confirm-delete-whatsapp-${normalizedMessageId}`,
+      title: "Delete this message?",
+      description: "This cannot be undone.",
+      duration: 8000,
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void handleWhatsAppDelete(messageId);
+        },
+      },
+    });
+  };
+
   const handleWhatsAppSeedDemo = () =>
     run(async () => {
       await updateDb((currentDb) => {
@@ -5012,7 +5103,7 @@ export default function AdsPage() {
       ...item,
       issue_date: getTodayInAppTimeZone(),
       status: normalizeInvoiceStatus(item.status),
-      ad_ids: item.ad_ids || [],
+      ad_ids: toStringArray(item.ad_ids),
     });
     setView("newInvoice");
     setOpenInvoiceMenuId(null);
@@ -5024,10 +5115,12 @@ export default function AdsPage() {
       ...item,
       advertiser_name:
         item.advertiser_name ||
-        advertisers.find((adv) => adv.id === item.advertiser_id)?.advertiser_name ||
+        advertisers.find(
+          (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+        )?.advertiser_name ||
         "-",
       status: normalizeInvoiceStatus(item.status),
-      ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
+      ad_ids: toStringArray(item.ad_ids),
     });
     setOpenInvoiceMenuId(null);
   };
@@ -5422,6 +5515,7 @@ export default function AdsPage() {
     if (createAdSubmitting) {
       return;
     }
+    const isNewAdRecord = !String(ad.id || "").trim();
 
     const submitToast =
       mode === "draft"
@@ -5538,6 +5632,12 @@ export default function AdsPage() {
         }
 
         const savedAd = await upsertAd(payload);
+        if (isAdmin && isNewAdRecord && mode !== "draft") {
+          emitSubmissionNotificationSignal({
+            source: ADMIN_CREATED_AD_NOTIFICATION_SOURCE,
+            id: savedAd?.id || payload.id || "",
+          });
+        }
 
         if (mode === "continue") {
           const linkedInvoiceId =
@@ -5785,34 +5885,46 @@ export default function AdsPage() {
     setSelectedAdIds(allSelected ? new Set() : new Set(allIds));
   };
 
-  const handleBatchDelete = async () => {
-    if (selectedAdIds.size === 0) return;
-    const ids = [...selectedAdIds];
-    const confirmed = await showConfirm({
-      title: `Delete ${ids.length} ad${ids.length > 1 ? "s" : ""}?`,
-      message: "This cannot be undone.",
-      confirmLabel: "Delete",
-    });
-    if (!confirmed) return;
+  const executeBatchDelete = async (adIds) => {
     const toastId = "batch-delete-ads";
-    appToast.info({ id: toastId, title: "Deleting ads…", duration: Infinity });
+    appToast.info({ id: toastId, title: "Deleting ads...", duration: Infinity });
     try {
-      const res = await fetch("/api/ads/bulk-action", {
+      const res = await fetchWithSessionAuth("/api/ads/bulk-action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", adIds: ids }),
+        body: JSON.stringify({ action: "delete", adIds }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to delete ads.");
       setDb(readDb());
       setSelectedAdIds(new Set());
       appToast.success({ title: "Ads deleted", description: data.message });
-    } catch (err) {
-      console.error("[AdsPage] Batch delete failed", err);
-      appToast.error({ title: "Delete failed", description: err.message });
+    } catch (error) {
+      console.error("[AdsPage] Batch delete failed", error);
+      appToast.error({
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "Failed to delete ads.",
+      });
     } finally {
       appToast.dismiss(toastId);
     }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedAdIds.size === 0) return;
+    const ids = [...selectedAdIds];
+    appToast.warning({
+      id: "confirm-batch-delete-ads",
+      title: `Delete ${ids.length} ad${ids.length > 1 ? "s" : ""}?`,
+      description: "This cannot be undone.",
+      duration: 8000,
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void executeBatchDelete(ids);
+        },
+      },
+    });
   };
 
   const handleNavigate = (section) => {
@@ -6474,7 +6586,9 @@ export default function AdsPage() {
                                 {item.invoice_number || item.id}
                               </p>
                               <p className="mt-0.5 text-xs text-gray-500">
-                                {advertisers.find((adv) => adv.id === item.advertiser_id)
+                                {advertisers.find(
+                                  (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+                                )
                                   ?.advertiser_name || "-"}
                               </p>
                             </div>
@@ -7246,11 +7360,9 @@ export default function AdsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm("Delete this message?")) {
-                              handleWhatsAppDelete(selectedWhatsAppMessage.id);
-                            }
-                          }}
+                          onClick={() =>
+                            handleConfirmWhatsAppDelete(selectedWhatsAppMessage.id)
+                          }
                           className="px-3 py-2 bg-white text-red-700 text-sm font-medium rounded-lg border border-red-200 hover:bg-red-50 transition-colors inline-flex items-center gap-1.5"
                         >
                           <Trash2 size={14} />
@@ -9383,11 +9495,18 @@ export default function AdsPage() {
                         {filteredInvoices.map((item) => {
                           const advertiserName =
                             item.advertiser_name ||
-                            advertisers.find((adv) => adv.id === item.advertiser_id)
+                            advertisers.find(
+                              (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+                            )
                               ?.advertiser_name ||
                             "-";
                           const status = normalizeInvoiceStatus(item.status);
-                          const itemCount = Array.isArray(item.ad_ids) ? item.ad_ids.length : 0;
+                          const itemCount =
+                            Array.isArray(item.ad_ids) && item.ad_ids.length > 0
+                              ? item.ad_ids.length
+                              : Array.isArray(item.items)
+                                ? item.items.length
+                                : 0;
                           return (
                             <tr
                               key={item.id}
@@ -9841,13 +9960,19 @@ export default function AdsPage() {
                               <span className="truncate text-gray-700">{item.ad_name}</span>
                               <input
                                 type="checkbox"
-                                checked={invoice.ad_ids.includes(item.id)}
+                                checked={invoice.ad_ids.some(
+                                  (id) => String(id || "") === String(item.id || ""),
+                                )}
                                 onChange={() =>
                                   setInvoice((current) => ({
                                     ...current,
-                                    ad_ids: current.ad_ids.includes(item.id)
-                                      ? current.ad_ids.filter((id) => id !== item.id)
-                                      : [...current.ad_ids, item.id],
+                                    ad_ids: current.ad_ids.some(
+                                      (id) => String(id || "") === String(item.id || ""),
+                                    )
+                                      ? current.ad_ids.filter(
+                                        (id) => String(id || "") !== String(item.id || ""),
+                                      )
+                                      : [...current.ad_ids, String(item.id || "")],
                                   }))
                                 }
                               />

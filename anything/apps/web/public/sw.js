@@ -52,6 +52,14 @@ self.addEventListener('fetch', (event) => {
     // 3. API routes — always network-only, never intercept
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/_create/')) return;
 
+    // 3b. Dev/HMR routes — never intercept
+    if (
+        url.pathname.startsWith('/@vite/') ||
+        url.pathname.startsWith('/@id/') ||
+        url.pathname.startsWith('/src/') ||
+        url.pathname.startsWith('/node_modules/')
+    ) return;
+
     // 4. Static assets (JS, CSS, fonts, images) — stale-while-revalidate
     if (isStaticAsset(url.pathname)) {
         event.respondWith(staleWhileRevalidate(request, ASSET_CACHE));

@@ -15,7 +15,7 @@ export async function POST(request) {
         viewed_by_admin: true,
         updated_at: new Date().toISOString(),
       })
-      .eq("status", "pending")
+      .in("status", ["pending", "Pending"])
       .eq("viewed_by_admin", false);
 
     if (error) throw error;

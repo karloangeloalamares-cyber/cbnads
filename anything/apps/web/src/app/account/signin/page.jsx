@@ -4,17 +4,40 @@ import { useEffect, useState } from "react";
 import {
   completeOAuthSignIn,
   getSignedInUser,
-  requestPasswordReset,
   signIn,
   signInWithGoogle,
   signOut,
 } from "@/lib/localAuth";
 import { ensureDb } from "@/lib/localDb";
+import { getSupabaseClient, hasSupabaseConfig, publicAppUrl } from "@/lib/supabase";
 import { appToast } from "@/lib/toast";
 
 const getDefaultRedirectForUser = (user) => {
   const role = String(user?.role || "").trim().toLowerCase();
   return role === "advertiser" ? "/ads?section=Dashboard" : "/ads?section=Dashboard";
+};
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+const requestPasswordResetEmail = async ({ email }) => {
+  if (!hasSupabaseConfig) {
+    throw new Error("Password reset is unavailable right now.");
+  }
+
+  const supabase = getSupabaseClient();
+  const fallbackAppUrl = String(publicAppUrl || "").trim();
+  const redirectBase =
+    (typeof window !== "undefined" && window.location?.origin) || fallbackAppUrl;
+  const redirectTo = `${redirectBase}/account/reset-password`;
+
+  const { error } = await supabase.auth.resetPasswordForEmail(normalizeEmail(email), {
+    redirectTo,
+  });
+  if (error) {
+    throw new Error(error.message || "Unable to send password reset email.");
+  }
+
+  return { ok: true };
 };
 
 const resolveRedirectTarget = (user, params) => {
@@ -170,10 +193,11 @@ export default function SignInPage() {
     }
     setForgotLoading(true);
     try {
-      await requestPasswordReset({ email: forgotEmail });
+      await requestPasswordResetEmail({ email: forgotEmail });
       setForgotSent(true);
     } catch (err) {
       console.error("Forgot password error:", err);
+      setForgotError(err instanceof Error ? err.message : "Unable to send reset email.");
     } finally {
       setForgotLoading(false);
     }

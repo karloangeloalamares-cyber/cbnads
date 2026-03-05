@@ -171,6 +171,26 @@ npx vercel --prod --yes
    - local storage keys
    - future storage buckets
 
+## Recent Fixes (March 5, 2026)
+
+1. Destructive actions in Ads UI now use app toasts (no browser `window.confirm` dialogs):
+   - batch ad delete
+   - WhatsApp message delete
+   - team member remove
+   - Telegram chat ID delete
+2. Batch ad delete must use authenticated fetch helper (`fetchWithSessionAuth`) to avoid `401 Unauthorized` in `/api/ads/bulk-action`.
+3. Local dev HMR stability:
+   - service worker is disabled/unregistered on localhost
+   - dev service worker excludes Vite/HMR paths (`/@vite/`, `/@id/`, `/src/`, `/node_modules/`)
+4. Submission notifications are now faster and cross-tab aware:
+   - unread polling interval reduced to 10 seconds
+   - public submit flow emits `cbn:pending-submission-created` (custom event + localStorage ping)
+   - notification hook listens for that signal and refreshes unread count immediately
+   - admin unread/mark-read endpoints now accept both `pending` and `Pending` status values
+5. Important behavior rule:
+   - bell/Submissions badges track new **pending submissions** (`pending_ads` via `/submit-ad`)
+   - admin "Create new ad" in Ads section creates an ad record directly and now emits a local notification signal (`admin-created-ad`) so bell/Submissions badges and toast still update without creating a new pending submission row
+
 ## Audit and Debug Personas
 
 Skills live in:
@@ -234,4 +254,3 @@ Skill:
 2. Frontend code quality and behavior pass (`frontend-audit`)
 3. Backend/API and schema pass (`backend-audit`)
 4. Focused issue isolation and fix verification (`debugger-workflow`)
-

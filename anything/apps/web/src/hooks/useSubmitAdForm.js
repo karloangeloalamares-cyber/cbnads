@@ -15,6 +15,9 @@ import {
 import { appToast } from "@/lib/toast";
 import { useAccountSetup } from "./useAccountSetup";
 
+const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
+const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
+
 const initialFormData = {
   advertiser_name: "",
   contact_name: "",
@@ -49,6 +52,38 @@ export function useSubmitAdForm() {
   const availabilityRequestIdRef = useRef(0);
 
   const account = useAccountSetup();
+
+  const emitSubmissionCreatedSignal = useCallback(
+    (pendingSubmissionId = "", source = "public-submit-ad") => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      const eventPayload = {
+        source: String(source || "").trim() || "public-submit-ad",
+        id: String(pendingSubmissionId || "").trim() || null,
+        timestamp: Date.now(),
+      };
+
+      try {
+        window.dispatchEvent(
+          new CustomEvent(SUBMISSION_NOTIFICATION_EVENT, { detail: eventPayload }),
+        );
+      } catch {
+        // Ignore local event dispatch failures.
+      }
+
+      try {
+        window.localStorage.setItem(
+          SUBMISSION_NOTIFICATION_STORAGE_KEY,
+          JSON.stringify(eventPayload),
+        );
+      } catch {
+        // Ignore storage write failures (private mode/quota/etc).
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     formDataRef.current = formData;
@@ -327,9 +362,11 @@ export function useSubmitAdForm() {
 
       const data = await response.json();
       const nextSubmittedData = { ...formData, post_time: timeWithSeconds };
+      const createdPendingAdId = String(data?.pending_ad?.id || "").trim();
 
       setSubmittedData(nextSubmittedData);
-      setPendingAdId(data?.pending_ad?.id || "");
+      setPendingAdId(createdPendingAdId);
+      emitSubmissionCreatedSignal(createdPendingAdId);
       account.initAccount(formData.email);
       setPhase("account");
       setFormData(initialFormData);

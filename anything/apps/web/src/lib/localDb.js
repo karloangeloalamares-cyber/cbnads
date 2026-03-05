@@ -34,6 +34,12 @@ const numberOrZero = (value) => {
 };
 
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
+const normalizeId = (value) => String(value || '').trim();
+const sameId = (left, right) => {
+  const normalizedLeft = normalizeId(left);
+  const normalizedRight = normalizeId(right);
+  return normalizedLeft && normalizedLeft === normalizedRight;
+};
 
 const isBrowser = () => typeof window !== 'undefined';
 
@@ -504,20 +510,28 @@ const repairDbReferences = (inputDb) => {
     };
   });
 
-  db.invoices = db.invoices.map((invoice) => ({
-    ...invoice,
-    ad_ids: toArray(invoice?.ad_ids).filter((id) =>
-      adIds.has(String(id || '').trim()),
-    ),
-    items: toArray(invoice?.items).map((item) => ({
+  db.invoices = db.invoices.map((invoice) => {
+    const explicitAdIds = toArray(invoice?.ad_ids)
+      .map((id) => normalizeId(id))
+      .filter((id) => adIds.has(id));
+    const items = toArray(invoice?.items).map((item) => ({
       ...item,
       invoice_id: invoice.id,
-      ad_id: adIds.has(String(item?.ad_id || '').trim()) ? item.ad_id : null,
-      product_id: productIds.has(String(item?.product_id || '').trim())
+      ad_id: adIds.has(normalizeId(item?.ad_id)) ? item.ad_id : null,
+      product_id: productIds.has(normalizeId(item?.product_id))
         ? item.product_id
         : null,
-    })),
-  }));
+    }));
+    const itemAdIds = items
+      .map((item) => normalizeId(item?.ad_id))
+      .filter(Boolean);
+
+    return {
+      ...invoice,
+      ad_ids: explicitAdIds.length > 0 ? explicitAdIds : [...new Set(itemAdIds)],
+      items,
+    };
+  });
 
   return db;
 };
@@ -784,17 +798,8 @@ const toPendingAdRow = (input) => ({
   updated_at: input.updated_at || nowIso(),
 });
 
-const fromInvoiceRow = (row) => ({
-  id: row.id,
-  invoice_number: row.invoice_number || '',
-  advertiser_id: row.advertiser_id || '',
-  advertiser_name: row.advertiser_name || '',
-  amount: toMoney(row.amount),
-  due_date: toDateOnly(row.due_date),
-  status: row.status || 'Unpaid',
-  paid_date: toDateOnly(row.paid_date),
-  ad_ids: toArray(row.ad_ids).filter(Boolean),
-  items: toArray(row.items).map((item) => ({
+const fromInvoiceRow = (row) => {
+  const items = toArray(row.items).map((item) => ({
     id: item.id || createId(),
     invoice_id: item.invoice_id || row.id,
     ad_id: item.ad_id || null,
@@ -804,23 +809,39 @@ const fromInvoiceRow = (row) => ({
     unit_price: toMoney(item.unit_price),
     amount: toMoney(item.amount),
     created_at: item.created_at || row.created_at || nowIso(),
-  })),
-  contact_name: row.contact_name || '',
-  contact_email: row.contact_email || '',
-  bill_to: row.bill_to || '',
-  issue_date: toDateOnly(row.issue_date),
-  discount: toMoney(row.discount),
-  tax: toMoney(row.tax),
-  total: toMoney(row.total),
-  notes: row.notes || '',
-  amount_paid: toMoney(row.amount_paid),
-  deleted_at: row.deleted_at || null,
-  is_recurring: Boolean(row.is_recurring),
-  recurring_period: row.recurring_period || '',
-  last_generated_at: row.last_generated_at || null,
-  created_at: row.created_at || nowIso(),
-  updated_at: row.updated_at || nowIso(),
-});
+  }));
+  const explicitAdIds = toArray(row.ad_ids).map((id) => normalizeId(id)).filter(Boolean);
+  const itemAdIds = items.map((item) => normalizeId(item.ad_id)).filter(Boolean);
+  const adIds = explicitAdIds.length > 0 ? explicitAdIds : [...new Set(itemAdIds)];
+
+  return {
+    id: row.id,
+    invoice_number: row.invoice_number || '',
+    advertiser_id: row.advertiser_id || '',
+    advertiser_name: row.advertiser_name || '',
+    amount: toMoney(row.amount),
+    due_date: toDateOnly(row.due_date),
+    status: row.status || 'Unpaid',
+    paid_date: toDateOnly(row.paid_date),
+    ad_ids: adIds,
+    items,
+    contact_name: row.contact_name || '',
+    contact_email: row.contact_email || '',
+    bill_to: row.bill_to || '',
+    issue_date: toDateOnly(row.issue_date),
+    discount: toMoney(row.discount),
+    tax: toMoney(row.tax),
+    total: toMoney(row.total),
+    notes: row.notes || '',
+    amount_paid: toMoney(row.amount_paid),
+    deleted_at: row.deleted_at || null,
+    is_recurring: Boolean(row.is_recurring),
+    recurring_period: row.recurring_period || '',
+    last_generated_at: row.last_generated_at || null,
+    created_at: row.created_at || nowIso(),
+    updated_at: row.updated_at || nowIso(),
+  };
+};
 
 const toInvoiceRow = (input) => ({
   id: input.id || createId(),
@@ -1487,17 +1508,19 @@ export const upsertAd = async (input) => {
       input,
       'paid_via_invoice_id',
     );
-    const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
-    const product = db.products.find((item) => item.id === input.product_id);
+    const normalizedAdvertiserId = normalizeId(input.advertiser_id);
+    const normalizedProductId = normalizeId(input.product_id);
+    const advertiser = db.advertisers.find((item) => sameId(item.id, normalizedAdvertiserId));
+    const product = db.products.find((item) => sameId(item.id, normalizedProductId));
     const postDate = toDateOnly(input.post_date || input.schedule || input.post_date_from);
     const paidViaInvoiceId = input.paid_via_invoice_id || input.invoice_id || null;
     const resolvedPrice = toMoney(input.price || product?.price || 0);
     const payload = {
       id: input.id || createId('ad'),
       ad_name: (input.ad_name || '').trim(),
-      advertiser_id: input.advertiser_id || '',
+      advertiser_id: normalizedAdvertiserId || '',
       advertiser: advertiser?.advertiser_name || input.advertiser || '',
-      product_id: input.product_id || '',
+      product_id: normalizedProductId || '',
       product_name: product?.product_name || input.product_name || '',
       post_type: normalizePostType(input.post_type || 'one_time'),
       status: input.status || 'Draft',
@@ -1526,7 +1549,7 @@ export const upsertAd = async (input) => {
       updated_at: now,
     };
 
-    const index = db.ads.findIndex((item) => item.id === payload.id);
+    const index = db.ads.findIndex((item) => sameId(item.id, payload.id));
     if (index === -1) {
       db.ads.unshift(payload);
     } else {
@@ -1545,26 +1568,62 @@ export const upsertAd = async (input) => {
 };
 
 export const deleteAd = async (adId) => {
+  const normalizedAdId = normalizeId(adId);
+  if (!normalizedAdId) {
+    return;
+  }
+
   await updateDb((db) => {
-    db.ads = db.ads.filter((item) => item.id !== adId);
-    db.invoices = db.invoices.map((invoice) => ({
-      ...invoice,
-      ad_ids: (invoice.ad_ids || []).filter((id) => id !== adId),
-    }));
+    db.ads = db.ads.filter(
+      (item) => !sameId(item?.id, normalizedAdId),
+    );
+    db.invoices = db.invoices.map((invoice) => {
+      const remainingItems = (invoice.items || []).filter(
+        (item) => !sameId(item?.ad_id, normalizedAdId),
+      );
+      const subtotal = remainingItems.reduce((sum, item) => sum + numberOrZero(item?.amount), 0);
+      const nextTotal = toMoney(
+        subtotal - numberOrZero(invoice.discount) + numberOrZero(invoice.tax),
+      );
+
+      return {
+        ...invoice,
+        ad_ids: (invoice.ad_ids || []).filter(
+          (id) => !sameId(id, normalizedAdId),
+        ),
+        items: remainingItems,
+        amount: nextTotal,
+        total: nextTotal,
+        amount_paid: normalizeText(invoice.status) === 'paid' ? nextTotal : invoice.amount_paid,
+        updated_at: nowIso(),
+      };
+    });
     return db;
   });
 };
 
 export const updateAdStatus = async (adId, status) => {
+  const normalizedAdId = normalizeId(adId);
+  if (!normalizedAdId) {
+    return;
+  }
   await updateDb((db) => {
-    db.ads = db.ads.map((ad) => (ad.id === adId ? { ...ad, status, updated_at: nowIso() } : ad));
+    db.ads = db.ads.map((ad) =>
+      sameId(ad.id, normalizedAdId) ? { ...ad, status, updated_at: nowIso() } : ad
+    );
     return db;
   });
 };
 
 export const updateAdPayment = async (adId, payment) => {
+  const normalizedAdId = normalizeId(adId);
+  if (!normalizedAdId) {
+    return;
+  }
   await updateDb((db) => {
-    db.ads = db.ads.map((ad) => (ad.id === adId ? { ...ad, payment, updated_at: nowIso() } : ad));
+    db.ads = db.ads.map((ad) =>
+      sameId(ad.id, normalizedAdId) ? { ...ad, payment, updated_at: nowIso() } : ad
+    );
     return db;
   });
 };
@@ -1694,23 +1753,25 @@ export const deletePendingAd = async (pendingAdId) => {
 };
 
 const applyInvoiceLinks = (db, invoiceId, previousAdIds, nextAdIds, invoiceStatus) => {
-  const previous = new Set(previousAdIds);
-  const next = new Set(nextAdIds);
+  const normalizedInvoiceId = normalizeId(invoiceId);
+  const previous = new Set(toArray(previousAdIds).map((id) => normalizeId(id)).filter(Boolean));
+  const next = new Set(toArray(nextAdIds).map((id) => normalizeId(id)).filter(Boolean));
   const nextPaymentStatus =
     normalizeText(invoiceStatus) === 'paid' ? 'Paid' : 'Pending';
 
   db.ads = db.ads.map((ad) => {
-    if (next.has(ad.id)) {
+    const normalizedAdId = normalizeId(ad?.id);
+    if (next.has(normalizedAdId)) {
       return {
         ...ad,
-        invoice_id: invoiceId,
-        paid_via_invoice_id: invoiceId,
+        invoice_id: normalizedInvoiceId,
+        paid_via_invoice_id: normalizedInvoiceId,
         payment: nextPaymentStatus,
         updated_at: nowIso(),
       };
     }
 
-    if (previous.has(ad.id) && ad.invoice_id === invoiceId) {
+    if (previous.has(normalizedAdId) && sameId(ad.invoice_id, normalizedInvoiceId)) {
       return {
         ...ad,
         invoice_id: null,
@@ -1728,17 +1789,24 @@ export const upsertInvoice = async (input) => {
   let saved = null;
   await updateDb((db) => {
     const now = nowIso();
-    const invoiceId = input.id || createId('inv');
-    const adIds = Array.isArray(input.ad_ids) ? input.ad_ids.filter(Boolean) : [];
-    const advertiser = db.advertisers.find((item) => item.id === input.advertiser_id);
-    const existing = db.invoices.find((item) => item.id === invoiceId);
+    const invoiceId = normalizeId(input.id) || createId('inv');
+    const adIds = Array.from(
+      new Set(
+        toArray(input.ad_ids)
+          .map((adId) => normalizeId(adId))
+          .filter(Boolean),
+      ),
+    );
+    const normalizedAdvertiserId = normalizeId(input.advertiser_id);
+    const advertiser = db.advertisers.find((item) => sameId(item.id, normalizedAdvertiserId));
+    const existing = db.invoices.find((item) => sameId(item.id, invoiceId));
     const previousAdIds = existing?.ad_ids || [];
     const selectedAds = adIds
-      .map((adId) => db.ads.find((item) => item.id === adId))
+      .map((adId) => db.ads.find((item) => sameId(item.id, adId)))
       .filter(Boolean);
     const derivedItems = selectedAds.map((adItem) => ({
       id:
-        existing?.items?.find((item) => item.ad_id === adItem.id)?.id ||
+        existing?.items?.find((item) => sameId(item.ad_id, adItem.id))?.id ||
         createId('inv_item'),
       invoice_id: invoiceId,
       ad_id: adItem.id,
@@ -1750,7 +1818,7 @@ export const upsertInvoice = async (input) => {
       unit_price: toMoney(adItem.price),
       amount: toMoney(adItem.price),
       created_at:
-        existing?.items?.find((item) => item.ad_id === adItem.id)?.created_at || now,
+        existing?.items?.find((item) => sameId(item.ad_id, adItem.id))?.created_at || now,
     }));
     const items = Array.isArray(input.items) && input.items.length > 0 ? input.items : derivedItems;
     const subtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
@@ -1767,7 +1835,7 @@ export const upsertInvoice = async (input) => {
         existing?.invoice_number ||
         (input.invoice_number || '').trim() ||
         `INV-${Date.now().toString().slice(-6)}`,
-      advertiser_id: input.advertiser_id || '',
+      advertiser_id: normalizedAdvertiserId || '',
       advertiser_name: advertiser?.advertiser_name || input.advertiser_name || '',
       amount: total,
       due_date: toDateOnly(input.due_date),
@@ -1795,7 +1863,7 @@ export const upsertInvoice = async (input) => {
       updated_at: now,
     };
 
-    const index = db.invoices.findIndex((item) => item.id === invoiceId);
+    const index = db.invoices.findIndex((item) => sameId(item.id, invoiceId));
     if (index === -1) {
       db.invoices.unshift(payload);
     } else {
@@ -1810,11 +1878,16 @@ export const upsertInvoice = async (input) => {
 };
 
 export const deleteInvoice = async (invoiceId) => {
+  const normalizedInvoiceId = normalizeId(invoiceId);
+  if (!normalizedInvoiceId) {
+    return;
+  }
+
   await updateDb((db) => {
-    const invoice = db.invoices.find((item) => item.id === invoiceId);
+    const invoice = db.invoices.find((item) => sameId(item.id, normalizedInvoiceId));
     const linkedAdIds = invoice?.ad_ids || [];
-    db.invoices = db.invoices.filter((item) => item.id !== invoiceId);
-    applyInvoiceLinks(db, invoiceId, linkedAdIds, [], 'Unpaid');
+    db.invoices = db.invoices.filter((item) => !sameId(item.id, normalizedInvoiceId));
+    applyInvoiceLinks(db, normalizedInvoiceId, linkedAdIds, [], 'Unpaid');
     return db;
   });
 };
@@ -1919,7 +1992,7 @@ export const getReconciliationReport = () => {
   const discrepancies = db.invoices
     .map((invoice) => {
       const invoiceAdTotal = (invoice.ad_ids || []).reduce((total, adId) => {
-        const ad = db.ads.find((item) => item.id === adId);
+        const ad = db.ads.find((item) => sameId(item.id, adId));
         return total + numberOrZero(ad?.price);
       }, 0);
       const invoiceTotal = numberOrZero(invoice.amount);

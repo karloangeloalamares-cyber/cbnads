@@ -131,10 +131,39 @@ export function Layout({ children }: { children: React.ReactNode }) {
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
+                const isLocalDevHost =
+                  location.hostname === 'localhost' ||
+                  location.hostname === '127.0.0.1' ||
+                  location.hostname === '0.0.0.0';
+
+                if (isLocalDevHost) {
+                  navigator.serviceWorker.getRegistrations()
+                    .then(function (registrations) {
+                      return Promise.all(
+                        registrations.map(function (registration) {
+                          return registration.unregister();
+                        }),
+                      );
+                    })
+                    .catch(function () {});
+
+                  if ('caches' in window) {
+                    caches.keys()
+                      .then(function (keys) {
+                        return Promise.all(
+                          keys
+                            .filter(function (key) { return key.startsWith('cbn-ads-'); })
+                            .map(function (key) { return caches.delete(key); }),
+                        );
+                      })
+                      .catch(function () {});
+                  }
+                } else {
                 window.addEventListener('load', function () {
                   navigator.serviceWorker.register('/sw.js', { scope: '/' })
                     .catch(function (err) { console.warn('[SW] Registration failed:', err); });
                 });
+                }
               }
             `,
           }}
