@@ -53,29 +53,56 @@ export const expandDateRange = (from, to) => {
   return dates;
 };
 
+// Module-level cache for max-ads-per-day (rarely changes, refreshed every 5 min)
+let _maxAdsCache = null;
+let _maxAdsCacheExpiry = 0;
+
 const getMaxAdsPerDay = async (supabase) => {
+  const now = Date.now();
+  if (_maxAdsCache !== null && now < _maxAdsCacheExpiry) {
+    return _maxAdsCache;
+  }
   const { data: settingsRows, error: settingsError } = await supabase
     .from(table("admin_settings"))
-    .select("*")
+    .select("max_ads_per_day, max_ads_per_slot")
     .order("id", { ascending: true })
     .limit(1);
   if (settingsError) throw settingsError;
 
-  return (
+  const value =
     toNumber(settingsRows?.[0]?.max_ads_per_day, 0) ||
     toNumber(settingsRows?.[0]?.max_ads_per_slot, 0) ||
-    5
-  );
+    5;
+  _maxAdsCache = value;
+  _maxAdsCacheExpiry = now + 5 * 60 * 1000; // 5 minutes
+  return value;
 };
 
-const getScheduledRecords = async (supabase) => {
+// Build a query for scheduled records filtered to dates that could overlap [minDate, maxDate].
+// - One-time/custom posts with post_date_from in range are included.
+// - Daily runs still active (post_date_to >= minDate or no end date) are included.
+// - Records with null post_date_to are always included (custom schedules, ongoing daily runs).
+// The JS-level includesDate() check is the authoritative filter; this just reduces fetch size.
+const getScheduledRecords = async (supabase, { minDate, maxDate } = {}) => {
+  const buildQuery = (tableName) => {
+    let q = supabase
+      .from(tableName)
+      .select("id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time");
+
+    if (minDate) {
+      const max = maxDate || minDate;
+      // Include if: date_from is in [minDate, max] OR post_date_to >= minDate OR no end date
+      q = q.or(
+        `and(post_date_from.gte.${minDate},post_date_from.lte.${max}),post_date_to.gte.${minDate},post_date_to.is.null`,
+      );
+    }
+
+    return q;
+  };
+
   const [adsResult, pendingResult] = await Promise.all([
-    supabase
-      .from(table("ads"))
-      .select("id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time"),
-    supabase
-      .from(table("pending_ads"))
-      .select("id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time"),
+    buildQuery(table("ads")),
+    buildQuery(table("pending_ads")),
   ]);
 
   if (adsResult.error) throw adsResult.error;
@@ -101,7 +128,7 @@ export const checkSingleDateAvailability = async ({
 
   const [maxAdsPerDay, scheduledItems] = await Promise.all([
     getMaxAdsPerDay(supabase),
-    getScheduledRecords(supabase),
+    getScheduledRecords(supabase, { minDate: targetDate, maxDate: targetDate }),
   ]);
 
   const visibleItems = scheduledItems.filter((item) => !isExcluded(item, excludeId));
@@ -128,7 +155,7 @@ export const checkSingleDateAvailability = async ({
       limit: maxAdsPerDay,
       bookedCount: totalAdsOnDate,
       reason,
-      tooltip: isDayFull ? "Ad limit reached" : isTimeBlocked ? "Time slot already booked" : null,
+      tooltip: isDayFull ? "All slots are taken on that day" : isTimeBlocked ? "Time slot already booked" : null,
       blocked_times: Array.from(blockedTimes),
       total_ads_on_date: totalAdsOnDate,
       max_ads_per_day: maxAdsPerDay,
@@ -143,7 +170,7 @@ export const checkSingleDateAvailability = async ({
     limit: maxAdsPerDay,
     bookedCount: totalAdsOnDate,
     reason: isDayFull ? "limit_reached" : null,
-    tooltip: isDayFull ? "Ad limit reached" : null,
+    tooltip: isDayFull ? "All slots are taken on that day" : null,
     total_ads_on_date: totalAdsOnDate,
     max_ads_per_day: maxAdsPerDay,
     is_day_full: isDayFull,
@@ -162,9 +189,13 @@ export const checkBatchAvailability = async ({
     return { results: {}, max_ads_per_day: 5 };
   }
 
+  const sortedDates = [...normalizedDates].sort();
+  const minDate = sortedDates[0];
+  const maxDate = sortedDates[sortedDates.length - 1];
+
   const [maxAdsPerDay, scheduledItems] = await Promise.all([
     getMaxAdsPerDay(supabase),
-    getScheduledRecords(supabase),
+    getScheduledRecords(supabase, { minDate, maxDate }),
   ]);
 
   const visibleItems = scheduledItems.filter((item) => !isExcluded(item, excludeId));
@@ -181,7 +212,7 @@ export const checkBatchAvailability = async ({
       total_ads_on_date: totalAdsOnDate,
       max_ads_per_day: maxAdsPerDay,
       is_full: isFull,
-      tooltip: isFull ? "Ad limit reached" : null,
+      tooltip: isFull ? "All slots are taken on that day" : null,
     };
   }
 

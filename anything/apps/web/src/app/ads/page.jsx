@@ -2077,6 +2077,7 @@ export default function AdsPage() {
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
   const [pendingSubmissionApproveIds, setPendingSubmissionApproveIds] = useState([]);
   const [selectedAdIds, setSelectedAdIds] = useState(new Set());
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(new Set());
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
       return "Dashboard";
@@ -3680,58 +3681,37 @@ export default function AdsPage() {
       const todayKey = getTodayInAppTimeZone();
 
       return [...filteredAds].sort((left, right) => {
-        const leftScheduleDate = parseCalendarDate(left.schedule);
-        const rightScheduleDate = parseCalendarDate(right.schedule);
-        const leftNeedsAction = isAdsActionRequired(left.status);
-        const rightNeedsAction = isAdsActionRequired(right.status);
-        const leftIsToday =
-          leftScheduleDate && toDateKey(leftScheduleDate) === todayKey;
-        const rightIsToday =
-          rightScheduleDate && toDateKey(rightScheduleDate) === todayKey;
+        const leftDate = parseCalendarDate(left.schedule);
+        const rightDate = parseCalendarDate(right.schedule);
+        const leftDateKey = leftDate ? toDateKey(leftDate) : null;
+        const rightDateKey = rightDate ? toDateKey(rightDate) : null;
 
-        const leftPriorityGroup = leftIsToday && leftNeedsAction ? 0 : leftNeedsAction ? 1 : 2;
-        const rightPriorityGroup = rightIsToday && rightNeedsAction ? 0 : rightNeedsAction ? 1 : 2;
+        // Groups: 0 = today, 1 = future, 2 = past, 3 = no date
+        const dateGroup = (dateKey) =>
+          dateKey === todayKey ? 0 : dateKey > todayKey ? 1 : dateKey ? 2 : 3;
+        const leftGroup = dateGroup(leftDateKey);
+        const rightGroup = dateGroup(rightDateKey);
 
-        if (leftPriorityGroup !== rightPriorityGroup) {
-          return leftPriorityGroup - rightPriorityGroup;
-        }
+        if (leftGroup !== rightGroup) return leftGroup - rightGroup;
 
-        if (leftPriorityGroup === 0) {
-          const leftTime = parseAdsTimeToMinutes(left.post_time);
-          const rightTime = parseAdsTimeToMinutes(right.post_time);
-          if (leftTime == null && rightTime != null) return 1;
-          if (rightTime == null && leftTime != null) return -1;
-          if (leftTime != null && rightTime != null && leftTime !== rightTime) {
-            return rightTime - leftTime;
-          }
-        }
+        if (leftGroup <= 1) {
+          // Today or future: sort by date asc, then time asc (soonest first)
+          const leftDateVal = leftDate?.valueOf() ?? Infinity;
+          const rightDateVal = rightDate?.valueOf() ?? Infinity;
+          if (leftDateVal !== rightDateVal) return leftDateVal - rightDateVal;
 
-        const leftStatusPriority = getAdsStatusPriority(left.status);
-        const rightStatusPriority = getAdsStatusPriority(right.status);
-        if (leftStatusPriority !== rightStatusPriority) {
-          return leftStatusPriority - rightStatusPriority;
-        }
+          const leftTime = parseAdsTimeToMinutes(left.post_time) ?? Infinity;
+          const rightTime = parseAdsTimeToMinutes(right.post_time) ?? Infinity;
+          if (leftTime !== rightTime) return leftTime - rightTime;
+        } else if (leftGroup === 2) {
+          // Past: most recent first
+          const leftDateVal = leftDate?.valueOf() ?? 0;
+          const rightDateVal = rightDate?.valueOf() ?? 0;
+          if (leftDateVal !== rightDateVal) return rightDateVal - leftDateVal;
 
-        const leftScheduleValue = leftScheduleDate?.valueOf();
-        const rightScheduleValue = rightScheduleDate?.valueOf();
-        if (leftScheduleValue == null && rightScheduleValue != null) return 1;
-        if (rightScheduleValue == null && leftScheduleValue != null) return -1;
-        if (
-          leftScheduleValue != null &&
-          rightScheduleValue != null &&
-          leftScheduleValue !== rightScheduleValue
-        ) {
-          return leftPriorityGroup === 1
-            ? leftScheduleValue - rightScheduleValue
-            : rightScheduleValue - leftScheduleValue;
-        }
-
-        const leftTime = parseAdsTimeToMinutes(left.post_time);
-        const rightTime = parseAdsTimeToMinutes(right.post_time);
-        if (leftTime == null && rightTime != null) return 1;
-        if (rightTime == null && leftTime != null) return -1;
-        if (leftTime != null && rightTime != null && leftTime !== rightTime) {
-          return leftPriorityGroup === 2 ? rightTime - leftTime : leftTime - rightTime;
+          const leftTime = parseAdsTimeToMinutes(left.post_time) ?? -1;
+          const rightTime = parseAdsTimeToMinutes(right.post_time) ?? -1;
+          if (leftTime !== rightTime) return rightTime - leftTime;
         }
 
         return String(left.ad_name || "").localeCompare(String(right.ad_name || ""));
@@ -5787,6 +5767,63 @@ export default function AdsPage() {
         current.filter((itemId) => itemId !== normalizedInvoiceId),
       );
     }
+  };
+
+  const handleToggleSelectInvoice = (invoiceId) => {
+    setSelectedInvoiceIds((prev) => {
+      const next = new Set(prev);
+      next.has(String(invoiceId)) ? next.delete(String(invoiceId)) : next.add(String(invoiceId));
+      return next;
+    });
+  };
+
+  const handleSelectAllInvoices = () => {
+    const allIds = filteredInvoices.map((i) => String(i.id));
+    const allSelected = allIds.length > 0 && allIds.every((id) => selectedInvoiceIds.has(id));
+    setSelectedInvoiceIds(allSelected ? new Set() : new Set(allIds));
+  };
+
+  const executeBatchDeleteInvoices = async (invoiceIds) => {
+    const toastId = "batch-delete-invoices";
+    appToast.info({ id: toastId, title: "Deleting invoices...", duration: Infinity });
+    try {
+      for (const id of invoiceIds) {
+        await deleteInvoice(id);
+      }
+      if (invoiceIds.includes(String(invoicePreviewModal?.id || "").trim())) {
+        setInvoicePreviewModal(null);
+      }
+      setDb(readDb());
+      setSelectedInvoiceIds(new Set());
+      appToast.success({
+        title: `${invoiceIds.length} invoice${invoiceIds.length > 1 ? "s" : ""} deleted`,
+      });
+    } catch (error) {
+      console.error("[AdsPage] Batch invoice delete failed", error);
+      appToast.error({
+        title: "Delete failed",
+        description: error instanceof Error ? error.message : "Failed to delete invoices.",
+      });
+    } finally {
+      appToast.dismiss(toastId);
+    }
+  };
+
+  const handleBatchDeleteInvoices = () => {
+    if (selectedInvoiceIds.size === 0) return;
+    const ids = [...selectedInvoiceIds];
+    appToast.warning({
+      id: "confirm-batch-delete-invoices",
+      title: `Delete ${ids.length} invoice${ids.length > 1 ? "s" : ""}?`,
+      description: "This cannot be undone.",
+      duration: 8000,
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void executeBatchDeleteInvoices(ids);
+        },
+      },
+    });
   };
 
   const saveInvoiceForm = async () => {
@@ -10051,11 +10088,46 @@ export default function AdsPage() {
                   ) : null}
                 </div>
               ) : (
+                <>
+                {isAdmin && selectedInvoiceIds.size > 0 && (
+                  <div className="mb-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
+                    <span className="text-sm text-gray-700 font-medium">
+                      {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size > 1 ? "s" : ""} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedInvoiceIds(new Set())}
+                      className="text-xs text-gray-500 hover:text-gray-900 transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <div className="ml-auto">
+                      <button
+                        type="button"
+                        onClick={handleBatchDeleteInvoices}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                      >
+                        <Trash2 size={13} />
+                        Delete {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size > 1 ? "s" : ""}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
+                          {isAdmin && (
+                            <th className="px-4 py-3 w-10">
+                              <input
+                                type="checkbox"
+                                checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedInvoiceIds.has(String(i.id)))}
+                                onChange={handleSelectAllInvoices}
+                                className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                              />
+                            </th>
+                          )}
                           <InvoiceSortableHeader
                             label="Invoice"
                             sortKey="invoice_number"
@@ -10109,6 +10181,19 @@ export default function AdsPage() {
                               className="hover:bg-gray-50 transition-colors cursor-pointer group"
                               onClick={() => openInvoicePreview(item)}
                             >
+                              {isAdmin && (
+                                <td
+                                  className="px-4 py-4"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedInvoiceIds.has(String(item.id))}
+                                    onChange={() => handleToggleSelectInvoice(item.id)}
+                                    className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                                  />
+                                </td>
+                              )}
                               <td className="px-6 py-4">
                                 <div className="text-xs font-semibold text-gray-900">
                                   #{item.invoice_number || item.id}
@@ -10240,6 +10325,7 @@ export default function AdsPage() {
                     </table>
                   </div>
                 </div>
+                </>
               )}
 
               {invoicePreviewModal ? (
@@ -10536,46 +10622,6 @@ export default function AdsPage() {
                         <option value="Pending">Pending</option>
                         <option value="Overdue">Overdue</option>
                       </select>
-                    </div>
-
-                    <div className="rounded-lg border border-gray-200 p-4 max-h-56 overflow-auto">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">
-                        Link Ads
-                      </p>
-                      <div className="space-y-2">
-                        {visibleAdsForInvoice.length === 0 ? (
-                          <p className="text-xs text-gray-500">
-                            No ads available for this advertiser.
-                          </p>
-                        ) : (
-                          visibleAdsForInvoice.map((item) => (
-                            <label
-                              key={item.id}
-                              className="flex items-center justify-between gap-3 text-xs"
-                            >
-                              <span className="truncate text-gray-700">{item.ad_name}</span>
-                              <input
-                                type="checkbox"
-                                checked={invoice.ad_ids.some(
-                                  (id) => String(id || "") === String(item.id || ""),
-                                )}
-                                onChange={() =>
-                                  setInvoice((current) => ({
-                                    ...current,
-                                    ad_ids: current.ad_ids.some(
-                                      (id) => String(id || "") === String(item.id || ""),
-                                    )
-                                      ? current.ad_ids.filter(
-                                        (id) => String(id || "") !== String(item.id || ""),
-                                      )
-                                      : [...current.ad_ids, String(item.id || "")],
-                                  }))
-                                }
-                              />
-                            </label>
-                          ))
-                        )}
-                      </div>
                     </div>
 
                     <div className="flex gap-3">

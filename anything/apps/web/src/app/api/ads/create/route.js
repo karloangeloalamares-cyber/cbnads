@@ -46,17 +46,32 @@ export async function POST(request) {
       );
     }
 
-    let advertiserLookup = supabase
+    // Run advertiser lookup, product lookup, and duplicate check in parallel
+    let advertiserQuery = supabase
       .from(table("advertisers"))
       .select("id, advertiser_name, status")
       .maybeSingle();
-    if (advertiser_id) {
-      advertiserLookup = advertiserLookup.eq("id", advertiser_id);
-    } else {
-      advertiserLookup = advertiserLookup.eq("advertiser_name", advertiser);
-    }
-    const { data: advertiserRow, error: advertiserError } = await advertiserLookup;
+    advertiserQuery = advertiser_id
+      ? advertiserQuery.eq("id", advertiser_id)
+      : advertiserQuery.eq("advertiser_name", advertiser);
+
+    const [
+      { data: advertiserRow, error: advertiserError },
+      { data: productRow, error: productError },
+      { data: candidateAds, error: candidateError },
+    ] = await Promise.all([
+      advertiserQuery,
+      product_id
+        ? supabase.from(table("products")).select("id, product_name, price").eq("id", product_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      !skip_duplicate_check
+        ? supabase.from(table("ads")).select("id, ad_name, status, post_type, schedule, post_date_from").eq("advertiser", advertiser).eq("placement", placement)
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+
     if (advertiserError) throw advertiserError;
+    if (productError) throw productError;
+    if (candidateError) throw candidateError;
 
     if (advertiserRow && String(advertiserRow.status || "").toLowerCase() === "inactive") {
       return Response.json(
@@ -67,34 +82,17 @@ export async function POST(request) {
       );
     }
 
-    let productRow = null;
-    if (product_id) {
-      const { data, error } = await supabase
-        .from(table("products"))
-        .select("id, product_name, price")
-        .eq("id", product_id)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) {
-        return Response.json({ error: "Selected product was not found" }, { status: 400 });
-      }
-      productRow = data;
+    if (product_id && !productRow) {
+      return Response.json({ error: "Selected product was not found" }, { status: 400 });
     }
 
-    // Duplicate check for same advertiser + placement + schedule intent.
-    if (!skip_duplicate_check) {
-      const { data: candidateAds, error: candidateError } = await supabase
-        .from(table("ads"))
-        .select("id, ad_name, status, post_type, schedule, post_date_from")
-        .eq("advertiser", advertiser)
-        .eq("placement", placement);
-      if (candidateError) throw candidateError;
-
+    // Duplicate check
+    if (!skip_duplicate_check && candidateAds) {
       const wantedType = normalizePostType(post_type);
       const wantedSchedule = dateOnly(schedule || post_date_from);
       const wantedFrom = dateOnly(post_date_from);
 
-      const duplicate = (candidateAds || []).find((ad) => {
+      const duplicate = candidateAds.find((ad) => {
         if (normalizePostType(ad.post_type) !== wantedType) return false;
         if (wantedType === "one_time") {
           return dateOnly(ad.schedule || ad.post_date_from) === wantedSchedule;
@@ -222,7 +220,10 @@ export async function POST(request) {
 
     if (createError) throw createError;
 
-    await updateAdvertiserNextAdDate(advertiser);
+    // Fire-and-forget: updates a cached field, slight staleness is acceptable
+    void updateAdvertiserNextAdDate(advertiser).catch((err) =>
+      console.error("[create-ad] updateAdvertiserNextAdDate failed:", err),
+    );
 
     return Response.json({ ad: createdAd });
   } catch (error) {

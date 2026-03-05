@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Clock, X, ChevronDown } from "lucide-react";
-import { fetchMonthAvailability } from "@/lib/adAvailabilityClient";
+import { fetchDateBlockedTimes, fetchMonthAvailability } from "@/lib/adAvailabilityClient";
 import { appToast } from "@/lib/toast";
 import {
   formatDateKeyFromDate,
@@ -9,10 +9,17 @@ import {
 } from "@/lib/timezone";
 
 const HOURS = Array.from({ length: 12 }).map((_, i) => String(i === 0 ? 12 : i));
-const MINUTES = ["00", "15", "30", "45"];
+const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
 const PERIODS = ["AM", "PM"];
 
-function TimeSelect({ value, onChange, onBlur, required }) {
+// Convert a 12-hour display value + period to 24-hour integer
+const to24Hour = (h12str, period) => {
+  const h = parseInt(h12str, 10);
+  if (period === "AM") return h === 12 ? 0 : h;
+  return h === 12 ? 12 : h + 12;
+};
+
+function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [], minTime = null }) {
   // value is expected to be "HH:MM" (24-hour format)
   const currentHour24 = value ? parseInt(value.split(":")[0], 10) : null;
   const currentMinute = value ? value.split(":")[1] : "";
@@ -21,6 +28,49 @@ function TimeSelect({ value, onChange, onBlur, required }) {
   let currentHour12 = currentHour24 !== null ? currentHour24 % 12 : "";
   if (currentHour12 === 0 && currentHour24 !== null) currentHour12 = 12;
   const displayHour = currentHour12 ? String(currentHour12) : "";
+
+  // Parse minTime into { hour, minute } for comparison
+  const minTime24 = useMemo(() => {
+    if (!minTime) return null;
+    const [h, m] = minTime.split(":");
+    return { hour: parseInt(h, 10), minute: parseInt(m, 10) };
+  }, [minTime]);
+
+  // Derive which minutes are taken for the currently selected hour
+  const blockedMinutesForHour = useMemo(() => {
+    if (currentHour24 === null || !blockedTimes.length) return new Set();
+    const hourStr = String(currentHour24).padStart(2, "0");
+    return new Set(
+      blockedTimes
+        .map((t) => String(t).slice(0, 5)) // "HH:MM:SS" → "HH:MM"
+        .filter((t) => t.startsWith(`${hourStr}:`))
+        .map((t) => t.slice(3)),            // "HH:MM" → "MM"
+    );
+  }, [currentHour24, blockedTimes]);
+
+  // Is a period option (AM/PM) in the past?
+  const isPeriodPast = (period) => {
+    if (!minTime24) return false;
+    // AM is fully past once it's 12:00+ (noon)
+    if (period === "AM") return minTime24.hour >= 12;
+    return false;
+  };
+
+  // Is a 12-hour display hour option in the past, given the current period selection?
+  const isHourPast = (h12str) => {
+    if (!minTime24 || !currentPeriod) return false;
+    const h24 = to24Hour(h12str, currentPeriod);
+    // Disable if even the last minute (55) of this hour is before minTime
+    return h24 * 60 + 55 < minTime24.hour * 60 + minTime24.minute;
+  };
+
+  // Is a specific minute past, given the currently selected hour?
+  const isMinutePast = (m) => {
+    if (!minTime24 || currentHour24 === null) return false;
+    if (currentHour24 < minTime24.hour) return true;
+    if (currentHour24 === minTime24.hour) return parseInt(m, 10) < minTime24.minute;
+    return false;
+  };
 
   const handleTimeChange = (type, val) => {
     let newHour12 = type === "hour" ? val : displayHour;
@@ -47,9 +97,14 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!displayHour ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">HH</option>
-        {HOURS.map((h) => (
-          <option key={h} value={h} className="text-gray-900">{h.padStart(2, "0")}</option>
-        ))}
+        {HOURS.map((h) => {
+          const isPast = isHourPast(h);
+          return (
+            <option key={h} value={h} disabled={isPast} className={isPast ? "text-gray-300" : "text-gray-900"}>
+              {h.padStart(2, "0")}
+            </option>
+          );
+        })}
       </select>
       <span className="text-sm text-gray-900 font-semibold">:</span>
       <select
@@ -60,9 +115,16 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!currentMinute ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">MM</option>
-        {MINUTES.map((m) => (
-          <option key={m} value={m} className="text-gray-900">{m}</option>
-        ))}
+        {MINUTES.map((m) => {
+          const isPast = isMinutePast(m);
+          const isBlocked = blockedMinutesForHour.has(m);
+          const isDisabled = isPast || isBlocked;
+          return (
+            <option key={m} value={m} disabled={isDisabled} className={isDisabled ? "text-gray-300" : "text-gray-900"}>
+              {m}{isBlocked && !isPast ? " (taken)" : ""}
+            </option>
+          );
+        })}
       </select>
       <select
         required={required}
@@ -72,9 +134,14 @@ function TimeSelect({ value, onChange, onBlur, required }) {
         className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ml-1 ${!currentPeriod ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">--</option>
-        {PERIODS.map((p) => (
-          <option key={p} value={p} className="text-gray-900">{p}</option>
-        ))}
+        {PERIODS.map((p) => {
+          const isPast = isPeriodPast(p);
+          return (
+            <option key={p} value={p} disabled={isPast} className={isPast ? "text-gray-300" : "text-gray-900"}>
+              {p}
+            </option>
+          );
+        })}
       </select>
     </div>
   );
@@ -84,6 +151,20 @@ const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const getMinDate = () => {
   return getTodayInAppTimeZone();
+};
+
+// Returns current ET time as "HH:MM" in 24-hour format
+const getCurrentETTime = () => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const h = parts.find((p) => p.type === "hour")?.value || "00";
+  const m = parts.find((p) => p.type === "minute")?.value || "00";
+  // Handle "24" edge case from some runtimes
+  return `${String(parseInt(h, 10) % 24).padStart(2, "0")}:${m}`;
 };
 
 const parseDate = (value) => {
@@ -294,7 +375,7 @@ function AvailabilityDateField({
 
               if (isDisabled) {
                 const tooltipText = isBlocked
-                  ? blockedInfo?.tooltip || "Ad limit reached"
+                  ? blockedInfo?.tooltip || "All slots are taken on that day"
                   : "Past dates unavailable";
 
                 return (
@@ -349,9 +430,19 @@ export function ScheduleSection({
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [monthAvailability, setMonthAvailability] = useState({});
   const [monthAvailabilityError, setMonthAvailabilityError] = useState("");
+  const [blockedTimesMap, setBlockedTimesMap] = useState({});
   const loadingMonthsRef = useRef(new Set());
   const monthAbortControllerRef = useRef(null);
   const currentMonthRef = useRef(parseDate(formData.post_date_from) || getTodayDateInAppTimeZone());
+
+  const loadBlockedTimesForDate = useCallback(
+    async (dateKey) => {
+      if (!dateKey) return;
+      const times = await fetchDateBlockedTimes({ date: dateKey, excludeAdId });
+      setBlockedTimesMap((prev) => ({ ...prev, [dateKey]: times }));
+    },
+    [excludeAdId],
+  );
 
   const loadMonthAvailability = useCallback(
     async (monthDate) => {
@@ -396,10 +487,18 @@ export function ScheduleSection({
     loadingMonthsRef.current.clear();
     setMonthAvailability({});
     setMonthAvailabilityError("");
+    setBlockedTimesMap({});
     void loadMonthAvailability(
       parseDate(formData.post_date_from) || getTodayDateInAppTimeZone(),
     );
   }, [excludeAdId, formData.post_date_from, loadMonthAvailability]);
+
+  // Fetch blocked times for One-Time Post when the date is set
+  useEffect(() => {
+    if (postType === "One-Time Post" && formData.post_date_from) {
+      void loadBlockedTimesForDate(formData.post_date_from);
+    }
+  }, [postType, formData.post_date_from, loadBlockedTimesForDate]);
 
   // Auto-seed one empty slot when switching to Custom Schedule (Issue #11)
   useEffect(() => {
@@ -481,22 +580,30 @@ export function ScheduleSection({
               placeholder="Select date"
             />
 
-            <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-              <label className="block text-xs font-semibold text-gray-700 mb-1">
+            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${blockedDates[formData.post_date_from] ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
+              <label className={`block text-xs font-semibold mb-1 ${blockedDates[formData.post_date_from] ? "text-red-700" : "text-gray-700"}`}>
                 Post Time (ET) <span className="text-red-500">*</span>
               </label>
-              <div className="flex items-center gap-1 pr-6">
-                <TimeSelect
-                  required
-                  value={timeForInput(formData.post_time)}
-                  onChange={(val) => onChange("post_time", val)}
-                  onBlur={triggerAvailabilityCheck}
-                />
-              </div>
-              <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-              {availabilityChecking ? (
-                <p className="text-xs text-gray-500 mt-1">Checking availability...</p>
-              ) : null}
+              {blockedDates[formData.post_date_from] ? (
+                <p className="text-xs font-medium text-red-600">All slots are taken on that day — please choose a different date.</p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1 pr-6">
+                    <TimeSelect
+                      required
+                      value={timeForInput(formData.post_time)}
+                      onChange={(val) => onChange("post_time", val)}
+                      onBlur={triggerAvailabilityCheck}
+                      blockedTimes={blockedTimesMap[formData.post_date_from] || []}
+                      minTime={formData.post_date_from === getTodayInAppTimeZone() ? getCurrentETTime() : null}
+                    />
+                  </div>
+                  <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                  {availabilityChecking ? (
+                    <p className="text-xs text-gray-500 mt-1">Checking availability...</p>
+                  ) : null}
+                </>
+              )}
             </div>
 
             <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
@@ -567,6 +674,7 @@ export function ScheduleSection({
                     value={timeForInput(formData.post_time)}
                     onChange={(val) => onChange("post_time", val)}
                     onBlur={triggerAvailabilityCheck}
+                    minTime={formData.post_date_from === getTodayInAppTimeZone() ? getCurrentETTime() : null}
                   />
                 </div>
                 <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
@@ -611,16 +719,24 @@ export function ScheduleSection({
             const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
             const timeStr = typeof entry === "object" && entry !== null ? entry.time : "";
             const reminderStr = typeof entry === "object" && entry !== null ? (entry.reminder || "15-min") : "15-min";
+            const isDateFull = Boolean(dateStr && blockedDates[dateStr]);
 
             return (
               <div
                 key={index}
-                className="bg-white border border-gray-200 rounded-xl p-4 hover:border-gray-300 transition-all"
+                className={`border rounded-xl p-4 transition-all ${isDateFull ? "bg-red-50 border-red-200" : "bg-white border-gray-200 hover:border-gray-300"}`}
               >
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Date {index + 1}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Date {index + 1}
+                    </span>
+                    {isDateFull && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-100 border border-red-200 px-2 py-0.5 rounded-full">
+                        All slots taken
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -649,6 +765,7 @@ export function ScheduleSection({
                       newDates[index] = currentEntry;
                       onChange("custom_dates", newDates);
                       triggerAvailabilityCheck();
+                      void loadBlockedTimesForDate(val);
                     }}
                     minDate={getMinDate()}
                     blockedDates={blockedDates}
@@ -656,6 +773,11 @@ export function ScheduleSection({
                     placeholder="Select date"
                   />
 
+                  <div className="relative rounded-lg bg-red-50 border border-red-100 px-4 pt-4 pb-3 transition-all md:col-span-2" style={isDateFull ? {} : { display: "none" }}>
+                    <p className="text-xs font-semibold text-red-700">All slots are taken on that day — please choose a different date.</p>
+                  </div>
+
+                  {!isDateFull && (
                   <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
                     <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
                     <div className="flex items-center gap-1 pr-6">
@@ -671,11 +793,15 @@ export function ScheduleSection({
                           onChange("custom_dates", newDates);
                           triggerAvailabilityCheck();
                         }}
+                        blockedTimes={blockedTimesMap[dateStr] || []}
+                        minTime={dateStr === getTodayInAppTimeZone() ? getCurrentETTime() : null}
                       />
                     </div>
                     <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   </div>
+                  )}
 
+                  {!isDateFull && (
                   <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
                     <label className="block text-xs font-semibold text-gray-700 mb-1">Reminder</label>
                     <div className="relative">
@@ -700,6 +826,7 @@ export function ScheduleSection({
                       <ChevronDown size={16} className="absolute right-0 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none z-0" />
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
             );

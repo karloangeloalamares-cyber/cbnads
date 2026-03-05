@@ -176,6 +176,23 @@ export const checkAdAvailability = async ({
   };
 };
 
+export const fetchDateBlockedTimes = async ({ date, excludeAdId }) => {
+  if (!date) return [];
+  try {
+    const response = await fetch("/api/ads/availability", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date, postType: "One-Time Post", adId: excludeAdId || null }),
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.blocked_times || [];
+  } catch {
+    return [];
+  }
+};
+
 export const fetchMonthAvailability = async ({ monthDate, excludeAdId, signal }) => {
   const month = new Date(monthDate);
   if (Number.isNaN(month.valueOf())) {
