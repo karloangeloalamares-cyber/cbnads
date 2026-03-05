@@ -2227,7 +2227,7 @@ export default function AdsPage() {
   const [settingsTeamModalOpen, setSettingsTeamModalOpen] = useState(false);
   const [settingsTeamName, setSettingsTeamName] = useState("");
   const [settingsTeamEmail, setSettingsTeamEmail] = useState("");
-  const [settingsTeamPassword, setSettingsTeamPassword] = useState("");
+  const [settingsTeamRole, setSettingsTeamRole] = useState("staff");
   const [settingsTeamSaving, setSettingsTeamSaving] = useState(false);
   const [settingsTeamError, setSettingsTeamError] = useState("");
   const [settingsNotification, setSettingsNotification] = useState({
@@ -5101,9 +5101,16 @@ export default function AdsPage() {
     event.preventDefault();
     const name = settingsTeamName.trim();
     const email = settingsTeamEmail.trim().toLowerCase();
+    const role = String(settingsTeamRole || "").trim().toLowerCase();
+    const allowedRoles = new Set(["admin", "manager", "staff"]);
 
     if (!name || !email) {
       setSettingsTeamError("Name and email are required.");
+      return;
+    }
+
+    if (!allowedRoles.has(role)) {
+      setSettingsTeamError("Role must be admin, manager, or staff.");
       return;
     }
 
@@ -5128,6 +5135,7 @@ export default function AdsPage() {
           body: JSON.stringify({
             name,
             email,
+            role,
           }),
         });
         const data = await response.json();
@@ -5150,7 +5158,7 @@ export default function AdsPage() {
           id: createId("member"),
           name,
           email,
-          role: "admin",
+          role,
         });
         setDb(readDb());
       }
@@ -5158,7 +5166,7 @@ export default function AdsPage() {
       setSettingsTeamModalOpen(false);
       setSettingsTeamName("");
       setSettingsTeamEmail("");
-      setSettingsTeamPassword("");
+      setSettingsTeamRole("staff");
       setSettingsTeamError("");
     } catch (error) {
       setSettingsTeamError(
@@ -11184,6 +11192,20 @@ export default function AdsPage() {
                           required
                         />
                       </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Role
+                        </label>
+                        <select
+                          value={settingsTeamRole}
+                          onChange={(event) => setSettingsTeamRole(event.target.value)}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                        >
+                          <option value="staff">Staff</option>
+                          <option value="manager">Manager</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
                       <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600">
                         We will create this team account and email them a secure link to verify
                         and set their password.
@@ -11195,7 +11217,7 @@ export default function AdsPage() {
                             setSettingsTeamModalOpen(false);
                             setSettingsTeamName("");
                             setSettingsTeamEmail("");
-                            setSettingsTeamPassword("");
+                            setSettingsTeamRole("staff");
                             setSettingsTeamError("");
                           }}
                           className="flex-1 px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"

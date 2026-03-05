@@ -9,6 +9,7 @@ import {
 import { sendEmail } from "../../utils/send-email.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ALLOWED_INTERNAL_ROLES = new Set(["admin", "manager", "staff"]);
 
 const createTemporaryPassword = () => `${crypto.randomBytes(24).toString("base64url")}Aa1!`;
 
@@ -20,9 +21,22 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const buildInternalUserMetadata = ({ existingMetadata, name, email }) => ({
+const normalizeInternalRole = (value, fallback = "staff") => {
+  const role = String(value || "").trim().toLowerCase();
+  if (ALLOWED_INTERNAL_ROLES.has(role)) {
+    return role;
+  }
+  return fallback;
+};
+
+const formatRoleLabel = (role) => {
+  const normalized = normalizeInternalRole(role, "staff");
+  return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
+};
+
+const buildInternalUserMetadata = ({ existingMetadata, name, email, role }) => ({
   ...(existingMetadata || {}),
-  role: "admin",
+  role: normalizeInternalRole(role, "staff"),
   full_name: String(name || "").trim() || email,
   signup_source: "admin_dashboard",
 });
@@ -30,9 +44,11 @@ const buildInternalUserMetadata = ({ existingMetadata, name, email }) => ({
 const sendTeamMemberInviteEmail = async ({
   email,
   name,
+  role,
   setupUrl,
   inviterName,
 }) => {
+  const roleLabel = escapeHtml(formatRoleLabel(role));
   const safeName = escapeHtml(String(name || "").trim() || "there");
   const safeInviterName = escapeHtml(
     String(inviterName || "").trim() || "a CBN Ads admin",
@@ -55,7 +71,7 @@ const sendTeamMemberInviteEmail = async ({
           </h1>
           <p style="margin: 0 0 16px;">Hi ${safeName},</p>
           <p style="margin: 0 0 24px;">
-            ${safeInviterName} created your CBN Ads team account. Use the button below to verify your email and set your password.
+            ${safeInviterName} created your CBN Ads team account with the ${roleLabel} role. Use the button below to verify your email and set your password.
           </p>
           <p style="margin: 0 0 24px;">
             <a
@@ -76,13 +92,13 @@ const sendTeamMemberInviteEmail = async ({
     `,
     text: `Hi ${String(name || "").trim() || "there"},
 
-${String(inviterName || "").trim() || "A CBN Ads admin"} created your CBN Ads team account.
+${String(inviterName || "").trim() || "A CBN Ads admin"} created your CBN Ads team account with the ${formatRoleLabel(role)} role.
 Verify your email and set your password here:
 ${setupUrl}`,
   });
 };
 
-// Get all admin members
+// Get all internal members
 export async function GET(request) {
   try {
     const admin = await requireAdmin(request);
@@ -94,7 +110,7 @@ export async function GET(request) {
     const { data: rows, error } = await supabase
       .from(table("team_members"))
       .select("id, name, email, role")
-      .eq("role", "admin")
+      .in("role", ["admin", "manager", "staff"])
       .order("created_at", { ascending: true });
     if (error) throw error;
 
@@ -128,7 +144,7 @@ export async function GET(request) {
   }
 }
 
-// Add a new admin member
+// Add a new internal member
 export async function POST(request) {
   try {
     const admin = await requireAdmin(request);
@@ -139,8 +155,10 @@ export async function POST(request) {
     const body = await request.json();
     const rawEmail = body?.email;
     const rawName = body?.name;
+    const requestedRole = String(body?.role || "").trim().toLowerCase();
     const normalizedEmail = normalizeEmail(rawEmail);
     const normalizedName = String(rawName || "").trim() || normalizedEmail;
+    const normalizedRole = normalizeInternalRole(requestedRole, "staff");
 
     if (!normalizedEmail) {
       return Response.json({ error: "Email is required." }, { status: 400 });
@@ -148,6 +166,13 @@ export async function POST(request) {
 
     if (!EMAIL_PATTERN.test(normalizedEmail)) {
       return Response.json({ error: "Enter a valid email address." }, { status: 400 });
+    }
+
+    if (requestedRole && !ALLOWED_INTERNAL_ROLES.has(requestedRole)) {
+      return Response.json(
+        { error: "Role must be admin, manager, or staff." },
+        { status: 400 },
+      );
     }
 
     const supabase = db();
@@ -162,7 +187,8 @@ export async function POST(request) {
     if (existingError) throw existingError;
 
     if (existing?.id) {
-      if (String(existing.role || "").toLowerCase() === "admin") {
+      const existingRole = String(existing.role || "").trim().toLowerCase();
+      if (ALLOWED_INTERNAL_ROLES.has(existingRole)) {
         return Response.json(
           { error: "A team member with this email already exists." },
           { status: 400 },
@@ -172,7 +198,7 @@ export async function POST(request) {
       const { error: promoteError } = await supabase
         .from(table("team_members"))
         .update({
-          role: "admin",
+          role: normalizedRole,
           name: normalizedName,
           updated_at: new Date().toISOString(),
         })
@@ -185,7 +211,7 @@ export async function POST(request) {
         .insert({
           name: normalizedName,
           email: normalizedEmail,
-          role: "admin",
+          role: normalizedRole,
           created_at: nowIso,
           updated_at: nowIso,
         });
@@ -217,10 +243,11 @@ export async function POST(request) {
           existingMetadata: existingUser.user_metadata,
           name: normalizedName,
           email: normalizedEmail,
+          role: normalizedRole,
         }),
         app_metadata: {
           ...(existingUser.app_metadata || {}),
-          role: "admin",
+          role: normalizedRole,
         },
       });
       if (error) throw error;
@@ -233,8 +260,9 @@ export async function POST(request) {
         user_metadata: buildInternalUserMetadata({
           name: normalizedName,
           email: normalizedEmail,
+          role: normalizedRole,
         }),
-        app_metadata: { role: "admin" },
+        app_metadata: { role: normalizedRole },
       });
       if (error) throw error;
       authUser = data?.user || null;
@@ -263,6 +291,7 @@ export async function POST(request) {
     await sendTeamMemberInviteEmail({
       email: normalizedEmail,
       name: normalizedName,
+      role: normalizedRole,
       setupUrl,
       inviterName: admin?.user?.name || admin?.user?.email || "",
     });
@@ -272,6 +301,7 @@ export async function POST(request) {
       message: "Team member created and invite email sent.",
       email_sent: true,
       created_user: !existingUser?.id,
+      role: normalizedRole,
     });
   } catch (err) {
     console.error("POST /api/admin/members error", err);
