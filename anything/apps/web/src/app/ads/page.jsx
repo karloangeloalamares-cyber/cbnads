@@ -6,6 +6,7 @@ export function meta() {
 
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { createPortal } from "react-dom";
 import {
   Bell,
@@ -92,10 +93,10 @@ import {
   deleteTeamMember,
   deleteProduct,
   ensureDb,
+  invalidateDbCache,
   getReconciliationReport,
   readDb,
   rejectPendingAd,
-  resetDbCache,
   resolveSupabaseSessionUser,
   saveAdminSettings,
   saveNotificationPreferences,
@@ -383,6 +384,17 @@ const normalizeInvoiceStatus = (value) => {
     return "Pending";
   }
   return status;
+};
+
+const getInvoiceStatusPriority = (value) => {
+  const status = normalizeInvoiceStatus(value);
+  if (status === "Pending") {
+    return 0;
+  }
+  if (status === "Paid") {
+    return 2;
+  }
+  return 1;
 };
 
 const getInvoiceStatusColor = (status) => {
@@ -2040,6 +2052,8 @@ function InvoiceSortableHeader({ label, sortKey, onSort }) {
 }
 
 export default function AdsPage() {
+  const navigate = useNavigate();
+  const authRedirectInFlightRef = useRef(false);
   const [db, setDb] = useState(() => readDb());
   const [revealedPii, setRevealedPii] = useState({});
 
@@ -2421,6 +2435,14 @@ export default function AdsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let unsubscribe = () => {};
+    const redirectToSignIn = () => {
+      if (cancelled || authRedirectInFlightRef.current) {
+        return;
+      }
+      authRedirectInFlightRef.current = true;
+      navigate("/account/signin", { replace: true });
+    };
     const sync = () => {
       if (cancelled) {
         return;
@@ -2430,59 +2452,76 @@ export default function AdsPage() {
       setReady(true);
     };
 
-    const initialize = async () => {
-      await ensureDb();
-      sync();
+    const recoverSessionUser = async () => {
+      const recovered = await resolveSupabaseSessionUser();
+      if (recovered?.id) {
+        return recovered;
+      }
+      try {
+        const supabase = getSupabaseClient();
+        await supabase.auth.refreshSession();
+      } catch {
+        // Ignore refresh failures and fall through to the final session lookup.
+      }
+      return resolveSupabaseSessionUser();
+    };
 
-      if (!hasSupabaseConfig) {
-        return;
+    const initialize = async () => {
+      if (hasSupabaseConfig) {
+        try {
+          const recoveredUser = await recoverSessionUser();
+          if (cancelled) {
+            return;
+          }
+
+          if (!recoveredUser) {
+            const fallbackUser = getSignedInUser();
+            if (!fallbackUser?.id) {
+              await signOut();
+              redirectToSignIn();
+              return;
+            }
+          } else {
+            const cachedUser = getSignedInUser();
+            const cachedUserId = String(cachedUser?.id || "").trim();
+            const recoveredUserId = String(recoveredUser.id || "").trim();
+            if (!cachedUserId || cachedUserId !== recoveredUserId) {
+              invalidateDbCache();
+            }
+          }
+        } catch (error) {
+          console.error("Failed to validate Supabase session:", error);
+          const fallbackUser = getSignedInUser();
+          if (!fallbackUser?.id) {
+            await signOut();
+            redirectToSignIn();
+            return;
+          }
+        }
       }
 
-      try {
-        const recoveredUser = await resolveSupabaseSessionUser();
-        if (cancelled) {
-          return;
-        }
-
-        if (!recoveredUser) {
-          await signOut();
-          if (!cancelled) {
-            window.location.href = "/account/signin";
-          }
-          return;
-        }
-
-        // Rehydrate from Supabase after validating the live session so the dashboard
-        // does not stay pinned to stale local cache data.
-        resetDbCache({ emit: false });
-        await ensureDb();
-        if (!cancelled) {
-          sync();
-        }
-      } catch (error) {
-        console.error("Failed to validate Supabase session:", error);
-        await signOut();
-        if (!cancelled) {
-          window.location.href = "/account/signin";
-        }
+      invalidateDbCache();
+      await ensureDb();
+      if (!cancelled) {
+        sync();
+        unsubscribe = subscribeDb(sync);
       }
     };
 
     void initialize();
-    const unsubscribe = subscribeDb(sync);
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     if (!ready || user || hasSupabaseConfig) {
       return;
     }
 
-    window.location.href = "/account/signin";
-  }, [ready, user]);
+    navigate("/account/signin", { replace: true });
+  }, [navigate, ready, user]);
 
   useEffect(() => {
     if (!ready || !user || !isAdvertiser) {
@@ -4005,11 +4044,22 @@ export default function AdsPage() {
       );
     });
 
-    if (!invoiceSortConfig.key || !invoiceSortConfig.direction) {
-      return baseFiltered;
-    }
-
     const sorted = [...baseFiltered].sort((a, b) => {
+      const statusPriorityDiff =
+        getInvoiceStatusPriority(a.status) - getInvoiceStatusPriority(b.status);
+      if (statusPriorityDiff !== 0) {
+        return statusPriorityDiff;
+      }
+
+      if (!invoiceSortConfig.key || !invoiceSortConfig.direction) {
+        const aDefaultDate = new Date(a.due_date || a.created_at || 0).valueOf();
+        const bDefaultDate = new Date(b.due_date || b.created_at || 0).valueOf();
+        if (aDefaultDate !== bDefaultDate) {
+          return bDefaultDate - aDefaultDate;
+        }
+        return String(a.id || "").localeCompare(String(b.id || ""));
+      }
+
       let aValue;
       let bValue;
 
@@ -4057,7 +4107,14 @@ export default function AdsPage() {
       if (aValue > bValue) {
         return invoiceSortConfig.direction === "asc" ? 1 : -1;
       }
-      return 0;
+
+      const aDate = new Date(a.due_date || a.created_at || 0).valueOf();
+      const bDate = new Date(b.due_date || b.created_at || 0).valueOf();
+      if (aDate !== bDate) {
+        return bDate - aDate;
+      }
+
+      return String(a.id || "").localeCompare(String(b.id || ""));
     });
 
     return sorted;
@@ -4155,7 +4212,7 @@ export default function AdsPage() {
         }
         approvalInvoiceNumber = String(data?.invoice?.invoice_number || "").trim();
 
-        resetDbCache({ emit: false });
+        invalidateDbCache();
         await ensureDb();
         setDb(readDb());
       }
@@ -4228,7 +4285,7 @@ export default function AdsPage() {
         throw new Error(data.error || "Failed to reject submission.");
       }
 
-      resetDbCache({ emit: false });
+      invalidateDbCache();
       await ensureDb();
       setDb(readDb());
       appToast.success({
@@ -4900,7 +4957,7 @@ export default function AdsPage() {
         throw new Error(data.error || "Failed to update submission.");
       }
 
-      resetDbCache({ emit: false });
+      invalidateDbCache();
       await ensureDb();
       setDb(readDb());
       resetSubmissionEditState();

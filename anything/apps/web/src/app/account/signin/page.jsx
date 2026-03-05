@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import {
   completeOAuthSignIn,
   getSignedInUser,
@@ -8,7 +9,7 @@ import {
   signInWithGoogle,
   signOut,
 } from "@/lib/localAuth";
-import { ensureDb } from "@/lib/localDb";
+import { invalidateDbCache } from "@/lib/localDb";
 import { getSupabaseClient, hasSupabaseConfig, publicAppUrl } from "@/lib/supabase";
 import { appToast } from "@/lib/toast";
 
@@ -46,6 +47,8 @@ const resolveRedirectTarget = (user, params) => {
 };
 
 export default function SignInPage() {
+  const navigate = useNavigate();
+  const hasRedirectedRef = useRef(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -59,6 +62,33 @@ export default function SignInPage() {
   const [forgotSent, setForgotSent] = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState("");
+  const redirectTo = (target) => {
+    const destination = String(target || "").trim();
+    if (!destination || hasRedirectedRef.current) {
+      return;
+    }
+
+    const hasScheme = /^[a-z][a-z\d+\-.]*:\/\//i.test(destination);
+    if (hasScheme) {
+      try {
+        const url = new URL(destination);
+        if (url.origin === window.location.origin) {
+          hasRedirectedRef.current = true;
+          navigate(`${url.pathname}${url.search}${url.hash}`, { replace: true });
+          return;
+        }
+      } catch {
+        // Fall back to hard navigation for malformed absolute URLs.
+      }
+
+      hasRedirectedRef.current = true;
+      window.location.assign(destination);
+      return;
+    }
+
+    hasRedirectedRef.current = true;
+    navigate(destination, { replace: true });
+  };
 
   useEffect(() => {
     if (!notice) {
@@ -132,7 +162,8 @@ export default function SignInPage() {
 
         if (result.ok) {
           const currentUser = getSignedInUser() || result.user;
-          window.location.replace(resolveRedirectTarget(currentUser, params));
+          invalidateDbCache();
+          redirectTo(resolveRedirectTarget(currentUser, params));
           return;
         }
 
@@ -141,11 +172,9 @@ export default function SignInPage() {
         }
       }
 
-      await ensureDb();
-
       const currentUser = getSignedInUser();
       if (!cancelled && currentUser) {
-        window.location.href = resolveRedirectTarget(currentUser, params);
+        redirectTo(resolveRedirectTarget(currentUser, params));
       }
     };
     void initialize();
@@ -174,9 +203,9 @@ export default function SignInPage() {
       }
 
       const params = new URLSearchParams(window.location.search);
-      await ensureDb();
       const currentUser = getSignedInUser() || result.user;
-      window.location.replace(resolveRedirectTarget(currentUser, params));
+      invalidateDbCache();
+      redirectTo(resolveRedirectTarget(currentUser, params));
     } catch (err) {
       console.error("Sign in error:", err);
       setError("Something went wrong. Please try again.");

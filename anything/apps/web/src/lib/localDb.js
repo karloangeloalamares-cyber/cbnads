@@ -306,7 +306,16 @@ export const resolveSupabaseSessionUser = async (supabaseOverride = null) => {
     throwIfSupabaseError('get auth session', sessionError);
   }
 
-  const authUser = sessionData?.session?.user || null;
+  let authUser = sessionData?.session?.user || null;
+  if (!authUser?.id) {
+    try {
+      const { data: refreshData } = await supabase.auth.refreshSession();
+      authUser = refreshData?.session?.user || null;
+    } catch {
+      authUser = null;
+    }
+  }
+
   if (!authUser?.id) {
     setSessionUserId(null);
     return null;
@@ -1316,9 +1325,7 @@ export const ensureDb = async () => {
   if (!ensurePromise) {
     ensurePromise = hydrateCache()
       .catch((error) => {
-        console.error('[localDb] Failed to load Supabase data; using empty remote cache.', error);
-        const fallback = refreshDerivedFields(normalizeDb(baseDb()));
-        setDbCache(fallback, { emit: false });
+        console.error('[localDb] Failed to load Supabase data; keeping current cache.', error);
         hasLoadedInitialState = true;
         return clone(dbCache);
       })
@@ -1422,6 +1429,14 @@ export const resetDbCache = ({ emit = true } = {}) => {
     emitDbChanged();
   }
   return clone(dbCache);
+};
+
+export const invalidateDbCache = ({ emit = false } = {}) => {
+  hasLoadedInitialState = false;
+  ensurePromise = null;
+  if (emit) {
+    emitDbChanged();
+  }
 };
 
 export const upsertLocalUser = async (input) => {
