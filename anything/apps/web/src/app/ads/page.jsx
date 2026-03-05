@@ -2311,12 +2311,6 @@ export default function AdsPage() {
   }, []);
 
   useEffect(() => {
-    if (activeSection === "Ads" && adsUnreadCount > 0) {
-      setAdsUnreadCount(0);
-    }
-  }, [activeSection, adsUnreadCount]);
-
-  useEffect(() => {
     submissionEditFormRef.current = submissionEditForm;
   }, [submissionEditForm]);
 
@@ -6219,13 +6213,17 @@ export default function AdsPage() {
         }
 
         const savedAd = await upsertAd(payload);
+        const shouldNotifyAdCreated = isInternalUserRole && isNewAdRecord && mode !== "draft";
         let approvalEmailResult = null;
-        if (isAdmin && isNewAdRecord && mode !== "draft") {
+
+        if (shouldNotifyAdCreated) {
           emitSubmissionNotificationSignal({
             source: ADMIN_CREATED_AD_NOTIFICATION_SOURCE,
             id: savedAd?.id || payload.id || "",
           });
+        }
 
+        if (isAdmin && shouldNotifyAdCreated) {
           const accountInviteResult = await ensureAdvertiserAccountInvite(
             payload.advertiser_id || savedAd?.advertiser_id,
           );
@@ -6566,6 +6564,9 @@ export default function AdsPage() {
     setShowInvoiceCreateMenu(false);
     setInvoicePreviewModal(null);
     setShowProfileDropdown(false);
+    if (section === "Ads") {
+      setAdsUnreadCount(0);
+    }
   };
 
 
@@ -6917,6 +6918,8 @@ export default function AdsPage() {
         onClose={() => setMobileSidebarOpen(false)}
         unreadCount={unreadCount}
         onMarkAllAsRead={markAllAsRead}
+        adsUnreadCount={adsUnreadCount}
+        onClearAdsUnread={() => setAdsUnreadCount(0)}
       />
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -6982,7 +6985,7 @@ export default function AdsPage() {
                             className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
                           >
                             <p className="text-sm font-semibold text-gray-900">
-                              New ad created by admin
+                              New ad created in dashboard
                             </p>
                             <p className="text-xs text-gray-600 mt-1">
                               Click to review recent ads.
