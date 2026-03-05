@@ -9,6 +9,7 @@ import {
 } from "../../../utils/ad-availability.js";
 import { sendEmail } from "../../../utils/send-email.js";
 import { adAmount, nextSequentialInvoiceNumber } from "../../../utils/invoice-helpers.js";
+import { resolveInternalNotificationEmails } from "../../../utils/internal-notification-emails.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
   process.env.APPROVAL_ZELLE_NUMBER || "(555) 010-2026",
@@ -453,25 +454,7 @@ export async function POST(request) {
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
 
     try {
-      const { data: adminPrefs } = await supabase
-        .from(table("admin_notification_preferences"))
-        .select("email_address, email_enabled")
-        .eq("email_enabled", true);
-
-      const { data: globalPrefs } = await supabase
-        .from(table("notification_preferences"))
-        .select("reminder_email, email_enabled")
-        .order("id", { ascending: true })
-        .limit(1);
-
-      const adminEmails = Array.from(
-        new Set(
-          [
-            ...(adminPrefs || []).map((adminItem) => adminItem.email_address),
-            ...(globalPrefs?.[0]?.email_enabled ? [globalPrefs?.[0]?.reminder_email] : []),
-          ].filter(Boolean),
-        ),
-      );
+      const internalEmails = await resolveInternalNotificationEmails(supabase);
 
       const advertiserEmailHTML = `
 <!DOCTYPE html>
@@ -578,12 +561,12 @@ export async function POST(request) {
         }).catch((err) => console.error("[approve] Advertiser email failed:", err));
       }
 
-      if (adminEmails.length > 0) {
+      if (internalEmails.length > 0) {
         await sendEmail({
-          to: adminEmails,
+          to: internalEmails,
           subject: `Ad Approved - ${ad.ad_name} | ${invoiceNumberText}`,
           html: adminEmailHTML,
-        }).catch((err) => console.error("[approve] Admin email failed:", err));
+        }).catch((err) => console.error("[approve] Internal email failed:", err));
       }
     } catch (emailErr) {
       console.error("Error sending approval emails:", emailErr);

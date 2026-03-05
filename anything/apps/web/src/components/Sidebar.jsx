@@ -18,13 +18,31 @@ import {
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
 import { can, getVisibleSectionsForRole, normalizeAppRole } from "@/lib/permissions";
 
+const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
+const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
+const ADMIN_CREATED_AD_NOTIFICATION_SOURCE = "admin-created-ad";
+
+const parseNotificationSignal = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value || ""));
+  } catch {
+    return null;
+  }
+};
+
 const menuItemsCatalog = [
   { icon: LayoutDashboard, label: "Dashboard", id: "Dashboard" },
   { icon: Calendar, label: "Calendar", id: "Calendar" },
-  { icon: FileText, label: "Submissions", id: "Submissions", showBadge: true },
+  { icon: FileText, label: "Submissions", id: "Submissions", badgeType: "submissions" },
   { icon: MessageCircle, label: "WhatsApp", id: "WhatsApp" },
   { icon: Users, label: "Advertisers", id: "Advertisers" },
-  { icon: Megaphone, label: "Ads", id: "Ads" },
+  { icon: Megaphone, label: "Ads", id: "Ads", badgeType: "ads" },
   { icon: Package, label: "Products", id: "Products" },
   { icon: CreditCard, label: "Billing", id: "Billing" },
   { icon: AlertTriangle, label: "Reconciliation", id: "Reconciliation" },
@@ -41,6 +59,7 @@ export default function Sidebar({
 }) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [adsUnreadCount, setAdsUnreadCount] = useState(0);
   const normalizedRole = normalizeAppRole(userRole);
   const isInternal = normalizedRole !== "advertiser";
   const canViewSettings = can(normalizedRole, "settings:view");
@@ -83,9 +102,39 @@ export default function Sidebar({
     return () => window.removeEventListener("resize", syncViewport);
   }, []);
 
+  useEffect(() => {
+    const applySignal = (signal) => {
+      const source = String(signal?.source || "").trim().toLowerCase();
+      if (source !== ADMIN_CREATED_AD_NOTIFICATION_SOURCE) {
+        return;
+      }
+      setAdsUnreadCount((current) => current + 1);
+    };
+
+    const handleSignalEvent = (event) => {
+      applySignal(parseNotificationSignal(event?.detail));
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === SUBMISSION_NOTIFICATION_STORAGE_KEY && event.newValue) {
+        applySignal(parseNotificationSignal(event.newValue));
+      }
+    };
+
+    window.addEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
   const handleNavigate = (item) => {
     if (isInternal && item.id === "Submissions" && unreadCount > 0) {
       void markAllAsRead?.();
+    }
+    if (item.id === "Ads" && adsUnreadCount > 0) {
+      setAdsUnreadCount(0);
     }
 
     if (onNavigate) {
@@ -143,7 +192,13 @@ export default function Sidebar({
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.id === activeItem;
-          const badge = item.showBadge && unreadCount > 0 ? unreadCount : null;
+          let badge = null;
+          if (item.badgeType === "submissions" && unreadCount > 0) {
+            badge = unreadCount;
+          }
+          if (item.badgeType === "ads" && adsUnreadCount > 0) {
+            badge = adsUnreadCount;
+          }
           const hasBadge = badge != null;
 
           return (

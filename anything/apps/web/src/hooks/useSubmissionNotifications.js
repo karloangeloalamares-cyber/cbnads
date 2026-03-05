@@ -28,7 +28,6 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
   const previousCountRef = useRef(0);
   const initializedRef = useRef(false);
   const audioRef = useRef(null);
-  const localUnreadDeltaRef = useRef(0);
 
   const playSound = useCallback(() => {
     if (soundEnabled && audioRef.current) {
@@ -40,7 +39,6 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
     setUnreadCount(0);
     previousCountRef.current = 0;
     initializedRef.current = false;
-    localUnreadDeltaRef.current = 0;
   }, []);
 
   useEffect(() => {
@@ -95,7 +93,6 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
       setUnreadCount(0);
       previousCountRef.current = 0;
       initializedRef.current = true;
-      localUnreadDeltaRef.current = 0;
     } catch (_error) {
       // Ignore and allow the next refresh cycle to retry.
     }
@@ -140,7 +137,7 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
 
       initializedRef.current = true;
       previousCountRef.current = newCount;
-      setUnreadCount(newCount + localUnreadDeltaRef.current);
+      setUnreadCount(newCount);
     } catch (_error) {
       // Ignore transient auth/network issues and retry on the next poll.
     }
@@ -211,13 +208,8 @@ export function useSubmissionNotifications(enabled = true, { onViewPending } = {
     const applyNotificationSignal = (signal) => {
       const source = String(signal?.source || "").trim().toLowerCase();
       if (source === ADMIN_CREATED_AD_NOTIFICATION_SOURCE) {
-        localUnreadDeltaRef.current += 1;
-        setUnreadCount((current) => current + 1);
-        playSound();
-        showSubmissionToast(1);
         return;
       }
-
       void fetchUnreadCount();
     };
 

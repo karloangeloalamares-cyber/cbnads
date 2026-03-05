@@ -1,5 +1,6 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { sendEmail } from "../../utils/send-email.js";
+import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 import {
   checkBatchAvailability,
@@ -290,28 +291,7 @@ export async function POST(request) {
       insertedPendingAd.post_date_from,
     );
 
-    // Get all admin emails configured for notifications.
-    const { data: adminPrefs, error: adminPrefError } = await supabase
-      .from(table("admin_notification_preferences"))
-      .select("email_address, email_enabled")
-      .eq("email_enabled", true);
-    if (adminPrefError) throw adminPrefError;
-
-    const { data: globalPrefs, error: globalPrefError } = await supabase
-      .from(table("notification_preferences"))
-      .select("reminder_email, email_enabled")
-      .order("id", { ascending: true })
-      .limit(1);
-    if (globalPrefError) throw globalPrefError;
-
-    const adminEmails = Array.from(
-      new Set(
-        [
-          ...(adminPrefs || []).map((admin) => admin.email_address),
-          ...(globalPrefs?.[0]?.email_enabled ? [globalPrefs?.[0]?.reminder_email] : []),
-        ].filter(Boolean),
-      ),
-    );
+    const internalEmails = await resolveInternalNotificationEmails(supabase);
 
     // Create advertiser confirmation email
     const advertiserEmailHTML = `
@@ -517,21 +497,21 @@ export async function POST(request) {
       // Don't fail the whole request if email fails
     }
 
-    // Send notification to admins
-    if (adminEmails.length > 0) {
+    // Send notification to internal roles (admin/manager/staff).
+    if (internalEmails.length > 0) {
       try {
         await sendEmail({
-          to: adminEmails,
+          to: internalEmails,
           subject: `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
           html: adminEmailHTML,
         });
-        console.log("[submit-ad] Notification sent to admins:", adminEmails);
+        console.log("[submit-ad] Notification sent to internal recipients:", internalEmails);
       } catch (emailError) {
-        console.error("[submit-ad] Failed to send admin email:", emailError);
+        console.error("[submit-ad] Failed to send internal notification email:", emailError);
         // Don't fail the whole request if email fails
       }
     } else {
-      console.warn("[submit-ad] No admin emails configured for notifications");
+      console.warn("[submit-ad] No internal recipient emails configured for notifications");
     }
 
     return Response.json({

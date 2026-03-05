@@ -140,6 +140,20 @@ const DEFAULT_SUBMISSION_REJECTION_REASONS = [
   "Poor Image Quality",
 ];
 
+const parseNotificationSignal = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === "object") {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value || ""));
+  } catch {
+    return null;
+  }
+};
+
 const emitSubmissionNotificationSignal = ({ source = "", id = "" } = {}) => {
   if (typeof window === "undefined") {
     return;
@@ -2161,6 +2175,7 @@ export default function AdsPage() {
   const [syncing, setSyncing] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [adsUnreadCount, setAdsUnreadCount] = useState(0);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pendingAdDeleteIdsRef = useRef(new Set());
   const pendingInvoiceActionIdsRef = useRef(new Set());
@@ -2262,10 +2277,44 @@ export default function AdsPage() {
       setView("list");
     },
   });
+  const totalUnreadCount = unreadCount + adsUnreadCount;
 
   useEffect(() => {
     createAdStateRef.current = ad;
   }, [ad]);
+
+  useEffect(() => {
+    const applySignal = (signal) => {
+      const source = String(signal?.source || "").trim().toLowerCase();
+      if (source !== ADMIN_CREATED_AD_NOTIFICATION_SOURCE) {
+        return;
+      }
+      setAdsUnreadCount((current) => current + 1);
+    };
+
+    const handleSignalEvent = (event) => {
+      applySignal(parseNotificationSignal(event?.detail));
+    };
+
+    const handleStorage = (event) => {
+      if (event.key === SUBMISSION_NOTIFICATION_STORAGE_KEY && event.newValue) {
+        applySignal(parseNotificationSignal(event.newValue));
+      }
+    };
+
+    window.addEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(SUBMISSION_NOTIFICATION_EVENT, handleSignalEvent);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeSection === "Ads" && adsUnreadCount > 0) {
+      setAdsUnreadCount(0);
+    }
+  }, [activeSection, adsUnreadCount]);
 
   useEffect(() => {
     submissionEditFormRef.current = submissionEditForm;
@@ -4354,6 +4403,120 @@ export default function AdsPage() {
     });
   };
 
+  const ensureAdvertiserAccountInvite = async (advertiserId) => {
+    if (!isAdmin || !hasSupabaseConfig) {
+      return { skipped: true };
+    }
+
+    const normalizedAdvertiserId = String(advertiserId || "").trim();
+    if (!normalizedAdvertiserId) {
+      return { skipped: true };
+    }
+
+    const advertiserRecord = advertisers.find(
+      (item) => String(item?.id || "").trim() === normalizedAdvertiserId,
+    );
+    const advertiserEmail = String(advertiserRecord?.email || "")
+      .trim()
+      .toLowerCase();
+
+    if (!advertiserEmail) {
+      return { skipped: true, reason: "missing_email" };
+    }
+
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/advertisers/ensure-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          advertiser_id: normalizedAdvertiserId,
+          advertiser_name: advertiserRecord?.advertiser_name || "",
+          contact_name: advertiserRecord?.contact_name || "",
+          email: advertiserEmail,
+          phone_number: advertiserRecord?.phone_number || advertiserRecord?.phone || "",
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          skipped: false,
+          error: data?.error || "Failed to send advertiser account email.",
+        };
+      }
+
+      return data || { skipped: false };
+    } catch (error) {
+      return {
+        skipped: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to send advertiser account email.",
+      };
+    }
+  };
+
+  const sendApprovedAdNoticeEmail = async ({ adRecord, advertiserId }) => {
+    if (!isAdmin || !hasSupabaseConfig) {
+      return { skipped: true };
+    }
+
+    const adId = String(adRecord?.id || "").trim();
+    if (!adId) {
+      return { skipped: true };
+    }
+
+    const normalizedAdvertiserId = String(
+      advertiserId || adRecord?.advertiser_id || "",
+    ).trim();
+    const advertiserRecord = advertisers.find(
+      (item) => String(item?.id || "").trim() === normalizedAdvertiserId,
+    );
+
+    const advertiserEmail = String(advertiserRecord?.email || "")
+      .trim()
+      .toLowerCase();
+    if (!advertiserEmail) {
+      return { skipped: true, reason: "missing_email" };
+    }
+
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/ads/send-approval-email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ad_id: adId,
+          advertiser_id: normalizedAdvertiserId || null,
+          email: advertiserEmail,
+          contact_name: advertiserRecord?.contact_name || "",
+          invoice_id:
+            adRecord?.paid_via_invoice_id || adRecord?.invoice_id || null,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          skipped: false,
+          error: data?.error || "Failed to send approval email.",
+        };
+      }
+
+      return data || { skipped: false };
+    } catch (error) {
+      return {
+        skipped: false,
+        error:
+          error instanceof Error ? error.message : "Failed to send approval email.",
+      };
+    }
+  };
+
   const resetSubmissionEditState = () => {
     submissionEditFormRef.current = blankSubmissionEditForm;
     submissionEditAvailabilityRequestIdRef.current += 1;
@@ -6056,11 +6219,43 @@ export default function AdsPage() {
         }
 
         const savedAd = await upsertAd(payload);
+        let approvalEmailResult = null;
         if (isAdmin && isNewAdRecord && mode !== "draft") {
           emitSubmissionNotificationSignal({
             source: ADMIN_CREATED_AD_NOTIFICATION_SOURCE,
             id: savedAd?.id || payload.id || "",
           });
+
+          const accountInviteResult = await ensureAdvertiserAccountInvite(
+            payload.advertiser_id || savedAd?.advertiser_id,
+          );
+          if (accountInviteResult?.email_sent) {
+            appToast.success({
+              title: "Advertiser account email sent.",
+              description: `Sent to ${accountInviteResult.email || "the advertiser email"}.`,
+            });
+          } else if (accountInviteResult?.error) {
+            appToast.warning({
+              title: "Ad saved, but account email was not sent.",
+              description: accountInviteResult.error,
+            });
+          }
+
+          approvalEmailResult = await sendApprovedAdNoticeEmail({
+            adRecord: savedAd,
+            advertiserId: payload.advertiser_id || savedAd?.advertiser_id,
+          });
+          if (approvalEmailResult?.success) {
+            appToast.success({
+              title: "Approved ad email sent.",
+              description: `Sent to ${approvalEmailResult.email || "the advertiser email"}.`,
+            });
+          } else if (approvalEmailResult?.error) {
+            appToast.warning({
+              title: "Ad saved, but approval email was not sent.",
+              description: approvalEmailResult.error,
+            });
+          }
         }
 
         if (mode === "continue") {
@@ -6069,10 +6264,12 @@ export default function AdsPage() {
             savedAd?.invoice_id ||
             payload.paid_via_invoice_id ||
             payload.invoice_id ||
+            approvalEmailResult?.invoice_id ||
             null;
-          const linkedInvoice = linkedInvoiceId
+          const linkedInvoiceFromState = linkedInvoiceId
             ? invoices.find((item) => String(item.id) === String(linkedInvoiceId))
             : null;
+          const linkedInvoice = linkedInvoiceFromState || approvalEmailResult?.invoice || null;
 
           if (linkedInvoice) {
             setInvoice({
@@ -6743,9 +6940,9 @@ export default function AdsPage() {
                   onClick={() => setShowNotificationsDropdown((current) => !current)}
                 >
                   <Bell size={20} className="text-gray-600" />
-                  {unreadCount > 0 ? (
+                  {totalUnreadCount > 0 ? (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] rounded-full bg-[#ED1D26] px-1 text-[10px] font-semibold text-white flex items-center justify-center">
-                      {unreadCount > 99 ? "99+" : unreadCount}
+                      {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
                     </span>
                   ) : null}
                 </button>
@@ -6757,10 +6954,13 @@ export default function AdsPage() {
                         <p className="text-sm font-semibold text-gray-900">Notifications</p>
                         <p className="text-xs text-gray-500">Recent app activity</p>
                       </div>
-                      {unreadCount > 0 ? (
+                      {totalUnreadCount > 0 ? (
                         <button
                           type="button"
-                          onClick={() => void markAllAsRead()}
+                          onClick={async () => {
+                            await markAllAsRead();
+                            setAdsUnreadCount(0);
+                          }}
                           className="text-xs font-medium text-gray-600 hover:text-gray-900"
                         >
                           Mark all read
@@ -6768,24 +6968,47 @@ export default function AdsPage() {
                       ) : null}
                     </div>
 
-                    {unreadCount > 0 ? (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await markAllAsRead();
-                          setShowNotificationsDropdown(false);
-                          setActiveSection("Submissions");
-                          setView("list");
-                        }}
-                        className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
-                      >
-                        <p className="text-sm font-semibold text-gray-900">
-                          New ad submission received
-                        </p>
-                        <p className="text-xs text-gray-600 mt-1">
-                          Click to review pending submissions.
-                        </p>
-                      </button>
+                    {totalUnreadCount > 0 ? (
+                      <div className="space-y-2">
+                        {adsUnreadCount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAdsUnreadCount(0);
+                              setShowNotificationsDropdown(false);
+                              setActiveSection("Ads");
+                              setView("list");
+                            }}
+                            className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
+                          >
+                            <p className="text-sm font-semibold text-gray-900">
+                              New ad created by admin
+                            </p>
+                            <p className="text-xs text-gray-600 mt-1">
+                              Click to review recent ads.
+                            </p>
+                          </button>
+                        ) : null}
+                        {unreadCount > 0 ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await markAllAsRead();
+                              setShowNotificationsDropdown(false);
+                              setActiveSection("Submissions");
+                              setView("list");
+                            }}
+                            className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
+                          >
+                            <p className="text-sm font-semibold text-gray-900">
+                              New ad submission received
+                            </p>
+                            <p className="text-xs text-gray-600 mt-1">
+                              Click to review pending submissions.
+                            </p>
+                          </button>
+                        ) : null}
+                      </div>
                     ) : (
                       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
                         No new notifications

@@ -188,8 +188,9 @@ npx vercel --prod --yes
    - notification hook listens for that signal and refreshes unread count immediately
    - admin unread/mark-read endpoints now accept both `pending` and `Pending` status values
 5. Important behavior rule:
-   - bell/Submissions badges track new **pending submissions** (`pending_ads` via `/submit-ad`)
-   - admin "Create new ad" in Ads section creates an ad record directly and now emits a local notification signal (`admin-created-ad`) so bell/Submissions badges and toast still update without creating a new pending submission row
+   - bell/Submissions badges and Submissions toast track only real **pending submissions** (`pending_ads` via `/submit-ad`)
+   - admin "Create new ad" in Ads section must not increment Submissions unread/badge/toast
+   - admin-created ads emit local source `admin-created-ad` and must appear under Ads notification pathways (Ads sidebar badge + bell item navigating to Ads)
 6. Submissions review workflow is locked:
    - clicking the eye action in **Submissions** must open the submission review modal (not a toast-only preview)
    - review modal must allow editing submission fields so admins can apply client-requested changes
@@ -197,6 +198,25 @@ npx vercel --prod --yes
      - `pending`: Approve and Reject
      - `not_approved`: Delete
    - do not convert this modal into read-only review mode
+7. Email notification and invoice rules (critical):
+   - Submitted ad flow (`/api/public/submit-ad`) sends:
+     - advertiser confirmation email
+     - internal notifications to admin/manager/staff (and owner), resolved from `team_members` + `profiles` + enabled notification preference emails
+   - Admin-created ad flow sends:
+     - advertiser account invite flow via `/api/admin/advertisers/ensure-account`:
+       - create/update advertiser auth user as role `Advertiser`
+       - send verification email only when account is not already verified
+       - existing verified advertiser must not receive duplicate verification email
+     - approved ad/payment instruction email via `/api/admin/ads/send-approval-email`
+     - internal notification email for the created/approved ad to admin/manager/staff (and owner)
+   - Approval email invoice safety:
+     - `send-approval-email` must not send `Pending assignment` when an invoice exists or can be inferred
+     - resolve invoice using (in order):
+       1. ad-linked ids (`paid_via_invoice_id`, `invoice_id`, request `invoice_id`)
+       2. `invoice_items` by `ad_id`
+       3. `invoices.ad_ids` containing the ad
+     - if no invoice is found, auto-create and link invoice before sending email
+     - billing "continue" UI should reuse invoice returned by approval-email API to avoid duplicate invoice creation
 
 ## Audit and Debug Personas
 
