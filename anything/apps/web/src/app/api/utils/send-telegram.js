@@ -1,30 +1,74 @@
+const TELEGRAM_API_BASE = "https://api.telegram.org";
+
+const createTelegramError = (status, data) => {
+  const error = new Error(data?.description || "Failed to send Telegram message");
+  error.telegramStatus = status;
+  error.telegramErrorCode = data?.error_code ?? null;
+  return error;
+};
+
+const stripHtmlTags = (value) =>
+  String(value || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/?[^>]+>/g, "")
+    .trim();
+
+const shouldRetryWithoutHtml = (error) =>
+  /can't parse entities/i.test(String(error?.message || ""));
+
+const sendTelegram = async ({ token, chatId, text, parseMode = "HTML" }) => {
+  const payload = {
+    chat_id: String(chatId).trim(),
+    text: String(text || ""),
+  };
+  if (parseMode) {
+    payload.parse_mode = parseMode;
+  }
+
+  const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    throw createTelegramError(response.status, data);
+  }
+
+  return { message_id: data.result?.message_id };
+};
+
 export async function sendTelegramMessage({ chatId, text }) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
   if (!token) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   }
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${token}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: String(chatId).trim(),
-        text,
-        parse_mode: "HTML",
-      }),
-    },
-  );
+  try {
+    return await sendTelegram({
+      token,
+      chatId,
+      text,
+      parseMode: "HTML",
+    });
+  } catch (error) {
+    if (!shouldRetryWithoutHtml(error)) {
+      throw error;
+    }
 
-  const data = await response.json();
-  if (!response.ok || !data.ok) {
-    const error = new Error(data?.description || "Failed to send Telegram message");
-    error.telegramStatus = response.status;
-    error.telegramErrorCode = data?.error_code ?? null;
-    throw error;
+    const plainText = stripHtmlTags(text);
+    if (!plainText) {
+      throw error;
+    }
+
+    return sendTelegram({
+      token,
+      chatId,
+      text: plainText,
+      parseMode: null,
+    });
   }
-  return { message_id: data.result?.message_id };
 }
 
 export async function sendTelegramToMany({ chatIds, text }) {

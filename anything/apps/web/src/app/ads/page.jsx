@@ -5160,6 +5160,15 @@ export default function AdsPage() {
             ? "Invite email sent with a verify and password setup link."
             : data?.warning || "Team member added, but invite email was not sent.",
         });
+
+        if (data?.internal_notifications && !data.internal_notifications.telegram_sent) {
+          appToast.warning({
+            title: "Telegram notification not sent",
+            description:
+              data.internal_notifications.telegram_error ||
+              "No active Telegram recipients are configured in notification settings.",
+          });
+        }
       } else {
         await upsertTeamMember({
           id: createId("member"),

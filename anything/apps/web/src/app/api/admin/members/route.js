@@ -7,6 +7,7 @@ import {
   normalizeEmail,
 } from "../../utils/advertiser-auth.js";
 import { sendEmail } from "../../utils/send-email.js";
+import { notifyInternalChannels } from "../../utils/internal-notification-channels.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ALLOWED_INTERNAL_ROLES = new Set(["admin", "manager", "staff"]);
@@ -52,6 +53,28 @@ const formatRoleLabel = (role) => {
   const normalized = normalizeInternalRole(role, "staff");
   return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
 };
+
+const buildInternalMemberEmailHtml = ({
+  actionLabel,
+  memberName,
+  memberEmail,
+  memberRole,
+  inviterName,
+  emailSent,
+}) => `
+  <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
+    <div style="max-width: 560px; margin: 0 auto; padding: 24px 20px;">
+      <h2 style="margin: 0 0 16px;">${escapeHtml(actionLabel)}</h2>
+      <p style="margin: 0 0 8px;"><strong>Name:</strong> ${escapeHtml(memberName)}</p>
+      <p style="margin: 0 0 8px;"><strong>Email:</strong> ${escapeHtml(memberEmail)}</p>
+      <p style="margin: 0 0 8px;"><strong>Role:</strong> ${escapeHtml(memberRole)}</p>
+      <p style="margin: 0 0 8px;"><strong>Invited by:</strong> ${escapeHtml(inviterName)}</p>
+      <p style="margin: 0;">
+        <strong>Invite email:</strong> ${emailSent ? "Sent" : "Failed"}
+      </p>
+    </div>
+  </div>
+`;
 
 const buildInternalUserMetadata = ({ existingMetadata, name, email, role }) => ({
   ...(existingMetadata || {}),
@@ -406,6 +429,48 @@ export async function POST(request) {
       : inviteResult.error ||
         "Team member was created, but invite email could not be sent. Check email provider configuration.";
 
+    const actionLabel = existing?.id ? "Team Member Updated" : "Team Member Added";
+    const roleLabel = formatRoleLabel(normalizedRole);
+    const inviterLabel = String(admin?.user?.name || admin?.user?.email || "Unknown").trim();
+
+    let internalNotification = null;
+    try {
+      internalNotification = await notifyInternalChannels({
+        supabase,
+        emailSubject: `${actionLabel} - ${normalizedName} (${roleLabel})`,
+        emailHtml: buildInternalMemberEmailHtml({
+          actionLabel,
+          memberName: normalizedName,
+          memberEmail: normalizedEmail,
+          memberRole: roleLabel,
+          inviterName: inviterLabel,
+          emailSent,
+        }),
+        telegramText: [
+          `<b>${escapeHtml(actionLabel)}</b>`,
+          "",
+          `<b>Name:</b> ${escapeHtml(normalizedName)}`,
+          `<b>Email:</b> ${escapeHtml(normalizedEmail)}`,
+          `<b>Role:</b> ${escapeHtml(roleLabel)}`,
+          `<b>Invited by:</b> ${escapeHtml(inviterLabel)}`,
+          `<b>Invite email:</b> ${emailSent ? "Sent" : "Failed"}`,
+        ].join("\n"),
+        excludeEmails: [normalizedEmail],
+      });
+
+      if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
+        console.warn(
+          "[admin/members] Internal notifications were not sent:",
+          internalNotification,
+        );
+      }
+    } catch (internalNotificationError) {
+      console.error(
+        "[admin/members] Failed to send internal notifications:",
+        internalNotificationError,
+      );
+    }
+
     return Response.json({
       success: true,
       message: emailSent
@@ -416,6 +481,16 @@ export async function POST(request) {
       warning,
       created_user: !existingUser?.id,
       role: normalizedRole,
+      internal_notifications: internalNotification
+        ? {
+          email_sent: internalNotification.email_sent,
+          telegram_sent: internalNotification.telegram_sent,
+          email_recipients: internalNotification.emails.length,
+          telegram_recipients: internalNotification.telegram_chat_ids.length,
+          email_error: internalNotification.email_error,
+          telegram_error: internalNotification.telegram_error,
+        }
+        : null,
     });
   } catch (err) {
     console.error("POST /api/admin/members error", err);
