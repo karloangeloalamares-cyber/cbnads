@@ -5138,9 +5138,16 @@ export default function AdsPage() {
             role,
           }),
         });
-        const data = await response.json();
+        let data = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
         if (!response.ok) {
-          throw new Error(data?.error || "Failed to add team member.");
+          throw new Error(
+            data?.error || `Failed to add team member (HTTP ${response.status}).`,
+          );
         }
 
         invalidateDbCache();
@@ -5151,7 +5158,7 @@ export default function AdsPage() {
           title: "Team member added",
           description: data?.email_sent
             ? "Invite email sent with a verify and password setup link."
-            : "Team member added successfully.",
+            : data?.warning || "Team member added, but invite email was not sent.",
         });
       } else {
         await upsertTeamMember({

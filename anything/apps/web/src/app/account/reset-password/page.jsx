@@ -5,6 +5,54 @@ import { getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 import { updatePassword } from "@/lib/localAuth";
 import { appToast } from "@/lib/toast";
 
+const Shell = ({ children }) => (
+    <div className="min-h-screen flex">
+        {/* Left hero panel */}
+        <div
+            className="hidden lg:flex lg:w-1/2 relative bg-cover bg-center"
+            style={{
+                backgroundImage:
+                    "url(https://ucarecdn.com/8d0941a2-8e3f-47fa-b87d-1904c04c4e0c/-/format/auto/)",
+            }}
+        >
+            <div className="absolute inset-0 bg-black bg-opacity-40" />
+            <div className="relative z-10 flex items-center justify-center w-full p-12">
+                <div className="max-w-lg">
+                    <h1 className="text-5xl font-bold text-white leading-tight">
+                        GET YOUR
+                        <br />
+                        PRODUCT
+                        <br />
+                        SEEN
+                        <br />
+                        BY{" "}
+                        <span className="bg-black text-red-500 px-4 py-1 rounded-md inline-block">
+                            30,000+
+                        </span>
+                        <br />
+                        CUSTOMERS
+                        <br />
+                        DAILY!
+                    </h1>
+                </div>
+            </div>
+        </div>
+        {/* Right content panel */}
+        <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
+            <div className="w-full max-w-md">
+                <div className="flex justify-center mb-8">
+                    <img
+                        src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                        alt="Logo"
+                        className="h-20 w-auto"
+                    />
+                </div>
+                {children}
+            </div>
+        </div>
+    </div>
+);
+
 export default function ResetPasswordPage() {
     const [view, setView] = useState("loading"); // loading | form | success | error
     const [errorMessage, setErrorMessage] = useState("");
@@ -73,54 +121,6 @@ export default function ResetPasswordPage() {
     }, [view]);
 
     // ─── LAYOUTS ────────────────────────────────────────────────────────────────
-
-    const Shell = ({ children }) => (
-        <div className="min-h-screen flex">
-            {/* Left hero panel */}
-            <div
-                className="hidden lg:flex lg:w-1/2 relative bg-cover bg-center"
-                style={{
-                    backgroundImage:
-                        "url(https://ucarecdn.com/8d0941a2-8e3f-47fa-b87d-1904c04c4e0c/-/format/auto/)",
-                }}
-            >
-                <div className="absolute inset-0 bg-black bg-opacity-40" />
-                <div className="relative z-10 flex items-center justify-center w-full p-12">
-                    <div className="max-w-lg">
-                        <h1 className="text-5xl font-bold text-white leading-tight">
-                            GET YOUR
-                            <br />
-                            PRODUCT
-                            <br />
-                            SEEN
-                            <br />
-                            BY{" "}
-                            <span className="bg-black text-red-500 px-4 py-1 rounded-md inline-block">
-                                30,000+
-                            </span>
-                            <br />
-                            CUSTOMERS
-                            <br />
-                            DAILY!
-                        </h1>
-                    </div>
-                </div>
-            </div>
-            {/* Right content panel */}
-            <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
-                <div className="w-full max-w-md">
-                    <div className="flex justify-center mb-8">
-                        <img
-                            src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
-                            alt="Logo"
-                            className="h-20 w-auto"
-                        />
-                    </div>
-                    {children}
-                </div>
-            </div>
-        </div>
-    );
 
     if (view === "loading") {
         return (

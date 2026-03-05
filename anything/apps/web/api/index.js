@@ -12,9 +12,9 @@ import * as route_9 from "../src/app/api/admin/sync-advertiser-spending/route.js
 import * as route_10 from "../src/app/api/ads/archive/route.js";
 import * as route_11 from "../src/app/api/ads/availability/route.js";
 import * as route_12 from "../src/app/api/ads/availability-batch/route.js";
-import * as route_13 from "../src/app/api/ads/bulk-action/route.js";
-import * as route_14 from "../src/app/api/ads/create/route.js";
-import * as route_15 from "../src/app/api/ads/calendar/route.js";
+import * as route_13 from "../src/app/api/ads/calendar/route.js";
+import * as route_14 from "../src/app/api/ads/bulk-action/route.js";
+import * as route_15 from "../src/app/api/ads/create/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
 import * as route_17 from "../src/app/api/ads/export/route.js";
 import * as route_18 from "../src/app/api/ads/list/route.js";
@@ -30,8 +30,8 @@ import * as route_27 from "../src/app/api/invoices/batch-create/route.js";
 import * as route_28 from "../src/app/api/invoices/create/route.js";
 import * as route_29 from "../src/app/api/invoices/create-from-ads/route.js";
 import * as route_30 from "../src/app/api/invoices/generate-recurring/route.js";
-import * as route_31 from "../src/app/api/invoices/validate-amounts/route.js";
-import * as route_32 from "../src/app/api/products/create/route.js";
+import * as route_31 from "../src/app/api/products/create/route.js";
+import * as route_32 from "../src/app/api/invoices/validate-amounts/route.js";
 import * as route_33 from "../src/app/api/products/list/route.js";
 import * as route_34 from "../src/app/api/products/[id]/route.js";
 import * as route_35 from "../src/app/api/public/submit-ad/route.js";
@@ -40,8 +40,8 @@ import * as route_37 from "../src/app/api/submissions/[id]/route.js";
 import * as route_38 from "../src/app/api/upload/signed-url/route.js";
 import * as route_39 from "../src/app/api/user/profile/route.js";
 import * as route_40 from "../src/app/api/user/role/route.js";
-import * as route_41 from "../src/app/api/__create/ssr-test/route.js";
-import * as route_42 from "../src/app/api/admin/ads/send-approval-email/route.js";
+import * as route_41 from "../src/app/api/admin/ads/send-approval-email/route.js";
+import * as route_42 from "../src/app/api/__create/ssr-test/route.js";
 import * as route_43 from "../src/app/api/admin/advertisers/ensure-account/route.js";
 import * as route_44 from "../src/app/api/admin/members/[id]/route.js";
 import * as route_45 from "../src/app/api/admin/pending-ads/approve/route.js";
@@ -68,7 +68,7 @@ const routes = [
   { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_56 },
   { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_58 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_50 },
-  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_42 },
+  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_41 },
   { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_48 },
   { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_59 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_45 },
@@ -85,7 +85,7 @@ const routes = [
   { regex: new RegExp("^/api/admin/notification\\-preferences$"), module: route_5 },
   { regex: new RegExp("^/api/admin/sync\\-advertiser\\-spending$"), module: route_9 },
   { regex: new RegExp("^/api/invoices/generate\\-recurring$"), module: route_30 },
-  { regex: new RegExp("^/api/invoices/validate\\-amounts$"), module: route_31 },
+  { regex: new RegExp("^/api/invoices/validate\\-amounts$"), module: route_32 },
   { regex: new RegExp("^/api/invoices/create\\-from\\-ads$"), module: route_29 },
   { regex: new RegExp("^/api/admin/fix\\-all\\-spending$"), module: route_3 },
   { regex: new RegExp("^/api/ads/availability\\-batch$"), module: route_12 },
@@ -98,20 +98,20 @@ const routes = [
   { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_19 },
   { regex: new RegExp("^/api/advertisers/create$"), module: route_21 },
   { regex: new RegExp("^/api/upload/signed\\-url$"), module: route_38 },
-  { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_41 },
+  { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_42 },
   { regex: new RegExp("^/api/ads/availability$"), module: route_11 },
   { regex: new RegExp("^/api/advertisers/list$"), module: route_22 },
   { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_35 },
-  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_13 },
+  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_14 },
   { regex: new RegExp("^/api/invoices/create$"), module: route_28 },
-  { regex: new RegExp("^/api/products/create$"), module: route_32 },
+  { regex: new RegExp("^/api/products/create$"), module: route_31 },
   { regex: new RegExp("^/api/admin/settings$"), module: route_8 },
   { regex: new RegExp("^/api/admin/members$"), module: route_4 },
   { regex: new RegExp("^/api/products/list$"), module: route_33 },
-  { regex: new RegExp("^/api/ads/calendar$"), module: route_15 },
+  { regex: new RegExp("^/api/ads/calendar$"), module: route_13 },
   { regex: new RegExp("^/api/user/profile$"), module: route_39 },
   { regex: new RegExp("^/api/ads/archive$"), module: route_10 },
-  { regex: new RegExp("^/api/ads/create$"), module: route_14 },
+  { regex: new RegExp("^/api/ads/create$"), module: route_15 },
   { regex: new RegExp("^/api/ads/delete$"), module: route_16 },
   { regex: new RegExp("^/api/ads/export$"), module: route_17 },
   { regex: new RegExp("^/api/ads/update$"), module: route_20 },

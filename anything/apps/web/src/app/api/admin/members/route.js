@@ -10,6 +10,11 @@ import { sendEmail } from "../../utils/send-email.js";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ALLOWED_INTERNAL_ROLES = new Set(["admin", "manager", "staff"]);
+const APP_ROLE_TO_PROFILE_ROLE = {
+  admin: "Admin",
+  manager: "Manager",
+  staff: "Staff",
+};
 
 const createTemporaryPassword = () => `${crypto.randomBytes(24).toString("base64url")}Aa1!`;
 
@@ -29,6 +34,20 @@ const normalizeInternalRole = (value, fallback = "staff") => {
   return fallback;
 };
 
+const toProfileRole = (appRole) => {
+  const normalizedRole = normalizeInternalRole(appRole, "staff");
+  return APP_ROLE_TO_PROFILE_ROLE[normalizedRole] || "Staff";
+};
+
+const getProfileRoleCandidates = (appRole) => {
+  const normalizedRole = normalizeInternalRole(appRole, "staff");
+  if (normalizedRole === "staff") {
+    // Backward compatibility for environments that still use Assistant.
+    return ["Staff", "Assistant"];
+  }
+  return [toProfileRole(normalizedRole)];
+};
+
 const formatRoleLabel = (role) => {
   const normalized = normalizeInternalRole(role, "staff");
   return normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
@@ -36,7 +55,7 @@ const formatRoleLabel = (role) => {
 
 const buildInternalUserMetadata = ({ existingMetadata, name, email, role }) => ({
   ...(existingMetadata || {}),
-  role: normalizeInternalRole(role, "staff"),
+  role: toProfileRole(role),
   full_name: String(name || "").trim() || email,
   signup_source: "admin_dashboard",
 });
@@ -96,6 +115,76 @@ ${String(inviterName || "").trim() || "A CBN Ads admin"} created your CBN Ads te
 Verify your email and set your password here:
 ${setupUrl}`,
   });
+};
+
+const sendPasswordSetupEmail = async ({
+  supabase,
+  email,
+  name,
+  role,
+  inviterName,
+  redirectTo,
+}) => {
+  let setupUrl = "";
+  let lastError = null;
+
+  try {
+    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: {
+        redirectTo,
+      },
+    });
+    if (linkError) {
+      console.warn("[admin/members] generateLink failed; will try reset email fallback:", linkError);
+      lastError = linkError;
+    } else {
+      setupUrl = String(linkData?.properties?.action_link || "").trim();
+    }
+  } catch (error) {
+    console.warn("[admin/members] generateLink threw; will try reset email fallback:", error);
+    lastError = error;
+  }
+
+  if (setupUrl) {
+    try {
+      await sendTeamMemberInviteEmail({
+        email,
+        name,
+        role,
+        setupUrl,
+        inviterName,
+      });
+      return {
+        emailSent: true,
+        deliveryMethod: "custom",
+        error: null,
+      };
+    } catch (error) {
+      console.warn("[admin/members] custom invite email failed; will try reset email fallback:", error);
+      lastError = error;
+    }
+  }
+
+  const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
+  });
+  if (resetError) {
+    console.warn("[admin/members] Supabase reset email fallback failed:", resetError);
+    lastError = resetError;
+    return {
+      emailSent: false,
+      deliveryMethod: "none",
+      error: String(resetError?.message || lastError?.message || "Failed to send invite email."),
+    };
+  }
+
+  return {
+    emailSent: true,
+    deliveryMethod: "supabase_reset",
+    error: null,
+  };
 };
 
 // Get all internal members
@@ -194,28 +283,6 @@ export async function POST(request) {
           { status: 400 },
         );
       }
-
-      const { error: promoteError } = await supabase
-        .from(table("team_members"))
-        .update({
-          role: normalizedRole,
-          name: normalizedName,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existing.id);
-      if (promoteError) throw promoteError;
-    } else {
-      const nowIso = new Date().toISOString();
-      const { error: insertError } = await supabase
-        .from(table("team_members"))
-        .insert({
-          name: normalizedName,
-          email: normalizedEmail,
-          role: normalizedRole,
-          created_at: nowIso,
-          updated_at: nowIso,
-        });
-      if (insertError) throw insertError;
     }
 
     const existingUser = await findAuthUserByEmail(supabase, normalizedEmail);
@@ -253,53 +320,100 @@ export async function POST(request) {
       if (error) throw error;
       authUser = data?.user || existingUser;
     } else {
-      const { data, error } = await supabase.auth.admin.createUser({
-        email: normalizedEmail,
-        password: createTemporaryPassword(),
-        email_confirm: true,
-        user_metadata: buildInternalUserMetadata({
-          name: normalizedName,
+      const profileRoleCandidates = getProfileRoleCandidates(normalizedRole);
+      let createdUser = null;
+      let lastCreateError = null;
+
+      for (const profileRole of profileRoleCandidates) {
+        const { data, error } = await supabase.auth.admin.createUser({
           email: normalizedEmail,
-          role: normalizedRole,
-        }),
-        app_metadata: { role: normalizedRole },
-      });
-      if (error) throw error;
-      authUser = data?.user || null;
+          password: createTemporaryPassword(),
+          email_confirm: true,
+          user_metadata: buildInternalUserMetadata({
+            name: normalizedName,
+            email: normalizedEmail,
+            role: profileRole,
+          }),
+          app_metadata: { role: normalizedRole },
+        });
+
+        if (!error) {
+          createdUser = data?.user || null;
+          break;
+        }
+
+        lastCreateError = error;
+        const isStaffFallbackCandidate =
+          normalizedRole === "staff" && profileRoleCandidates.length > 1;
+        const isDatabaseCreateError = /database error creating new user/i.test(
+          String(error?.message || ""),
+        );
+
+        if (!isStaffFallbackCandidate || !isDatabaseCreateError) {
+          throw error;
+        }
+      }
+
+      if (!createdUser && lastCreateError) {
+        throw lastCreateError;
+      }
+
+      authUser = createdUser;
     }
 
     if (!authUser?.id) {
       throw new Error("Failed to create the team member auth account.");
     }
 
-    const appBaseUrl = getAdvertiserAuthBaseUrl(request);
-    const redirectTo = `${appBaseUrl}/account/reset-password`;
-    const { data: linkData, error: linkError } = await supabase.auth.admin.generateLink({
-      type: "recovery",
-      email: normalizedEmail,
-      options: {
-        redirectTo,
-      },
-    });
-    if (linkError) throw linkError;
-
-    const setupUrl = String(linkData?.properties?.action_link || "").trim();
-    if (!setupUrl) {
-      throw new Error("Failed to generate the password setup link.");
+    if (existing?.id) {
+      const { error: promoteError } = await supabase
+        .from(table("team_members"))
+        .update({
+          role: normalizedRole,
+          name: normalizedName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      if (promoteError) throw promoteError;
+    } else {
+      const nowIso = new Date().toISOString();
+      const { error: insertError } = await supabase
+        .from(table("team_members"))
+        .insert({
+          name: normalizedName,
+          email: normalizedEmail,
+          role: normalizedRole,
+          created_at: nowIso,
+          updated_at: nowIso,
+        });
+      if (insertError) throw insertError;
     }
 
-    await sendTeamMemberInviteEmail({
+    const appBaseUrl = getAdvertiserAuthBaseUrl(request);
+    const redirectTo = `${appBaseUrl}/account/reset-password`;
+    const inviteResult = await sendPasswordSetupEmail({
+      supabase,
       email: normalizedEmail,
       name: normalizedName,
       role: normalizedRole,
-      setupUrl,
       inviterName: admin?.user?.name || admin?.user?.email || "",
+      redirectTo,
     });
+
+    const emailSent = inviteResult.emailSent === true;
+    const warning = emailSent
+      ? null
+      : inviteResult.error ||
+        "Team member was created, but invite email could not be sent. Check email provider configuration.";
 
     return Response.json({
       success: true,
-      message: "Team member created and invite email sent.",
-      email_sent: true,
+      message: emailSent
+        ? "Team member created and invite email sent."
+        : "Team member created, but invite email was not sent.",
+      email_sent: emailSent,
+      email_delivery_method: inviteResult.deliveryMethod,
+      warning,
       created_user: !existingUser?.id,
       role: normalizedRole,
     });
