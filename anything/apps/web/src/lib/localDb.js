@@ -476,6 +476,7 @@ const baseDb = (users = []) => {
     notification_preferences: {
       email_enabled: false,
       sms_enabled: false,
+      telegram_enabled: false,
       reminder_time_value: 1,
       reminder_time_unit: 'hours',
       email_address: '',
@@ -1026,24 +1027,32 @@ const toAdminSettingsFallbackRow = (input) => {
   };
 };
 
-const fromNotificationRows = (notificationRow, adminNotificationRow) => ({
-  email_enabled:
-    adminNotificationRow?.email_enabled ?? notificationRow?.email_enabled ?? false,
-  sms_enabled: adminNotificationRow?.sms_enabled ?? false,
-  reminder_time_value: Number(adminNotificationRow?.reminder_time_value) || 1,
-  reminder_time_unit: adminNotificationRow?.reminder_time_unit || 'hours',
-  email_address:
-    adminNotificationRow?.email_address ||
-    notificationRow?.reminder_email ||
-    '',
-  phone_number: normalizeUSPhoneNumber(adminNotificationRow?.phone_number || ''),
-  sound_enabled: adminNotificationRow?.sound_enabled ?? true,
-  reminder_email:
-    notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
-  telegram_chat_ids: toArray(adminNotificationRow?.telegram_chat_ids),
-  created_at: notificationRow?.created_at || adminNotificationRow?.created_at || nowIso(),
-  updated_at: notificationRow?.updated_at || adminNotificationRow?.updated_at || nowIso(),
-});
+const fromNotificationRows = (notificationRow, adminNotificationRow) => {
+  const telegramChatIds = toArray(adminNotificationRow?.telegram_chat_ids);
+  const hasActiveTelegramChat = telegramChatIds.some(
+    (entry) => entry?.is_active !== false && String(entry?.chat_id || '').trim(),
+  );
+
+  return {
+    email_enabled:
+      adminNotificationRow?.email_enabled ?? notificationRow?.email_enabled ?? false,
+    sms_enabled: adminNotificationRow?.sms_enabled ?? false,
+    telegram_enabled: adminNotificationRow?.telegram_enabled ?? hasActiveTelegramChat,
+    reminder_time_value: Number(adminNotificationRow?.reminder_time_value) || 1,
+    reminder_time_unit: adminNotificationRow?.reminder_time_unit || 'hours',
+    email_address:
+      adminNotificationRow?.email_address ||
+      notificationRow?.reminder_email ||
+      '',
+    phone_number: normalizeUSPhoneNumber(adminNotificationRow?.phone_number || ''),
+    sound_enabled: adminNotificationRow?.sound_enabled ?? true,
+    reminder_email:
+      notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
+    telegram_chat_ids: telegramChatIds,
+    created_at: notificationRow?.created_at || adminNotificationRow?.created_at || nowIso(),
+    updated_at: notificationRow?.updated_at || adminNotificationRow?.updated_at || nowIso(),
+  };
+};
 
 const toNotificationRow = (input) => ({
   email_enabled: Boolean(input?.email_enabled),

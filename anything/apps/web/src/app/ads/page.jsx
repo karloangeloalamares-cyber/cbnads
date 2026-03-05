@@ -2835,7 +2835,8 @@ export default function AdsPage() {
       sms_enabled:
         notificationPreferences.sms_enabled ?? current.sms_enabled ?? false,
       telegram_enabled:
-        notificationPreferences.telegram_enabled ?? current.telegram_enabled ?? false,
+        notificationPreferences.telegram_enabled ??
+        (settingsActiveTelegramCount > 0 ? true : current.telegram_enabled ?? false),
       reminder_time_value:
         Number(notificationPreferences.reminder_time_value) ||
         current.reminder_time_value ||
@@ -2858,7 +2859,7 @@ export default function AdsPage() {
     setSettingsMaxAdsPerDay(
       String(adminSettings.max_ads_per_day || adminSettings.max_ads_per_slot || 5),
     );
-  }, [adminSettings, notificationPreferences, user?.email]);
+  }, [adminSettings, notificationPreferences, settingsActiveTelegramCount, user?.email]);
 
   useEffect(() => {
     if (filteredWhatsAppMessages.length === 0) {
@@ -5307,6 +5308,41 @@ export default function AdsPage() {
           error instanceof Error
             ? error.message
             : "Failed to update Telegram chat ID.",
+      });
+    }
+  };
+
+  const handleSettingsToggleTelegramEnabled = async (nextEnabled) => {
+    setSettingsNotification((current) => ({
+      ...current,
+      telegram_enabled: nextEnabled,
+    }));
+
+    try {
+      await updateDb((currentDb) => {
+        const list = Array.isArray(currentDb.telegram_chat_ids)
+          ? currentDb.telegram_chat_ids
+          : [];
+        if (list.length === 0) {
+          return currentDb;
+        }
+
+        const now = new Date().toISOString();
+        currentDb.telegram_chat_ids = list.map((item) => ({
+          ...item,
+          is_active: nextEnabled,
+          updated_at: now,
+        }));
+        return currentDb;
+      });
+      setDb(readDb());
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to update Telegram notification status.",
       });
     }
   };
@@ -11264,10 +11300,7 @@ export default function AdsPage() {
                           id="settings-telegram-enabled"
                           checked={Boolean(settingsNotification.telegram_enabled)}
                           onChange={(event) =>
-                            setSettingsNotification((current) => ({
-                              ...current,
-                              telegram_enabled: event.target.checked,
-                            }))
+                            void handleSettingsToggleTelegramEnabled(event.target.checked)
                           }
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                         />
