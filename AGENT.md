@@ -1,6 +1,6 @@
 # CBN Ads Agent Handbook
 
-Last updated: February 27, 2026
+Last updated: March 5, 2026
 
 ## Scope
 
@@ -190,6 +190,13 @@ npx vercel --prod --yes
 5. Important behavior rule:
    - bell/Submissions badges track new **pending submissions** (`pending_ads` via `/submit-ad`)
    - admin "Create new ad" in Ads section creates an ad record directly and now emits a local notification signal (`admin-created-ad`) so bell/Submissions badges and toast still update without creating a new pending submission row
+6. Submissions review workflow is locked:
+   - clicking the eye action in **Submissions** must open the submission review modal (not a toast-only preview)
+   - review modal must allow editing submission fields so admins can apply client-requested changes
+   - admin actions must be available in the same review modal:
+     - `pending`: Approve and Reject
+     - `not_approved`: Delete
+   - do not convert this modal into read-only review mode
 
 ## Audit and Debug Personas
 

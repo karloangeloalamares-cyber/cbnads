@@ -131,6 +131,14 @@ const getSubmissionApproveToastId = (pendingAdId) => `submission-approve-${pendi
 const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
 const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
 const ADMIN_CREATED_AD_NOTIFICATION_SOURCE = "admin-created-ad";
+const SUBMISSION_REJECTION_REASON_STORAGE_KEY = "cbn:submission-rejection-reasons";
+const DEFAULT_SUBMISSION_REJECTION_REASONS = [
+  "No Image",
+  "Prohibited Content",
+  "Missing Required Details",
+  "Incorrect Schedule Details",
+  "Poor Image Quality",
+];
 
 const emitSubmissionNotificationSignal = ({ source = "", id = "" } = {}) => {
   if (typeof window === "undefined") {
@@ -158,6 +166,28 @@ const emitSubmissionNotificationSignal = ({ source = "", id = "" } = {}) => {
 
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
+const mergeUniqueSubmissionReasons = (...groups) => {
+  const merged = [];
+  const seen = new Set();
+
+  for (const group of groups) {
+    const values = Array.isArray(group) ? group : [];
+    for (const value of values) {
+      const reason = String(value || "").trim();
+      if (!reason) {
+        continue;
+      }
+      const key = reason.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(reason);
+    }
+  }
+
+  return merged;
+};
 
 const matchesAdvertiserScope = (item, scope) => {
   if (!item || !scope) {
@@ -1316,6 +1346,28 @@ const formatSubmissionStatus = (status) =>
     .replace(/_/g, " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
 
+const getSubmissionReasonPreview = (item) => {
+  const status = String(item?.status || "").toLowerCase();
+  const reviewNotes = String(item?.review_notes || "").trim();
+  if (!reviewNotes) {
+    return status === "not_approved" ? "No reason added" : "\u2014";
+  }
+
+  const lines = reviewNotes
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  const bulletReason = lines.find((line) => line.startsWith("- "));
+  if (bulletReason) {
+    return bulletReason.slice(2);
+  }
+
+  const firstReadableLine = lines.find(
+    (line) => !/^rejection reasons:?$/i.test(line) && !/^reviewer notes:?$/i.test(line),
+  );
+  return firstReadableLine || reviewNotes;
+};
+
 const formatSubmissionDate = (value) => {
   if (!value) {
     return "-";
@@ -2093,6 +2145,13 @@ export default function AdsPage() {
     useState(false);
   const [submissionEditPastTimeError, setSubmissionEditPastTimeError] = useState(null);
   const [submissionEditFullyBookedDates, setSubmissionEditFullyBookedDates] = useState([]);
+  const [submissionReviewAction, setSubmissionReviewAction] = useState("");
+  const [submissionRejectReasonLibrary, setSubmissionRejectReasonLibrary] = useState(
+    DEFAULT_SUBMISSION_REJECTION_REASONS,
+  );
+  const [submissionRejectSelectedReasons, setSubmissionRejectSelectedReasons] = useState([]);
+  const [submissionRejectNote, setSubmissionRejectNote] = useState("");
+  const [submissionRejectNewReason, setSubmissionRejectNewReason] = useState("");
   const submissionEditFormRef = useRef(blankSubmissionEditForm);
   const submissionEditAvailabilityRequestIdRef = useRef(0);
   const [adDeleteModal, setAdDeleteModal] = useState(null);
@@ -2211,6 +2270,22 @@ export default function AdsPage() {
   useEffect(() => {
     submissionEditFormRef.current = submissionEditForm;
   }, [submissionEditForm]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(SUBMISSION_REJECTION_REASON_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setSubmissionRejectReasonLibrary(
+        mergeUniqueSubmissionReasons(DEFAULT_SUBMISSION_REJECTION_REASONS, parsed),
+      );
+    } catch (error) {
+      console.error("Failed to load submission rejection reasons:", error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!settingsProfileMessage) {
@@ -3954,7 +4029,7 @@ export default function AdsPage() {
   const handleApprovePendingAd = async (pendingAdId) => {
     const normalizedPendingAdId = String(pendingAdId || "").trim();
     if (!normalizedPendingAdId || pendingSubmissionApproveIdSet.has(normalizedPendingAdId)) {
-      return;
+      return false;
     }
 
     const toastId = getSubmissionApproveToastId(normalizedPendingAdId);
@@ -3977,16 +4052,180 @@ export default function AdsPage() {
         title: "Ad Approved",
         description: "The submission was moved out of pending items.",
       });
+      return true;
     } catch (error) {
       console.error("[AdsPage] Approve submission failed", error);
       appToast.error({
         title: error instanceof Error ? error.message : "Failed to approve ad.",
       });
+      return false;
     } finally {
       appToast.dismiss(toastId);
       setPendingSubmissionApproveIds((current) =>
         current.filter((id) => id !== normalizedPendingAdId),
       );
+    }
+  };
+
+  const handleRejectPendingAd = async (pendingAdId, { reasons = [], note = "" } = {}) => {
+    const normalizedPendingAdId = String(pendingAdId || "").trim();
+    if (!normalizedPendingAdId) {
+      return false;
+    }
+
+    const normalizedReasons = mergeUniqueSubmissionReasons(reasons);
+    const normalizedNote = String(note || "").trim();
+
+    if (!hasSupabaseConfig) {
+      try {
+        await rejectPendingAd(normalizedPendingAdId, {
+          reasons: normalizedReasons,
+          note: normalizedNote,
+        });
+        setDb(readDb());
+        appToast.success({
+          title: "Submission rejected.",
+        });
+        return true;
+      } catch (error) {
+        console.error("[AdsPage] Reject submission failed", error);
+        appToast.error({
+          title: error instanceof Error ? error.message : "Failed to reject submission.",
+        });
+        return false;
+      }
+    }
+
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/pending-ads/reject", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pending_ad_id: normalizedPendingAdId,
+          reasons: normalizedReasons,
+          rejection_note: normalizedNote,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to reject submission.");
+      }
+
+      resetDbCache({ emit: false });
+      await ensureDb();
+      setDb(readDb());
+      appToast.success({
+        title: "Submission rejected.",
+      });
+      return true;
+    } catch (error) {
+      console.error("[AdsPage] Reject submission failed", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to reject submission.",
+      });
+      return false;
+    }
+  };
+
+  const handleDeletePendingSubmission = async (pendingAdId) => {
+    const normalizedPendingAdId = String(pendingAdId || "").trim();
+    if (!normalizedPendingAdId) {
+      return false;
+    }
+
+    try {
+      await deletePendingAd(normalizedPendingAdId);
+      setDb(readDb());
+      appToast.success({
+        title: "Submission deleted.",
+      });
+      return true;
+    } catch (error) {
+      console.error("[AdsPage] Delete submission failed", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to delete submission.",
+      });
+      return false;
+    }
+  };
+
+  const handleModalApprovePendingAd = async () => {
+    if (!submissionEditModal?.id || submissionEditLoading) {
+      return;
+    }
+    setSubmissionEditLoading(true);
+    try {
+      const approved = await handleApprovePendingAd(submissionEditModal.id);
+      if (approved) {
+        resetSubmissionEditState();
+      }
+    } finally {
+      setSubmissionEditLoading(false);
+    }
+  };
+
+  const handleModalRejectPendingAd = async () => {
+    if (!submissionEditModal?.id || submissionEditLoading) {
+      return;
+    }
+
+    const selectedReasons = mergeUniqueSubmissionReasons(submissionRejectSelectedReasons);
+    const reviewerNote = String(submissionRejectNote || "").trim();
+    if (selectedReasons.length === 0 && !reviewerNote) {
+      appToast.error({
+        title: "Add rejection feedback",
+        description: "Select at least one reason or provide a reviewer note.",
+      });
+      return;
+    }
+
+    setSubmissionEditLoading(true);
+    try {
+      const rejected = await handleRejectPendingAd(submissionEditModal.id, {
+        reasons: selectedReasons,
+        note: reviewerNote,
+      });
+      if (rejected) {
+        resetSubmissionEditState();
+      }
+    } finally {
+      setSubmissionEditLoading(false);
+    }
+  };
+
+  const handleModalDeletePendingSubmission = async () => {
+    if (!submissionEditModal?.id || submissionEditLoading) {
+      return;
+    }
+    setSubmissionEditLoading(true);
+    try {
+      const deleted = await handleDeletePendingSubmission(submissionEditModal.id);
+      if (deleted) {
+        resetSubmissionEditState();
+      }
+    } finally {
+      setSubmissionEditLoading(false);
+    }
+  };
+
+  const submitSubmissionReviewAction = async () => {
+    if (!isSubmissionReviewMode || !submissionReviewAction || submissionEditLoading) {
+      return;
+    }
+
+    if (submissionReviewAction === "approve") {
+      await handleModalApprovePendingAd();
+      return;
+    }
+    if (submissionReviewAction === "reject") {
+      await handleModalRejectPendingAd();
+      return;
+    }
+    if (submissionReviewAction === "delete") {
+      await handleModalDeletePendingSubmission();
     }
   };
 
@@ -4056,10 +4295,26 @@ export default function AdsPage() {
     setSubmissionEditAvailabilityError(null);
     setSubmissionEditPastTimeError(null);
     setSubmissionEditFullyBookedDates([]);
+    setSubmissionReviewAction("");
+    setSubmissionRejectSelectedReasons([]);
+    setSubmissionRejectNote("");
+    setSubmissionRejectNewReason("");
   };
 
   const openSubmissionEditModal = (submission) => {
     const nextForm = toSubmissionEditForm(submission);
+    const normalizedStatus = String(submission?.status || "").toLowerCase();
+    let defaultReviewAction = "";
+    if (isAdmin && ["pending", "not_approved"].includes(normalizedStatus)) {
+      if (canConvertSubmissions) {
+        defaultReviewAction = "approve";
+      } else if (canRejectSubmissions) {
+        defaultReviewAction = "reject";
+      } else if (normalizedStatus === "not_approved") {
+        defaultReviewAction = "delete";
+      }
+    }
+
     submissionEditFormRef.current = nextForm;
     submissionEditAvailabilityRequestIdRef.current += 1;
     setSubmissionEditModal(submission);
@@ -4071,6 +4326,54 @@ export default function AdsPage() {
     setSubmissionEditAvailabilityError(null);
     setSubmissionEditPastTimeError(null);
     setSubmissionEditFullyBookedDates([]);
+    setSubmissionReviewAction(defaultReviewAction);
+    setSubmissionRejectSelectedReasons([]);
+    setSubmissionRejectNote("");
+    setSubmissionRejectNewReason("");
+  };
+
+  const toggleSubmissionRejectReason = (reason, checked) => {
+    const normalizedReason = String(reason || "").trim();
+    if (!normalizedReason) {
+      return;
+    }
+
+    setSubmissionRejectSelectedReasons((current) => {
+      if (checked) {
+        return mergeUniqueSubmissionReasons(current, [normalizedReason]);
+      }
+      return current.filter(
+        (item) =>
+          String(item || "").trim().toLowerCase() !== normalizedReason.toLowerCase(),
+      );
+    });
+  };
+
+  const addSubmissionRejectReasonOption = () => {
+    const normalizedReason = String(submissionRejectNewReason || "").trim();
+    if (!normalizedReason) {
+      return;
+    }
+
+    const reasonToAdd = normalizedReason.slice(0, 120);
+    setSubmissionRejectReasonLibrary((current) => {
+      const next = mergeUniqueSubmissionReasons(current, [reasonToAdd]);
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(
+            SUBMISSION_REJECTION_REASON_STORAGE_KEY,
+            JSON.stringify(next),
+          );
+        } catch {
+          // Ignore localStorage failures in private mode/quota limits.
+        }
+      }
+      return next;
+    });
+    setSubmissionRejectSelectedReasons((current) =>
+      mergeUniqueSubmissionReasons(current, [reasonToAdd]),
+    );
+    setSubmissionRejectNewReason("");
   };
 
   const handleSubmissionEditChange = (field, value) => {
@@ -4385,6 +4688,56 @@ export default function AdsPage() {
       setSubmissionEditLoading(false);
     }
   };
+
+  const submissionEditStatus = String(submissionEditModal?.status || "").toLowerCase();
+  const canModalApproveSubmission =
+    isAdmin &&
+    canConvertSubmissions &&
+    ["pending", "not_approved"].includes(submissionEditStatus);
+  const canModalRejectSubmission =
+    isAdmin &&
+    canRejectSubmissions &&
+    ["pending", "not_approved"].includes(submissionEditStatus);
+  const canModalDeleteSubmission =
+    isAdmin && submissionEditStatus === "not_approved";
+  const isSubmissionReviewMode =
+    canModalApproveSubmission || canModalRejectSubmission || canModalDeleteSubmission;
+  const submissionReviewDescription = canModalDeleteSubmission
+    ? "Review the submission details, then approve, reject, or delete."
+    : "Review the submission details, then approve or reject.";
+  const hasSubmissionRejectFeedback =
+    mergeUniqueSubmissionReasons(submissionRejectSelectedReasons).length > 0 ||
+    String(submissionRejectNote || "").trim().length > 0;
+  const submissionReviewActionOptions = useMemo(() => {
+    const options = [];
+    if (canModalApproveSubmission) {
+      options.push({ value: "approve", label: "Approve" });
+    }
+    if (canModalRejectSubmission) {
+      options.push({ value: "reject", label: "Reject" });
+    }
+    if (canModalDeleteSubmission) {
+      options.push({ value: "delete", label: "Delete" });
+    }
+    return options;
+  }, [canModalApproveSubmission, canModalDeleteSubmission, canModalRejectSubmission]);
+
+  useEffect(() => {
+    if (!isSubmissionReviewMode) {
+      if (submissionReviewAction !== "") {
+        setSubmissionReviewAction("");
+      }
+      return;
+    }
+
+    const allowedActions = new Set(
+      submissionReviewActionOptions.map((option) => option.value),
+    );
+    if (allowedActions.has(submissionReviewAction)) {
+      return;
+    }
+    setSubmissionReviewAction(submissionReviewActionOptions[0]?.value || "");
+  }, [isSubmissionReviewMode, submissionReviewAction, submissionReviewActionOptions]);
 
   const download = (filename, text, type) => {
     const blob = new Blob([text], { type });
@@ -7003,7 +7356,7 @@ export default function AdsPage() {
                             Advertiser
                           </th>
                           <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
-                            Email
+                            Reason
                           </th>
                           <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
                             Post Type
@@ -7018,10 +7371,6 @@ export default function AdsPage() {
                       </thead>
                       <tbody className="divide-y divide-gray-200">
                         {filteredPendingSubmissions.map((item) => {
-                          const isApprovingSubmission = pendingSubmissionApproveIdSet.has(
-                            String(item.id || ""),
-                          );
-
                           return (
                             <tr key={item.id} className="hover:bg-gray-50">
                             <td className="px-6 py-3.5">
@@ -7040,12 +7389,12 @@ export default function AdsPage() {
                               {item.advertiser_name || "-"}
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs">
-                              {(() => {
-                                const email = item.email || "";
-                                if (!email || !email.includes("@")) return email || "-";
-                                const [local, domain] = email.split("@");
-                                return `${local[0]}${"+".repeat(Math.min(local.length - 1, 5))}@${domain}`;
-                              })()}
+                              <span
+                                className="block max-w-[220px] truncate"
+                                title={String(item.review_notes || "").trim() || getSubmissionReasonPreview(item)}
+                              >
+                                {getSubmissionReasonPreview(item)}
+                              </span>
                             </td>
                             <td className="px-6 py-3.5 text-gray-600 text-xs whitespace-nowrap">
                               {formatPostTypeLabel(item.post_type) || "-"}
@@ -7070,76 +7419,12 @@ export default function AdsPage() {
                                   <button
                                     type="button"
                                     className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
-                                    title="View Details"
-                                    onClick={() => {
-                                      appToast.info({
-                                        title: item.ad_name || "Submission",
-                                        description: `Submitted by ${item.advertiser_name || "unknown advertiser"}`,
-                                      });
-                                    }}
+                                    title="Review submission"
+                                    onClick={() => openSubmissionEditModal(item)}
                                   >
                                     <Eye size={16} />
                                   </button>
                                 )}
-                                {isAdmin && item.status === "pending" ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="p-1.5 text-blue-600 hover:text-blue-900 hover:bg-blue-50 rounded transition-colors"
-                                      title="Edit Submission"
-                                      onClick={() => {
-                                        setActiveSection("Ads");
-                                        setAd({
-                                          ...blankAd,
-                                          ad_name: item.ad_name || "",
-                                          post_type: item.post_type || "one_time",
-                                          post_date:
-                                            item.post_date || item.post_date_from || "",
-                                          post_time: item.post_time || "",
-                                          notes: item.notes || item.ad_text || "",
-                                        });
-                                        setView("createAd");
-                                      }}
-                                    >
-                                      <Pencil size={16} />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="px-2.5 py-1 bg-black text-white rounded hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:text-gray-300 text-xs font-medium"
-                                      onClick={() => void handleApprovePendingAd(item.id)}
-                                      disabled={isApprovingSubmission}
-                                    >
-                                      {isApprovingSubmission ? "Approving..." : "Approve"}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="px-2.5 py-1 border border-gray-300 text-gray-700 rounded hover:bg-gray-50 hover:border-gray-400 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200 text-xs font-medium"
-                                      onClick={() =>
-                                        run(
-                                          () => rejectPendingAd(item.id),
-                                          "Submission rejected.",
-                                        )
-                                      }
-                                      disabled={isApprovingSubmission}
-                                    >
-                                      Reject
-                                    </button>
-                                  </>
-                                ) : null}
-                                {isAdmin && item.status === "not_approved" ? (
-                                  <button
-                                    type="button"
-                                    className="px-2.5 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors disabled:bg-gray-400 text-xs"
-                                    onClick={() =>
-                                      run(
-                                        () => deletePendingAd(item.id),
-                                        "Submission deleted.",
-                                      )
-                                    }
-                                  >
-                                    Delete
-                                  </button>
-                                ) : null}
                               </div>
                             </td>
                             </tr>
@@ -11060,11 +11345,22 @@ export default function AdsPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold text-gray-900">
-                      Edit pending submission
+                      {isSubmissionReviewMode ? "Review submission" : "Edit pending submission"}
                     </h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Update this submission before the team reviews it.
+                      {isSubmissionReviewMode
+                        ? submissionReviewDescription
+                        : "Update this submission before the team reviews it."}
                     </p>
+                    <div className="mt-2">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${getSubmissionStatusBadgeClass(
+                          submissionEditModal.status,
+                        )}`}
+                      >
+                        {formatSubmissionStatus(submissionEditModal.status)}
+                      </span>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -11128,6 +11424,72 @@ export default function AdsPage() {
               </div>
 
               <div className="border-t border-gray-200 bg-gray-50 px-6 py-4">
+                {isSubmissionReviewMode && submissionReviewAction === "reject" ? (
+                  <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-sm font-semibold text-amber-900">Rejection feedback</p>
+                    <p className="mt-1 text-xs text-amber-800">
+                      Select one or more reasons, and optionally add extra reviewer notes.
+                    </p>
+                    <div className="mt-3 max-h-32 overflow-y-auto rounded-lg border border-amber-200 bg-white p-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {submissionRejectReasonLibrary.map((reason) => {
+                          const checked = submissionRejectSelectedReasons.some(
+                            (item) => item.toLowerCase() === reason.toLowerCase(),
+                          );
+                          return (
+                            <label
+                              key={reason}
+                              className="flex items-center gap-2 text-xs text-gray-700"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) =>
+                                  toggleSubmissionRejectReason(reason, event.target.checked)
+                                }
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-gray-900 focus:ring-gray-400"
+                                disabled={submissionEditLoading}
+                              />
+                              <span>{reason}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={submissionRejectNewReason}
+                        onChange={(event) => setSubmissionRejectNewReason(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            addSubmissionRejectReasonOption();
+                          }
+                        }}
+                        placeholder="Add another reason (e.g. Missing CTA)"
+                        disabled={submissionEditLoading}
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={addSubmissionRejectReasonOption}
+                        disabled={submissionEditLoading || !submissionRejectNewReason.trim()}
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Add reason
+                      </button>
+                    </div>
+                    <textarea
+                      value={submissionRejectNote}
+                      onChange={(event) => setSubmissionRejectNote(event.target.value)}
+                      disabled={submissionEditLoading}
+                      rows={3}
+                      placeholder="Additional notes for the advertiser (optional)."
+                      className="mt-3 w-full resize-y rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+                ) : null}
                 <div className="flex items-center justify-end gap-3">
                   <button
                     type="button"
@@ -11135,16 +11497,47 @@ export default function AdsPage() {
                     disabled={submissionEditLoading}
                     className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Cancel
+                    {isSubmissionReviewMode ? "Close" : "Cancel"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={saveSubmissionEdit}
-                    disabled={submissionEditLoading || submissionEditCheckingAvailability}
-                    className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {submissionEditLoading ? "Saving..." : "Save changes"}
-                  </button>
+                  {isSubmissionReviewMode ? (
+                    <div className="flex items-center gap-3">
+                      <select
+                        value={submissionReviewAction}
+                        onChange={(event) => setSubmissionReviewAction(event.target.value)}
+                        disabled={submissionEditLoading}
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {submissionReviewActionOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => void submitSubmissionReviewAction()}
+                        disabled={
+                          submissionEditLoading ||
+                          !submissionReviewAction ||
+                          submissionReviewActionOptions.length === 0 ||
+                          (submissionReviewAction === "reject" &&
+                            !hasSubmissionRejectFeedback)
+                        }
+                        className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {submissionEditLoading ? "Submitting..." : "Submit Action"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={saveSubmissionEdit}
+                      disabled={submissionEditLoading || submissionEditCheckingAvailability}
+                      className="rounded-lg bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {submissionEditLoading ? "Saving..." : "Save changes"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

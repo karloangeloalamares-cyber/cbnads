@@ -144,6 +144,40 @@ const normalizePostType = (value) => normalizePostTypeValue(value);
 const toMoney = (value) => numberOrZero(value).toFixed(2);
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
+const toUniqueTrimmedList = (value) => {
+  const source = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const next = [];
+
+  for (const item of source) {
+    const text = String(item || '').trim();
+    if (!text) {
+      continue;
+    }
+    const key = text.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    next.push(text);
+  }
+
+  return next;
+};
+const buildSubmissionReviewNotes = ({ reasons = [], note = '' } = {}) => {
+  const normalizedReasons = toUniqueTrimmedList(reasons).slice(0, 20);
+  const normalizedNote = String(note || '').trim();
+  const chunks = [];
+
+  if (normalizedReasons.length > 0) {
+    chunks.push(`Rejection reasons:\n${normalizedReasons.map((reason) => `- ${reason}`).join('\n')}`);
+  }
+  if (normalizedNote) {
+    chunks.push(`Reviewer notes:\n${normalizedNote}`);
+  }
+
+  return chunks.join('\n\n').trim();
+};
 
 const isMissingRelationError = (error) => {
   const code = String(error?.code || '');
@@ -766,6 +800,7 @@ const fromPendingAdRow = (row) => ({
   media: toArray(row.media),
   placement: row.placement || '',
   notes: row.notes || '',
+  review_notes: row.review_notes || '',
   status: row.status || 'pending',
   viewed_by_admin: Boolean(row.viewed_by_admin),
   rejected_at: row.rejected_at || null,
@@ -793,7 +828,9 @@ const toPendingAdRow = (input) => ({
   media: toArray(input.media),
   placement: String(input.placement || '').trim(),
   notes: String(input.notes || '').trim(),
+  review_notes: String(input.review_notes || '').trim() || null,
   status: input.status || 'pending',
+  rejected_at: input.rejected_at || null,
   created_at: input.created_at || nowIso(),
   updated_at: input.updated_at || nowIso(),
 });
@@ -1655,6 +1692,7 @@ export const submitPendingAd = async (input) => {
       media: Array.isArray(input.media) ? input.media : [],
       placement: input.placement || '',
       notes: input.notes || '',
+      review_notes: String(input.review_notes || '').trim(),
       status: 'pending',
       created_at: nowIso(),
       updated_at: nowIso(),
@@ -1669,7 +1707,8 @@ export const submitPendingAd = async (input) => {
 export const approvePendingAd = async (pendingAdId) => {
   await updateDb((db) => {
     const pending = db.pending_ads.find((item) => item.id === pendingAdId);
-    if (!pending || pending.status !== 'pending') {
+    const normalizedStatus = normalizeText(pending?.status);
+    if (!pending || !['pending', 'not_approved'].includes(normalizedStatus)) {
       return db;
     }
 
@@ -1736,10 +1775,19 @@ export const approvePendingAd = async (pendingAdId) => {
   });
 };
 
-export const rejectPendingAd = async (pendingAdId) => {
+export const rejectPendingAd = async (pendingAdId, { reasons = [], note = '' } = {}) => {
+  const reviewNotes = buildSubmissionReviewNotes({ reasons, note });
   await updateDb((db) => {
     db.pending_ads = db.pending_ads.map((item) =>
-      item.id === pendingAdId ? { ...item, status: 'not_approved', updated_at: nowIso() } : item
+      item.id === pendingAdId
+        ? {
+          ...item,
+          status: 'not_approved',
+          rejected_at: nowIso(),
+          review_notes: reviewNotes || String(item.review_notes || '').trim(),
+          updated_at: nowIso(),
+        }
+        : item
     );
     return db;
   });
