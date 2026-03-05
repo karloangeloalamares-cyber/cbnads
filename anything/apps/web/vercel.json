@@ -2,6 +2,12 @@
   "framework": null,
   "buildCommand": "npm run build",
   "outputDirectory": "build/client",
+  "crons": [
+    {
+      "path": "/api/admin/send-reminders",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "routes": [
     {
       "src": "/api/(.*)",

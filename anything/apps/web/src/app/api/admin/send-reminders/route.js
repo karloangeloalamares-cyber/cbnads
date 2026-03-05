@@ -1,28 +1,94 @@
 import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/supabase-db.js";
-import { requireAdmin } from "../../utils/auth-check.js";
+import { requireInternalUser } from "../../utils/auth-check.js";
 import { sendEmail } from "../../utils/send-email.js";
+import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
+
+const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false,
+});
+
+const REMINDER_PRESET_MINUTES = {
+  "15-min": 15,
+  "15m": 15,
+  "30-min": 30,
+  "30m": 30,
+  "1-hour": 60,
+  "1h": 60,
+  "1-day": 1440,
+  "1d": 1440,
+};
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+const normalizeStatus = (value) => String(value || "").trim().toLowerCase();
+
+function parseNaiveDateTime(dateStr, timeStr) {
+  if (!dateStr || !timeStr) return null;
+  const [year, month, day] = String(dateStr).split("-").map((value) => Number(value));
+  const [hour, minute, second] = String(timeStr).split(":").map((value) => Number(value || 0));
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+  return new Date(Date.UTC(year, month - 1, day, hour, minute, Number.isFinite(second) ? second : 0));
+}
 
 function getNowInET() {
-  const now = new Date();
-  const etTimeStr = now.toLocaleString("en-US", {
-    timeZone: "America/New_York",
-  });
-  return new Date(etTimeStr);
+  const parts = {};
+  for (const part of ET_DATE_TIME_FORMATTER.formatToParts(new Date())) {
+    if (part.type !== "literal") {
+      parts[part.type] = part.value;
+    }
+  }
+
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const time = `${parts.hour}:${parts.minute}:${parts.second}`;
+  const pseudoDate = parseNaiveDateTime(date, time);
+
+  return {
+    date,
+    time,
+    hour: Number(parts.hour || 0),
+    pseudoDate,
+  };
 }
 
-function parseETDateTime(dateStr, timeStr) {
-  if (!dateStr || !timeStr) return null;
-  const [year, month, day] = String(dateStr).split("-").map((v) => Number(v));
-  const [hour, minute, second] = String(timeStr).split(":").map((v) => Number(v || 0));
-  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
-  return new Date(year, month - 1, day, hour, minute, Number.isFinite(second) ? second : 0);
-}
+function parseReminderMinutes(value, fallback = 15) {
+  const fallbackMinutes = Math.max(1, toNumber(fallback, 15));
 
-function reminderWindowToMinutes(value, unit) {
-  const amount = toNumber(value, 1);
-  if (unit === "minutes") return amount;
-  if (unit === "days") return amount * 1440;
-  return amount * 60;
+  if (value === null || value === undefined || value === "") {
+    return fallbackMinutes;
+  }
+
+  if (typeof value === "number") {
+    return Math.max(1, toNumber(value, fallbackMinutes));
+  }
+
+  const text = String(value).trim().toLowerCase();
+  if (!text) return fallbackMinutes;
+
+  if (/^\d+$/.test(text)) {
+    return Math.max(1, Number(text));
+  }
+
+  if (REMINDER_PRESET_MINUTES[text]) {
+    return REMINDER_PRESET_MINUTES[text];
+  }
+
+  const unitMatch = text.match(/^(\d+)\s*(minute|minutes|min|mins|hour|hours|day|days)$/i);
+  if (!unitMatch) {
+    return fallbackMinutes;
+  }
+
+  const amount = Math.max(1, Number(unitMatch[1]));
+  const unit = String(unitMatch[2] || "").toLowerCase();
+  if (unit.startsWith("day")) return amount * 1440;
+  if (unit.startsWith("hour")) return amount * 60;
+  return amount;
 }
 
 function timeUntilText(scheduledAt, nowET) {
@@ -43,46 +109,77 @@ function greetingForHour(hour) {
   return "Good Morning";
 }
 
-function computeScheduledTimes(ad, todayET) {
+function computeScheduledEntries(ad, todayET) {
   const type = normalizePostType(ad?.post_type);
-  const times = [];
+  const entries = [];
+  const defaultReminderMinutes = parseReminderMinutes(ad?.reminder_minutes, 15);
 
   if (type === "one_time") {
     const dateStr = dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
-    const dt = parseETDateTime(dateStr, ad?.post_time);
-    if (dt) times.push(dt);
-    return times;
+    const scheduledAt = parseNaiveDateTime(dateStr, ad?.post_time);
+    if (scheduledAt) {
+      entries.push({
+        scheduledAt,
+        reminderMinutes: defaultReminderMinutes,
+      });
+    }
+    return entries;
   }
 
   if (type === "daily_run") {
     const from = dateOnly(ad?.post_date_from || ad?.schedule || ad?.post_date);
     const to = dateOnly(ad?.post_date_to || from);
-    if (!from || !to || !ad?.post_time) return times;
-    if (todayET < from || todayET > to) return times;
-    const dt = parseETDateTime(todayET, ad.post_time);
-    if (dt) times.push(dt);
-    return times;
+    if (!from || !to || !ad?.post_time) return entries;
+    if (todayET < from || todayET > to) return entries;
+
+    const scheduledAt = parseNaiveDateTime(todayET, ad?.post_time);
+    if (scheduledAt) {
+      entries.push({
+        scheduledAt,
+        reminderMinutes: defaultReminderMinutes,
+      });
+    }
+    return entries;
   }
 
   if (type === "custom_schedule") {
-    if (!Array.isArray(ad?.custom_dates)) return times;
+    if (!Array.isArray(ad?.custom_dates)) return entries;
+
     for (const entry of ad.custom_dates) {
       if (typeof entry === "string") {
-        const dt = parseETDateTime(dateOnly(entry), ad?.post_time);
-        if (dt) times.push(dt);
+        const scheduledAt = parseNaiveDateTime(dateOnly(entry), ad?.post_time);
+        if (scheduledAt) {
+          entries.push({
+            scheduledAt,
+            reminderMinutes: defaultReminderMinutes,
+          });
+        }
         continue;
       }
-      const dt = parseETDateTime(dateOnly(entry?.date), entry?.time || ad?.post_time);
-      if (dt) times.push(dt);
+
+      const dateKey = dateOnly(entry?.date);
+      const timeValue = entry?.time || ad?.post_time;
+      const scheduledAt = parseNaiveDateTime(dateKey, timeValue);
+      if (!scheduledAt) continue;
+
+      entries.push({
+        scheduledAt,
+        reminderMinutes: parseReminderMinutes(entry?.reminder, defaultReminderMinutes),
+      });
     }
   }
 
-  return times;
+  return entries;
 }
 
 function isWithinReminderWindow(scheduledAt, nowET, windowMinutes) {
   const diffMinutes = (scheduledAt.getTime() - nowET.getTime()) / (1000 * 60);
   return diffMinutes > -5 && diffMinutes <= windowMinutes;
+}
+
+function isReminderEligibleStatus(status) {
+  const normalized = normalizeStatus(status);
+  return normalized === "scheduled" || normalized === "approved";
 }
 
 async function hasRecentReminder(supabase, adId, recipientType) {
@@ -126,7 +223,7 @@ function buildMediaFields(media) {
 
 async function sendZapier(payload) {
   if (!process.env.ZAPIER_WEBHOOK_URL) {
-    return; // graceful degradation since we are using native Resend emails
+    return;
   }
 
   const response = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
@@ -141,7 +238,7 @@ async function sendZapier(payload) {
   }
 }
 
-function generateReminderHtml(payload, isAdmin = false) {
+function generateReminderHtml(payload, isInternal = false) {
   const escapeHtml = (value) =>
     String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -153,11 +250,19 @@ function generateReminderHtml(payload, isAdmin = false) {
   const mediaLinks = [];
   for (let i = 1; i <= payload.imageCount; i++) {
     const url = payload[`image${i}Url`];
-    if (url) mediaLinks.push(`<div style="margin: 10px 0;"><strong>Image ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`);
+    if (url) {
+      mediaLinks.push(
+        `<div style="margin: 10px 0;"><strong>Image ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`,
+      );
+    }
   }
   for (let i = 1; i <= payload.videoCount; i++) {
     const url = payload[`video${i}Url`];
-    if (url) mediaLinks.push(`<div style="margin: 10px 0;"><strong>Video ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`);
+    if (url) {
+      mediaLinks.push(
+        `<div style="margin: 10px 0;"><strong>Video ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`,
+      );
+    }
   }
 
   return `
@@ -185,31 +290,35 @@ function generateReminderHtml(payload, isAdmin = false) {
     </div>
     <div class="content">
       <div class="alert">
-        <h2 style="margin-top: 0; color: #1d4ed8;">${isAdmin ? '🔔 Internal Admin Reminder' : '🔔 Upcoming Ad Reminder'}</h2>
+        <h2 style="margin-top: 0; color: #1d4ed8;">${isInternal ? "Internal Team Reminder" : "Upcoming Ad Reminder"}</h2>
         <p style="margin-bottom: 0;">${escapeHtml(payload.greeting)}, this is a reminder that an ad is scheduled to run ${escapeHtml(payload.timeUntilText)}.</p>
       </div>
       
       <div class="info-block">
         <div class="info-row"><span class="label">Ad Name:</span> ${escapeHtml(payload.adName)}</div>
         <div class="info-row"><span class="label">Advertiser:</span> ${escapeHtml(payload.advertiser)}</div>
-        ${isAdmin ? `<div class="info-row"><span class="label">Contact:</span> <a href="mailto:${escapeHtml(payload.advertiserEmail)}">${escapeHtml(payload.advertiserEmail)}</a> ${payload.advertiserPhone ? `| ${escapeHtml(payload.advertiserPhone)}` : ''}</div>` : ''}
-        ${payload.placement ? `<div class="info-row"><span class="label">Placement:</span> ${escapeHtml(payload.placement)}</div>` : ''}
+        ${isInternal ? `<div class="info-row"><span class="label">Contact:</span> <a href="mailto:${escapeHtml(payload.advertiserEmail)}">${escapeHtml(payload.advertiserEmail)}</a> ${payload.advertiserPhone ? `| ${escapeHtml(payload.advertiserPhone)}` : ""}</div>` : ""}
+        ${payload.placement ? `<div class="info-row"><span class="label">Placement:</span> ${escapeHtml(payload.placement)}</div>` : ""}
         <div class="info-row"><span class="label">Scheduled For:</span> ${escapeHtml(payload.formattedDate)} at ${escapeHtml(payload.formattedTime)}</div>
       </div>
       
-      ${payload.adText ? `
+      ${payload.adText
+    ? `
       <div class="info-block">
         <div class="label" style="margin-bottom: 5px;">Ad Content:</div>
         <div style="white-space: pre-wrap;">${escapeHtml(payload.adText)}</div>
       </div>
-      ` : ''}
+      `
+    : ""}
       
-      ${mediaLinks.length > 0 ? `
+      ${mediaLinks.length > 0
+    ? `
       <div class="media-section">
         <div class="label" style="margin-bottom: 10px;">Media Files (${mediaLinks.length})</div>
-        ${mediaLinks.join('')}
+        ${mediaLinks.join("")}
       </div>
-      ` : ''}
+      `
+    : ""}
       
     </div>
     <div class="footer">
@@ -221,24 +330,67 @@ function generateReminderHtml(payload, isAdmin = false) {
   `;
 }
 
+function normalizeInternalEmails(values) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => normalizeEmail(value))
+        .filter((value) => value && isValidEmail(value)),
+    ),
+  );
+}
+
+function resolveAdvertiserInfo(ad, { byId, byName }) {
+  const advertiserId = String(ad?.advertiser_id || "").trim();
+  if (advertiserId && byId.has(advertiserId)) {
+    return byId.get(advertiserId);
+  }
+
+  const advertiserName = normalizeEmail(String(ad?.advertiser || "").trim());
+  if (advertiserName && byName.has(advertiserName)) {
+    return byName.get(advertiserName);
+  }
+
+  return null;
+}
+
+function formatScheduledDateTime(scheduledAt) {
+  return {
+    formattedDate: scheduledAt.toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+    formattedTime: scheduledAt.toLocaleTimeString("en-US", {
+      timeZone: "UTC",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }),
+    dayOfWeek: scheduledAt.toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      weekday: "long",
+    }),
+  };
+}
+
 export async function POST(request) {
   try {
-    const admin = await requireAdmin();
-    if (!admin.authorized) {
+    const auth = await requireInternalUser(request);
+    if (!auth.authorized) {
       const configuredSecret = String(process.env.CRON_SECRET || "").trim();
       const bearerToken = String(request.headers.get("authorization") || "")
         .replace(/^Bearer\s+/i, "")
         .trim();
-      const cronHeaderSecret = String(
-        request.headers.get("x-cron-secret") || "",
-      ).trim();
+      const cronHeaderSecret = String(request.headers.get("x-cron-secret") || "").trim();
 
       if (
-        configuredSecret &&
-        bearerToken !== configuredSecret &&
-        cronHeaderSecret !== configuredSecret
+        !configuredSecret ||
+        (bearerToken !== configuredSecret && cronHeaderSecret !== configuredSecret)
       ) {
-        return Response.json({ error: admin.error }, { status: 401 });
+        return Response.json({ error: auth.error }, { status: auth.status || 401 });
       }
     }
 
@@ -248,133 +400,96 @@ export async function POST(request) {
     const supabase = db();
     const nowUTC = new Date();
     const nowET = getNowInET();
-    const todayET = dateOnly(nowET);
+    const todayET = nowET.date;
 
-    const { data: adminPrefsRows, error: adminPrefsError } = await supabase
-      .from(table("admin_notification_preferences"))
-      .select("id, email_enabled, sms_enabled, reminder_time_value, reminder_time_unit, email_address, phone_number")
-      .order("updated_at", { ascending: false });
-    if (adminPrefsError) throw adminPrefsError;
-
-    const { data: fallbackNotification, error: fallbackNotificationError } = await supabase
-      .from(table("notification_preferences"))
-      .select("email_enabled, reminder_email")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (fallbackNotificationError) throw fallbackNotificationError;
-
-    const adminPrefs = [...(adminPrefsRows || [])];
-    const fallbackEmail = String(fallbackNotification?.reminder_email || "").trim();
-    if (
-      adminPrefs.length === 0 &&
-      fallbackNotification?.email_enabled &&
-      fallbackEmail
-    ) {
-      adminPrefs.push({
-        id: "fallback",
-        email_enabled: true,
-        sms_enabled: false,
-        reminder_time_value: 1,
-        reminder_time_unit: "hours",
-        email_address: fallbackEmail,
-        phone_number: null,
-      });
+    if (!nowET.pseudoDate) {
+      throw new Error("Unable to compute current ET time");
     }
 
-    const { data: upcomingAds, error: upcomingAdsError } = await supabase
+    const { data: adsRows, error: adsError } = await supabase
       .from(table("ads"))
-      .select("id, ad_name, advertiser, post_type, placement, post_date, post_date_from, post_date_to, custom_dates, schedule, post_time, media, ad_text, reminder_minutes, status")
-      .eq("status", "Scheduled")
+      .select("id, ad_name, advertiser, advertiser_id, post_type, placement, post_date, post_date_from, post_date_to, custom_dates, schedule, post_time, media, ad_text, reminder_minutes, status")
       .eq("archived", false);
-    if (upcomingAdsError) throw upcomingAdsError;
+    if (adsError) throw adsError;
+
+    const upcomingAds = (adsRows || []).filter((ad) => isReminderEligibleStatus(ad?.status));
 
     const { data: advertisers, error: advertisersError } = await supabase
       .from(table("advertisers"))
-      .select("*");
+      .select("id, advertiser_name, contact_name, email, phone_number, phone");
     if (advertisersError) throw advertisersError;
 
+    const advertiserById = new Map(
+      (advertisers || []).map((row) => [String(row.id || "").trim(), row]),
+    );
     const advertiserByName = new Map(
-      (advertisers || []).map((row) => [String(row.advertiser_name || "").trim().toLowerCase(), row]),
+      (advertisers || []).map((row) => [
+        normalizeEmail(String(row.advertiser_name || "").trim()),
+        row,
+      ]),
+    );
+
+    const internalEmails = normalizeInternalEmails(
+      await resolveInternalNotificationEmails(supabase),
     );
 
     const results = [];
     const debug = [];
 
-    for (const pref of adminPrefs) {
-      if (!pref.email_enabled && !pref.sms_enabled) continue;
-      const reminderMinutes = reminderWindowToMinutes(
-        pref.reminder_time_value || 1,
-        pref.reminder_time_unit || "hours",
+    for (const ad of upcomingAds) {
+      const scheduleEntries = computeScheduledEntries(ad, todayET);
+      const dueEntry = scheduleEntries.find((entry) =>
+        isWithinReminderWindow(entry.scheduledAt, nowET.pseudoDate, entry.reminderMinutes),
       );
 
-      for (const ad of upcomingAds || []) {
-        const scheduledTimes = computeScheduledTimes(ad, todayET);
-        const scheduledAt = scheduledTimes.find((time) =>
-          isWithinReminderWindow(time, nowET, reminderMinutes),
-        );
+      if (debugMode) {
+        debug.push({
+          ad_id: ad.id,
+          ad_name: ad.ad_name,
+          status: ad.status,
+          scheduleChecks: scheduleEntries.length,
+          dueNow: Boolean(dueEntry),
+          dueReminderWindowMinutes: dueEntry?.reminderMinutes || null,
+        });
+      }
 
-        if (debugMode) {
-          debug.push({
-            type: "admin",
-            ad_id: ad.id,
-            ad_name: ad.ad_name,
-            reminderWindow: reminderMinutes,
-            shouldNotify: Boolean(scheduledAt),
-          });
-        }
+      if (!dueEntry) continue;
 
-        if (!scheduledAt) continue;
+      const scheduleMeta = formatScheduledDateTime(dueEntry.scheduledAt);
+      const untilText = timeUntilText(dueEntry.scheduledAt, nowET.pseudoDate);
+      const greeting = greetingForHour(nowET.hour);
+      const media = buildMediaFields(ad.media);
+      const advertiserInfo = resolveAdvertiserInfo(ad, {
+        byId: advertiserById,
+        byName: advertiserByName,
+      });
 
-        const alreadySent = await hasRecentReminder(supabase, ad.id, "admin");
-        if (alreadySent) {
+      if (internalEmails.length > 0) {
+        const alreadySentInternal = await hasRecentReminder(supabase, ad.id, "internal");
+        if (alreadySentInternal) {
           results.push({
-            type: "admin_email",
+            type: "internal_email",
             ad_id: ad.id,
             ad_name: ad.ad_name,
             status: "already_sent",
-            message: "Admin reminder already sent within last 24 hours",
+            message: "Internal reminder already sent within last 24 hours",
           });
-          continue;
-        }
-
-        const formattedDate = scheduledAt.toLocaleDateString("en-US", {
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        });
-        const formattedTime = scheduledAt.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        });
-        const dayOfWeek = scheduledAt.toLocaleDateString("en-US", {
-          weekday: "long",
-        });
-        const greeting = greetingForHour(nowET.getHours());
-        const untilText = timeUntilText(scheduledAt, nowET);
-        const media = buildMediaFields(ad.media);
-        const advertiserInfo = advertiserByName.get(
-          String(ad.advertiser || "").trim().toLowerCase(),
-        );
-
-        if (pref.email_enabled && pref.email_address) {
+        } else {
           try {
             const payload = {
-              recipientType: "admin",
-              to: pref.email_address,
+              recipientType: "internal",
+              to: internalEmails,
               from: "Ad Manager <advertise@cbnads.com>",
-              subject: `Ad Reminder | ${ad.advertiser} | ${dayOfWeek}, ${formattedTime} ET`,
+              subject: `Ad Reminder | ${ad.advertiser} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
               greeting,
-              firstName: "Admin",
+              firstName: "Team",
               adName: ad.ad_name,
               advertiser: ad.advertiser,
               advertiserEmail: advertiserInfo?.email || "",
               advertiserPhone: advertiserInfo?.phone_number || advertiserInfo?.phone || "",
               placement: ad.placement,
-              formattedTime: `${formattedTime} ET`,
-              formattedDate,
+              formattedTime: `${scheduleMeta.formattedTime} ET`,
+              formattedDate: scheduleMeta.formattedDate,
               timeUntilText: untilText,
               adText: ad.ad_text || "",
               imageCount: media.images.length,
@@ -383,75 +498,39 @@ export async function POST(request) {
             };
 
             await sendZapier(payload).catch(console.error);
-
             await sendEmail({
-              to: pref.email_address,
+              to: internalEmails,
               subject: payload.subject,
               html: generateReminderHtml(payload, true),
             });
 
-            await storeReminder(supabase, ad.id, "email", "admin");
+            await storeReminder(supabase, ad.id, "email", "internal");
             results.push({
-              type: "admin_email",
-              to: pref.email_address,
+              type: "internal_email",
+              to: internalEmails,
               ad_name: ad.ad_name,
               status: "sent",
             });
           } catch (error) {
             results.push({
-              type: "admin_email",
-              to: pref.email_address,
+              type: "internal_email",
+              to: internalEmails,
               ad_name: ad.ad_name,
               status: "failed",
               error: error.message,
             });
           }
         }
-
-        if (pref.sms_enabled && pref.phone_number) {
-          try {
-            await storeReminder(supabase, ad.id, "sms", "admin");
-            results.push({
-              type: "admin_sms",
-              to: pref.phone_number,
-              ad_name: ad.ad_name,
-              status: "logged",
-            });
-          } catch (error) {
-            results.push({
-              type: "admin_sms",
-              to: pref.phone_number,
-              ad_name: ad.ad_name,
-              status: "failed",
-              error: error.message,
-            });
-          }
-        }
-      }
-    }
-
-    for (const ad of upcomingAds || []) {
-      const reminderMinutes = toNumber(ad.reminder_minutes, 15);
-      const scheduledTimes = computeScheduledTimes(ad, todayET);
-      const scheduledAt = scheduledTimes.find((time) =>
-        isWithinReminderWindow(time, nowET, reminderMinutes),
-      );
-
-      if (debugMode) {
-        debug.push({
-          type: "advertiser",
+      } else {
+        results.push({
+          type: "internal_email",
           ad_id: ad.id,
           ad_name: ad.ad_name,
-          reminderWindow: reminderMinutes,
-          shouldNotify: Boolean(scheduledAt),
+          status: "skipped",
+          message: "No internal recipient emails found",
         });
       }
 
-      if (!scheduledAt) continue;
-
-      const advertiserInfo = advertiserByName.get(
-        String(ad.advertiser || "").trim().toLowerCase(),
-      );
       if (!advertiserInfo?.email) {
         results.push({
           type: "advertiser_email",
@@ -463,8 +542,8 @@ export async function POST(request) {
         continue;
       }
 
-      const alreadySent = await hasRecentReminder(supabase, ad.id, "advertiser");
-      if (alreadySent) {
+      const alreadySentAdvertiser = await hasRecentReminder(supabase, ad.id, "advertiser");
+      if (alreadySentAdvertiser) {
         results.push({
           type: "advertiser_email",
           ad_id: ad.id,
@@ -475,22 +554,6 @@ export async function POST(request) {
         continue;
       }
 
-      const formattedDate = scheduledAt.toLocaleDateString("en-US", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      });
-      const formattedTime = scheduledAt.toLocaleTimeString("en-US", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-      const dayOfWeek = scheduledAt.toLocaleDateString("en-US", {
-        weekday: "long",
-      });
-      const untilText = timeUntilText(scheduledAt, nowET);
-      const media = buildMediaFields(ad.media);
       const advertiserName = advertiserInfo.contact_name || advertiserInfo.advertiser_name;
       const advertiserFirstName = String(advertiserName || "Advertiser")
         .split(" ")
@@ -503,15 +566,15 @@ export async function POST(request) {
           advertiserEmail: advertiserInfo.email,
           advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
           from: "Ad Manager <advertise@cbnads.com>",
-          subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${dayOfWeek}, ${formattedTime} ET`,
+          subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
           greeting: `Hello ${advertiserFirstName}`,
           firstName: advertiserFirstName,
           advertiserName,
           adName: ad.ad_name,
           advertiser: ad.advertiser,
           placement: ad.placement,
-          formattedTime: `${formattedTime} ET`,
-          formattedDate,
+          formattedTime: `${scheduleMeta.formattedTime} ET`,
+          formattedDate: scheduleMeta.formattedDate,
           timeUntilText: untilText,
           adText: ad.ad_text || "",
           imageCount: media.images.length,
@@ -520,7 +583,6 @@ export async function POST(request) {
         };
 
         await sendZapier(payload).catch(console.error);
-
         await sendEmail({
           to: advertiserInfo.email,
           subject: payload.subject,
@@ -555,10 +617,11 @@ export async function POST(request) {
     if (debugMode) {
       response.debug = {
         serverTimeUTC: nowUTC.toISOString(),
-        easternTime: nowET.toLocaleString(),
+        easternTimeDate: nowET.date,
+        easternTimeTime: nowET.time,
         todayET,
-        adminCount: adminPrefs.length,
-        adCount: (upcomingAds || []).length,
+        internalRecipientCount: internalEmails.length,
+        eligibleAdCount: upcomingAds.length,
         advertiserCount: (advertisers || []).length,
         checks: debug,
       };
@@ -567,14 +630,10 @@ export async function POST(request) {
     return Response.json(response);
   } catch (err) {
     console.error("POST /api/admin/send-reminders error", err);
-    return Response.json(
-      { error: "Internal Server Error" },
-      { status: 500 },
-    );
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
 
 export async function GET(request) {
   return POST(request);
 }
-

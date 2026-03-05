@@ -5400,93 +5400,39 @@ export default function AdsPage() {
     }, 600);
   };
 
-  const handleSettingsCheckReminders = () => {
+  const handleSettingsCheckReminders = async () => {
     setSettingsNotificationChecking(true);
     setSettingsReminderResults(null);
     setSettingsNotificationMessage(null);
 
     try {
-      const unitToMs = {
-        minutes: 60 * 1000,
-        hours: 60 * 60 * 1000,
-        days: 24 * 60 * 60 * 1000,
-      };
-      const value = Math.max(1, Number(settingsNotification.reminder_time_value) || 1);
-      const windowMs =
-        value * (unitToMs[settingsNotification.reminder_time_unit] || unitToMs.hours);
-      const now = Date.now();
+      const response = await fetch("/api/admin/send-reminders?debug=true", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
 
-      const results = [];
-      for (const adItem of ads) {
-        if (!adItem.post_date) {
-          continue;
-        }
-        const scheduledAt = new Date(
-          `${adItem.post_date}T${adItem.post_time || "00:00:00"}`,
-        );
-        if (Number.isNaN(scheduledAt.valueOf())) {
-          continue;
-        }
-        const diff = scheduledAt.valueOf() - now;
-        if (diff < 0 || diff > windowMs) {
-          continue;
-        }
-
-        const advertiser = advertisers.find(
-          (item) => item.id === adItem.advertiser_id,
-        );
-        if (settingsNotification.email_enabled && settingsNotification.email_address) {
-          results.push({
-            type: "admin-email",
-            to: settingsNotification.email_address,
-            status: "queued",
-            ad_name: adItem.ad_name,
-          });
-        }
-        if (settingsNotification.sms_enabled && settingsNotification.phone_number) {
-          results.push({
-            type: "admin-sms",
-            to: settingsNotification.phone_number,
-            status: "queued",
-            ad_name: adItem.ad_name,
-          });
-        }
-        if (settingsNotification.telegram_enabled) {
-          settingsTelegramChatIds
-            .filter((item) => item.is_active !== false && item.chat_id)
-            .forEach((item) => {
-              results.push({
-                type: "admin-telegram",
-                to: item.label || item.chat_id,
-                status: "queued",
-                ad_name: adItem.ad_name,
-              });
-            });
-        }
-        if (advertiser?.email) {
-          results.push({
-            type: "advertiser-email",
-            to: advertiser.email,
-            status: "queued",
-            ad_name: adItem.ad_name,
-          });
-        }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || `Reminder check failed (${response.status})`);
       }
 
+      const results = Array.isArray(payload?.results) ? payload.results : [];
       setSettingsReminderResults({
-        totalResults: results.length,
+        totalResults: Number(payload?.totalResults) || results.length,
         results,
       });
 
       if (results.length === 0) {
         setSettingsNotificationMessage({
           type: "info",
-          text: "No reminders due at this time. Check console logs for details.",
+          text: "No reminders due at this time.",
         });
       } else {
         setSettingsNotificationMessage({
           type: "success",
-          text: `Processed ${results.length} reminder(s). See results below.`,
+          text: `Processed ${results.length} reminder action(s). See results below.`,
         });
       }
     } catch (error) {
@@ -11124,8 +11070,8 @@ export default function AdsPage() {
                       </h2>
                     </div>
                     <p className="text-sm text-gray-500">
-                      Two reminders go out per ad: one to you (the admin) based on
-                      the timing below, and one to the advertiser based on the
+                      Reminder emails are sent to internal team members
+                      (owner/admin/manager/staff) and the advertiser based on the
                       reminder time set on each ad.
                     </p>
                   </div>
@@ -11133,12 +11079,12 @@ export default function AdsPage() {
                   <div className="p-6 space-y-6">
                     <div>
                       <label className="block text-sm font-medium text-gray-900 mb-1">
-                        Admin reminder timing
+                        Internal reminder timing (legacy)
                       </label>
                       <p className="text-xs text-gray-500 mb-3">
-                        This controls when <strong>you</strong> get notified. The
-                        advertiser gets their own reminder based on the time set in
-                        the ad.
+                        Ad-level reminder settings now drive reminder emails for
+                        internal users and advertisers. This value is kept for
+                        backward compatibility.
                       </p>
                       <div className="flex items-center gap-3">
                         <input
