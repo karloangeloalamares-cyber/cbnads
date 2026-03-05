@@ -181,7 +181,7 @@ function generateReminderHtml(payload, isAdmin = false) {
 <body>
   <div class="container">
     <div class="header">
-      <img src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/" alt="Logo" class="logo">
+      <img src="https://cbnads.com/icons/icon-512.png" alt="Logo" class="logo">
     </div>
     <div class="content">
       <div class="alert">
@@ -577,3 +577,4 @@ export async function POST(request) {
 export async function GET(request) {
   return POST(request);
 }
+

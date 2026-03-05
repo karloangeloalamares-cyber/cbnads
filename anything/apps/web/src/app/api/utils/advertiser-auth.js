@@ -372,7 +372,7 @@ export const sendAdvertiserVerificationEmail = async ({
       <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.6;">
         <div style="max-width: 560px; margin: 0 auto; padding: 32px 20px;">
           <img
-            src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+            src="https://cbnads.com/icons/icon-512.png"
             alt="CBN"
             style="height: 48px; width: auto; margin-bottom: 24px;"
           />
@@ -403,3 +403,4 @@ export const sendAdvertiserVerificationEmail = async ({
     `,
   });
 };
+

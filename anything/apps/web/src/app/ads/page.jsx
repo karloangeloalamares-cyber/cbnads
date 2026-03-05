@@ -913,6 +913,9 @@ function AdsTableRow({
         </td>
       )}
       <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
+        <span className="text-xs text-gray-700 font-semibold">{ad.invoice_number || "—"}</span>
+      </td>
+      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
         <div className="text-xs font-semibold text-gray-900" title={ad.ad_name || ""}>
           {truncateAdsWords(ad.ad_name)}
         </div>
@@ -931,9 +934,6 @@ function AdsTableRow({
       </td>
       <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
         <span className="text-xs text-gray-700 font-medium">{ad.post_type || "-"}</span>
-      </td>
-      <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
-        <span className="text-xs text-gray-700 font-medium">{ad.placement || "-"}</span>
       </td>
       <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
         <AdsScheduleCell ad={ad} />
@@ -3388,6 +3388,26 @@ export default function AdsPage() {
     const placementByProductId = new Map(
       products.map((item) => [item.id, item.placement || ""]),
     );
+    const invoiceNumberByInvoiceId = new Map(
+      invoices
+        .filter((item) => item?.id)
+        .map((item) => [String(item.id), String(item.invoice_number || "").trim()]),
+    );
+    const invoiceNumberByAdId = new Map();
+    for (const invoiceItem of invoices) {
+      const invoiceNumber = String(invoiceItem?.invoice_number || "").trim();
+      if (!invoiceNumber) {
+        continue;
+      }
+      const linkedAdIds = toStringArray(invoiceItem?.ad_ids)
+        .map((entry) => String(entry).trim())
+        .filter(Boolean);
+      for (const linkedAdId of linkedAdIds) {
+        if (!invoiceNumberByAdId.has(linkedAdId)) {
+          invoiceNumberByAdId.set(linkedAdId, invoiceNumber);
+        }
+      }
+    }
 
     const todayKey = getTodayInAppTimeZone();
 
@@ -3411,6 +3431,15 @@ export default function AdsPage() {
       const status = item.status || "Draft";
       const paymentRaw = String(item.payment || "").trim();
       const payment = normalizeAdsPayment(paymentRaw);
+      const normalizedInvoiceId = String(
+        item.paid_via_invoice_id || item.invoice_id || "",
+      ).trim();
+      const invoiceNumber = String(
+        item.invoice_number ||
+          (normalizedInvoiceId ? invoiceNumberByInvoiceId.get(normalizedInvoiceId) : "") ||
+          invoiceNumberByAdId.get(String(item.id || "").trim()) ||
+          "",
+      ).trim();
 
       return {
         ...item,
@@ -3420,12 +3449,13 @@ export default function AdsPage() {
         payment_raw: paymentRaw || "Unpaid",
         payment,
         post_type: normalizeCalendarPostType(item.post_type),
+        invoice_number: invoiceNumber,
         schedule,
         custom_dates: customDates,
         published_dates: publishedDates,
       };
     });
-  }, [ads, advertisers, products]);
+  }, [ads, advertisers, invoices, products]);
 
   const adsPlacementOptions = useMemo(
     () => [...new Set(adsNormalized.map((item) => item.placement).filter(Boolean))].sort(),
@@ -3489,8 +3519,15 @@ export default function AdsPage() {
       const adName = String(item.ad_name || "").toLowerCase();
       const advertiser = String(item.advertiser || "").toLowerCase();
       const placement = String(item.placement || "").toLowerCase();
+      const invoiceNumber = String(item.invoice_number || "").toLowerCase();
 
-      if (query && !adName.includes(query) && !advertiser.includes(query) && !placement.includes(query)) {
+      if (
+        query &&
+        !adName.includes(query) &&
+        !advertiser.includes(query) &&
+        !placement.includes(query) &&
+        !invoiceNumber.includes(query)
+      ) {
         return false;
       }
 
@@ -4046,11 +4083,45 @@ export default function AdsPage() {
     });
 
     try {
-      await approvePendingAd(normalizedPendingAdId);
-      setDb(readDb());
+      let approvalInvoiceNumber = "";
+      if (!hasSupabaseConfig) {
+        await approvePendingAd(normalizedPendingAdId);
+        setDb(readDb());
+      } else {
+        const response = await fetchWithSessionAuth("/api/admin/pending-ads/approve", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            pending_ad_id: normalizedPendingAdId,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to approve ad.");
+        }
+
+        if (data.warning) {
+          appToast.info({
+            title: "Approval Needs Confirmation",
+            description: data.message || "Approval requires additional confirmation.",
+          });
+          return false;
+        }
+        approvalInvoiceNumber = String(data?.invoice?.invoice_number || "").trim();
+
+        resetDbCache({ emit: false });
+        await ensureDb();
+        setDb(readDb());
+      }
+
       appToast.success({
         title: "Ad Approved",
-        description: "The submission was moved out of pending items.",
+        description: approvalInvoiceNumber
+          ? `Invoice ${approvalInvoiceNumber} created.`
+          : "The submission was moved out of pending items.",
       });
       return true;
     } catch (error) {
@@ -7223,7 +7294,7 @@ export default function AdsPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <input
                           type="text"
-                          placeholder="Search ads..."
+                          placeholder="Search ads or invoice #..."
                           value={calendarSearch}
                           onChange={(event) => setCalendarSearch(event.target.value)}
                           className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-64"
@@ -7925,7 +7996,7 @@ export default function AdsPage() {
                     />
                     <input
                       type="text"
-                      placeholder="Search ads..."
+                      placeholder="Search ads or invoice #..."
                       value={adsFilters.search}
                       onChange={(event) =>
                         setAdsFilters((current) => ({
@@ -8027,6 +8098,12 @@ export default function AdsPage() {
                             </th>
                           )}
                           <AdsSortableHeader
+                            label="Invoice #"
+                            sortKey="invoice_number"
+                            sortConfig={adsSortConfig}
+                            onSort={handleAdsSort}
+                          />
+                          <AdsSortableHeader
                             label="Ad"
                             sortKey="ad_name"
                             sortConfig={adsSortConfig}
@@ -8047,12 +8124,6 @@ export default function AdsPage() {
                           <AdsSortableHeader
                             label="Post Type"
                             sortKey="post_type"
-                            sortConfig={adsSortConfig}
-                            onSort={handleAdsSort}
-                          />
-                          <AdsSortableHeader
-                            label="Placement"
-                            sortKey="placement"
                             sortConfig={adsSortConfig}
                             onSort={handleAdsSort}
                           />

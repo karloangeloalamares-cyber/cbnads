@@ -1742,8 +1742,21 @@ export const approvePendingAd = async (pendingAdId) => {
       db.advertisers.unshift(advertiser);
     }
 
-    db.ads.unshift({
-      id: createId('ad'),
+    const now = nowIso();
+    const adId = createId('ad');
+    const invoiceId = createId('inv');
+    let maxInvoiceDigits = 0;
+    for (const invoice of db.invoices) {
+      const digits = String(invoice?.invoice_number || '').replace(/\D/g, '');
+      const value = Number(digits);
+      if (Number.isFinite(value) && value > maxInvoiceDigits) {
+        maxInvoiceDigits = value;
+      }
+    }
+    const invoiceNumber = `INV-${String(maxInvoiceDigits + 1).padStart(4, '0')}`;
+
+    const nextAd = {
+      id: adId,
       ad_name: pending.ad_name || 'Submitted ad',
       advertiser_id: advertiser.id,
       advertiser: advertiser.advertiser_name,
@@ -1751,7 +1764,7 @@ export const approvePendingAd = async (pendingAdId) => {
       product_name: '',
       post_type: normalizePostType(pending.post_type || 'one_time'),
       status: 'Draft',
-      payment: 'Unpaid',
+      payment: 'Pending',
       post_date: postDate,
       schedule: postDate,
       post_date_from: pending.post_date_from || postDate,
@@ -1765,9 +1778,48 @@ export const approvePendingAd = async (pendingAdId) => {
       notes: pending.notes || '',
       price: '0.00',
       media_urls: [],
-      invoice_id: null,
-      created_at: nowIso(),
-      updated_at: nowIso(),
+      invoice_id: invoiceId,
+      paid_via_invoice_id: invoiceId,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const invoiceLineAmount = toMoney(nextAd.price);
+    db.ads.unshift(nextAd);
+    db.invoices.unshift({
+      id: invoiceId,
+      invoice_number: invoiceNumber,
+      advertiser_id: advertiser.id,
+      advertiser_name: advertiser.advertiser_name,
+      amount: invoiceLineAmount,
+      due_date: '',
+      status: 'Pending',
+      paid_date: '',
+      ad_ids: [adId],
+      items: [
+        {
+          id: createId('inv_item'),
+          invoice_id: invoiceId,
+          ad_id: adId,
+          product_id: null,
+          description: pending.ad_name || 'Ad placement',
+          quantity: 1,
+          unit_price: invoiceLineAmount,
+          amount: invoiceLineAmount,
+          created_at: now,
+        },
+      ],
+      contact_name: pending.contact_name || '',
+      contact_email: pending.email || '',
+      bill_to: pending.advertiser_name || advertiser.advertiser_name || '',
+      issue_date: getTodayInAppTimeZone(),
+      discount: '0.00',
+      tax: '0.00',
+      total: invoiceLineAmount,
+      notes: 'Auto-generated on ad approval.',
+      amount_paid: '0.00',
+      created_at: now,
+      updated_at: now,
     });
 
     db.pending_ads = db.pending_ads.filter((item) => item.id !== pendingAdId);
