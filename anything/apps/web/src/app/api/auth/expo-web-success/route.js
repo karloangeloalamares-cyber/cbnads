@@ -1,8 +1,11 @@
 import { getToken } from '@auth/core/jwt';
 
+const readAuthSecret = () =>
+	String(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || '').trim();
+
 const getAuthOrigin = () => {
 	try {
-		const authUrl = String(process.env.AUTH_URL || '').trim();
+		const authUrl = String(process.env.AUTH_URL || process.env.APP_URL || '').trim();
 		return authUrl ? new URL(authUrl).origin : '';
 	} catch {
 		return '';
@@ -10,14 +13,27 @@ const getAuthOrigin = () => {
 };
 
 export async function GET(request) {
-	const authUrl = String(process.env.AUTH_URL || '').trim();
+	const authUrl = String(process.env.AUTH_URL || process.env.APP_URL || '').trim();
 	const secureCookie = authUrl.startsWith('https');
 	const targetOrigin = getAuthOrigin();
+	const authSecret = readAuthSecret();
 
 	if (!targetOrigin) {
 		return new Response(
 			JSON.stringify({
-				error: 'Server auth configuration is invalid: AUTH_URL must be set to a valid URL.',
+				error: 'Server auth configuration is invalid: AUTH_URL or APP_URL must be set to a valid URL.',
+			}),
+			{
+				status: 500,
+				headers: { 'Content-Type': 'application/json' },
+			}
+		);
+	}
+
+	if (!authSecret) {
+		return new Response(
+			JSON.stringify({
+				error: 'Server auth configuration is invalid: AUTH_SECRET or NEXTAUTH_SECRET must be set.',
 			}),
 			{
 				status: 500,
@@ -29,13 +45,13 @@ export async function GET(request) {
 	const [token, jwt] = await Promise.all([
 		getToken({
 			req: request,
-			secret: process.env.AUTH_SECRET,
+			secret: authSecret,
 			secureCookie,
 			raw: true,
 		}),
 		getToken({
 			req: request,
-			secret: process.env.AUTH_SECRET,
+			secret: authSecret,
 			secureCookie,
 		}),
 	]);
