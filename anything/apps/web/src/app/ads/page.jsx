@@ -5360,7 +5360,7 @@ export default function AdsPage() {
     setSettingsTelegramTesting(chatId);
     setSettingsNotificationMessage(null);
     try {
-      const response = await fetch("/api/admin/telegram/send", {
+      const response = await fetchWithSessionAuth("/api/admin/telegram/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5388,7 +5388,7 @@ export default function AdsPage() {
     setSettingsTelegramWebhookLoading(true);
     setSettingsTelegramWebhookStatus(null);
     try {
-      const response = await fetch("/api/admin/telegram/verify");
+      const response = await fetchWithSessionAuth("/api/admin/telegram/verify");
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Verification failed");
       setSettingsTelegramWebhookStatus({
@@ -5411,7 +5411,7 @@ export default function AdsPage() {
     setSettingsNotificationMessage(null);
 
     try {
-      const response = await fetch("/api/admin/send-reminders?debug=true", {
+      const response = await fetchWithSessionAuth("/api/admin/send-reminders?debug=true", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -5485,7 +5485,7 @@ export default function AdsPage() {
     setSettingsSystemSyncResult(null);
 
     try {
-      const response = await fetch("/api/admin/fix-all-spending", {
+      const response = await fetchWithSessionAuth("/api/admin/fix-all-spending", {
         method: "POST",
       });
       const data = await response.json().catch(() => ({}));
@@ -6496,7 +6496,7 @@ export default function AdsPage() {
 
     const messageText = buildAdsShareMessage(adItem);
     try {
-      const response = await fetch("/api/admin/telegram/send", {
+      const response = await fetchWithSessionAuth("/api/admin/telegram/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chat_ids: activeChatIds, text: messageText }),

@@ -220,6 +220,12 @@ const isMissingColumnError = (error) => {
   return code === '42703' || /column .* does not exist/i.test(message);
 };
 
+const isUniqueConstraintError = (error) => {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === '23505' || /duplicate key/i.test(message) || /unique constraint/i.test(message);
+};
+
 const isPermissionDeniedError = (error) => {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -233,6 +239,12 @@ const isPermissionDeniedError = (error) => {
     /not allowed/i.test(message)
   );
 };
+
+const isOptionalSyncError = (error) =>
+  isMissingRelationError(error) ||
+  isMissingColumnError(error) ||
+  isPermissionDeniedError(error) ||
+  isUniqueConstraintError(error);
 
 const throwIfSupabaseError = (label, error) => {
   if (!error) {
@@ -1119,6 +1131,60 @@ const fetchSingleton = async (
   return result.data?.[0] || null;
 };
 
+const fetchWithSupabaseSessionAuth = async (input, init = {}) => {
+  if (!canUseSupabase()) {
+    return fetch(input, init);
+  }
+
+  const supabase = getSupabaseClient();
+  let {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const expiresAtMs = Number(session?.expires_at || 0) * 1000;
+  const needsRefresh =
+    !session?.access_token ||
+    (Number.isFinite(expiresAtMs) &&
+      expiresAtMs > 0 &&
+      expiresAtMs <= Date.now() + 60_000);
+
+  if (needsRefresh) {
+    const { data: refreshData } = await supabase.auth.refreshSession();
+    session = refreshData?.session || session || null;
+  }
+
+  const accessToken = String(session?.access_token || '').trim();
+  if (!accessToken) {
+    return fetch(input, init);
+  }
+
+  const headers = new Headers(init.headers || {});
+  headers.set('Authorization', `Bearer ${accessToken}`);
+
+  const response = await fetch(input, {
+    ...init,
+    headers,
+  });
+
+  if (response.status !== 401) {
+    return response;
+  }
+
+  const { data: refreshData } = await supabase.auth.refreshSession();
+  const refreshedToken = String(refreshData?.session?.access_token || '').trim();
+  if (!refreshedToken || refreshedToken === accessToken) {
+    return response;
+  }
+
+  const retryHeaders = new Headers(init.headers || {});
+  retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+
+  return fetch(input, {
+    ...init,
+    headers: retryHeaders,
+  });
+};
+
 const fetchDbFromSupabase = async () => {
   const supabase = getSupabaseClient();
   const currentUser = await resolveSupabaseSessionUser(supabase);
@@ -1212,7 +1278,7 @@ const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) 
   if (normalizedRows.length > 0) {
     const upsertResult = await supabase.from(table).upsert(normalizedRows, { onConflict: 'id' });
     if (upsertResult.error) {
-      if (optional && isMissingRelationError(upsertResult.error)) {
+      if (optional && isOptionalSyncError(upsertResult.error)) {
         return;
       }
       throwIfSupabaseError(`upsert ${baseName}`, upsertResult.error);
@@ -1221,7 +1287,7 @@ const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) 
 
   const selectResult = await supabase.from(table).select('id');
   if (selectResult.error) {
-    if (optional && isMissingRelationError(selectResult.error)) {
+    if (optional && isOptionalSyncError(selectResult.error)) {
       return;
     }
     throwIfSupabaseError(`select ids ${baseName}`, selectResult.error);
@@ -1237,7 +1303,12 @@ const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) 
   }
 
   const deleteResult = await supabase.from(table).delete().in('id', deleteIds);
-  throwIfSupabaseError(`delete missing ${baseName}`, deleteResult.error);
+  if (deleteResult.error) {
+    if (optional && isOptionalSyncError(deleteResult.error)) {
+      return;
+    }
+    throwIfSupabaseError(`delete missing ${baseName}`, deleteResult.error);
+  }
 };
 
 const syncSingletonTable = async (
@@ -1252,7 +1323,7 @@ const syncSingletonTable = async (
   const table = tableName(baseName);
   const existing = await supabase.from(table).select('id').order('id', { ascending: true }).limit(1);
   if (existing.error) {
-    if (optional && isMissingRelationError(existing.error)) {
+    if (optional && isOptionalSyncError(existing.error)) {
       return;
     }
     throwIfSupabaseError(`select singleton ${baseName}`, existing.error);
@@ -1266,10 +1337,15 @@ const syncSingletonTable = async (
     }
     if (fallbackRow && isMissingColumnError(insertResult.error)) {
       const fallbackInsert = await supabase.from(table).insert(fallbackRow);
-      throwIfSupabaseError(`insert singleton ${baseName}`, fallbackInsert.error);
+      if (fallbackInsert.error) {
+        if (optional && isOptionalSyncError(fallbackInsert.error)) {
+          return;
+        }
+        throwIfSupabaseError(`insert singleton ${baseName}`, fallbackInsert.error);
+      }
       return;
     }
-    if (optional && isMissingRelationError(insertResult.error)) {
+    if (optional && isOptionalSyncError(insertResult.error)) {
       return;
     }
     throwIfSupabaseError(`insert singleton ${baseName}`, insertResult.error);
@@ -1282,13 +1358,63 @@ const syncSingletonTable = async (
   }
   if (fallbackRow && isMissingColumnError(updateResult.error)) {
     const fallbackUpdate = await supabase.from(table).update(fallbackRow).eq('id', target.id);
-    throwIfSupabaseError(`update singleton ${baseName}`, fallbackUpdate.error);
+    if (fallbackUpdate.error) {
+      if (optional && isOptionalSyncError(fallbackUpdate.error)) {
+        return;
+      }
+      throwIfSupabaseError(`update singleton ${baseName}`, fallbackUpdate.error);
+    }
     return;
   }
-  if (optional && isMissingRelationError(updateResult.error)) {
+  if (optional && isOptionalSyncError(updateResult.error)) {
     return;
   }
   throwIfSupabaseError(`update singleton ${baseName}`, updateResult.error);
+};
+
+const syncAdminNotificationPreferencesViaApi = async (
+  row,
+  { optional = false } = {},
+) => {
+  if (!isBrowser() || typeof fetch !== 'function') {
+    return;
+  }
+
+  let response;
+  try {
+    response = await fetchWithSupabaseSessionAuth('/api/admin/notification-preferences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(row),
+    });
+  } catch (error) {
+    if (optional) {
+      return;
+    }
+    throw new Error(
+      `sync admin_notification_preferences via API failed: ${error?.message || 'Network error'}`,
+    );
+  }
+
+  if (response.ok) {
+    return;
+  }
+
+  let message = '';
+  try {
+    const payload = await response.json();
+    message = String(payload?.error || '').trim();
+  } catch {
+    // Ignore JSON parse errors and use status text below.
+  }
+
+  if (optional) {
+    return;
+  }
+
+  throw new Error(
+    `sync admin_notification_preferences via API failed (${response.status}): ${message || response.statusText || 'Unknown error'}`,
+  );
 };
 
 const persistDbToSupabase = async (value) => {
@@ -1318,9 +1444,7 @@ const persistDbToSupabase = async (value) => {
     'notification_preferences',
     toNotificationRow(db.notification_preferences),
   );
-  await syncSingletonTable(
-    supabase,
-    'admin_notification_preferences',
+  await syncAdminNotificationPreferencesViaApi(
     toAdminNotificationRow({
       ...db.notification_preferences,
       telegram_chat_ids: db.telegram_chat_ids,

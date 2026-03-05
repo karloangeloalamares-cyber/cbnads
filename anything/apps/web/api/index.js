@@ -51,33 +51,37 @@ import * as route_48 from "../src/app/api/admin/pending-ads/mark-read/route.js";
 import * as route_49 from "../src/app/api/admin/pending-ads/reject/route.js";
 import * as route_50 from "../src/app/api/admin/pending-ads/unread-count/route.js";
 import * as route_51 from "../src/app/api/admin/pending-ads/[id]/route.js";
-import * as route_52 from "../src/app/api/ads/[id]/invoices/route.js";
-import * as route_53 from "../src/app/api/public/submit-ad/account/route.js";
-import * as route_54 from "../src/app/api/public/submit-ad/google-account/route.js";
-import * as route_55 from "../src/app/api/public/submit-ad/resend-verification/route.js";
-import * as route_56 from "../src/app/api/public/submit-ad/verify-account/route.js";
-import * as route_57 from "../src/app/api/reconciliation/cases/review/route.js";
-import * as route_58 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_52 from "../src/app/api/admin/telegram/send/route.js";
+import * as route_53 from "../src/app/api/admin/telegram/verify/route.js";
+import * as route_54 from "../src/app/api/ads/[id]/invoices/route.js";
+import * as route_55 from "../src/app/api/public/submit-ad/account/route.js";
+import * as route_56 from "../src/app/api/public/submit-ad/google-account/route.js";
+import * as route_57 from "../src/app/api/public/submit-ad/resend-verification/route.js";
+import * as route_58 from "../src/app/api/public/submit-ad/verify-account/route.js";
+import * as route_59 from "../src/app/api/reconciliation/cases/review/route.js";
+import * as route_60 from "../src/app/api/submissions/[id]/convert/route.js";
 import { handleRouteRequest } from "../vercel-api/adapter.js";
 
 const routes = [
-  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_55 },
+  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_57 },
   { regex: new RegExp("^/api/admin/advertisers/ensure\\-account$"), module: route_43 },
-  { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_54 },
-  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_56 },
+  { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_56 },
+  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_58 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_50 },
   { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_42 },
   { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_48 },
-  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_57 },
+  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_59 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_45 },
   { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_46 },
   { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_49 },
-  { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_53 },
+  { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_55 },
   { regex: new RegExp("^/api/admin/pending\\-ads/list$"), module: route_47 },
-  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_58 },
+  { regex: new RegExp("^/api/admin/telegram/verify$"), module: route_53 },
+  { regex: new RegExp("^/api/admin/telegram/send$"), module: route_52 },
+  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_60 },
   { regex: new RegExp("^/api/admin/pending\\-ads/(?<id>[^/]+)$"), module: route_51 },
   { regex: new RegExp("^/api/admin/members/(?<id>[^/]+)$"), module: route_44 },
-  { regex: new RegExp("^/api/ads/(?<id>[^/]+)/invoices$"), module: route_52 },
+  { regex: new RegExp("^/api/ads/(?<id>[^/]+)/invoices$"), module: route_54 },
   { regex: new RegExp("^/api/admin/notification\\-preferences$"), module: route_5 },
   { regex: new RegExp("^/api/admin/sync\\-advertiser\\-spending$"), module: route_9 },
   { regex: new RegExp("^/api/invoices/generate\\-recurring$"), module: route_30 },

@@ -22,6 +22,43 @@ const isRecoverablePreferencesError = (error) => {
   );
 };
 
+const normalizeTelegramChatIds = (value) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized = [];
+  const seen = new Set();
+
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const chatId = String(entry.chat_id || "").trim();
+    if (!chatId) {
+      continue;
+    }
+
+    const key = chatId.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    normalized.push({
+      id: String(entry.id || chatId).trim() || chatId,
+      label: String(entry.label || chatId).trim() || chatId,
+      chat_id: chatId,
+      is_active: entry.is_active !== false,
+      created_at: entry.created_at || null,
+      updated_at: entry.updated_at || null,
+    });
+  }
+
+  return normalized;
+};
+
 const normalizePreferences = (row, fallbackEmail = "") => ({
   email_enabled: row?.email_enabled ?? true,
   sms_enabled: row?.sms_enabled ?? false,
@@ -30,6 +67,7 @@ const normalizePreferences = (row, fallbackEmail = "") => ({
   email_address: row?.email_address ?? fallbackEmail,
   phone_number: normalizeUSPhoneNumber(row?.phone_number ?? ""),
   sound_enabled: row?.sound_enabled ?? true,
+  telegram_chat_ids: normalizeTelegramChatIds(row?.telegram_chat_ids),
 });
 
 async function findPreferenceRow(supabase, userId, email) {
@@ -111,6 +149,10 @@ export async function POST(request) {
     const userId = UUID_REGEX.test(String(user?.id || "")) ? String(user.id) : null;
     const body = await request.json();
     const normalizedPhoneNumber = normalizeUSPhoneNumber(body?.phone_number || "");
+    const includesTelegramChatIds = Object.prototype.hasOwnProperty.call(
+      body || {},
+      "telegram_chat_ids",
+    );
 
     if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
       return Response.json(
@@ -129,6 +171,9 @@ export async function POST(request) {
       sound_enabled: body?.sound_enabled !== undefined ? Boolean(body.sound_enabled) : true,
       updated_at: new Date().toISOString(),
     };
+    if (includesTelegramChatIds) {
+      patch.telegram_chat_ids = normalizeTelegramChatIds(body?.telegram_chat_ids);
+    }
 
     const supabase = db();
     let saved = null;

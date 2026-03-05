@@ -34,9 +34,14 @@ export async function POST(request) {
     return Response.json({ success: true, message_id: result.message_id });
   } catch (error) {
     console.error("[telegram/send] Error:", error);
+    const upstreamStatus = Number(error?.telegramStatus || 0);
+    const status =
+      Number.isFinite(upstreamStatus) && upstreamStatus >= 400 && upstreamStatus <= 599
+        ? upstreamStatus
+        : 500;
     return Response.json(
       { error: error.message || "Failed to send Telegram message" },
-      { status: 500 },
+      { status },
     );
   }
 }

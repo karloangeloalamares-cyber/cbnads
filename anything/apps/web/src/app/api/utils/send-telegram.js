@@ -19,7 +19,10 @@ export async function sendTelegramMessage({ chatId, text }) {
 
   const data = await response.json();
   if (!response.ok || !data.ok) {
-    throw new Error(data?.description || "Failed to send Telegram message");
+    const error = new Error(data?.description || "Failed to send Telegram message");
+    error.telegramStatus = response.status;
+    error.telegramErrorCode = data?.error_code ?? null;
+    throw error;
   }
   return { message_id: data.result?.message_id };
 }
