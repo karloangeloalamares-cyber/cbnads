@@ -1,21 +1,8 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
+import { nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
-
-function generateInvoiceNumber() {
-  const now = new Date();
-  const dateStr =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let random = "";
-  for (let i = 0; i < 4; i++) {
-    random += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `INV-${dateStr}-${random}`;
-}
 
 export async function POST(request) {
   try {
@@ -57,7 +44,10 @@ export async function POST(request) {
     const subtotal = items.reduce((sum, item) => sum + toNumber(item.amount, 0), 0);
     const total = subtotal - toNumber(discount, 0) + toNumber(tax, 0);
     const nowIso = new Date().toISOString();
-    const invoiceNumber = generateInvoiceNumber();
+    const invoiceNumber = await nextSequentialInvoiceNumber(
+      supabase,
+      table("invoices"),
+    );
     const linkedAdIds = [
       ...new Set(
         items

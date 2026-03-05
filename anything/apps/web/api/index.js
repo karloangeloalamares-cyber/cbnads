@@ -12,8 +12,8 @@ import * as route_9 from "../src/app/api/admin/sync-advertiser-spending/route.js
 import * as route_10 from "../src/app/api/ads/archive/route.js";
 import * as route_11 from "../src/app/api/ads/availability/route.js";
 import * as route_12 from "../src/app/api/ads/availability-batch/route.js";
-import * as route_13 from "../src/app/api/ads/calendar/route.js";
-import * as route_14 from "../src/app/api/ads/bulk-action/route.js";
+import * as route_13 from "../src/app/api/ads/bulk-action/route.js";
+import * as route_14 from "../src/app/api/ads/calendar/route.js";
 import * as route_15 from "../src/app/api/ads/create/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
 import * as route_17 from "../src/app/api/ads/export/route.js";
@@ -98,13 +98,13 @@ const routes = [
   { regex: new RegExp("^/api/ads/availability$"), module: route_11 },
   { regex: new RegExp("^/api/advertisers/list$"), module: route_22 },
   { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_35 },
-  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_14 },
+  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_13 },
   { regex: new RegExp("^/api/invoices/create$"), module: route_28 },
   { regex: new RegExp("^/api/products/create$"), module: route_32 },
   { regex: new RegExp("^/api/admin/settings$"), module: route_8 },
   { regex: new RegExp("^/api/admin/members$"), module: route_4 },
   { regex: new RegExp("^/api/products/list$"), module: route_33 },
-  { regex: new RegExp("^/api/ads/calendar$"), module: route_13 },
+  { regex: new RegExp("^/api/ads/calendar$"), module: route_14 },
   { regex: new RegExp("^/api/user/profile$"), module: route_39 },
   { regex: new RegExp("^/api/ads/archive$"), module: route_10 },
   { regex: new RegExp("^/api/ads/create$"), module: route_15 },

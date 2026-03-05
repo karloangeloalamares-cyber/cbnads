@@ -164,6 +164,35 @@ const toUniqueTrimmedList = (value) => {
 
   return next;
 };
+
+const toInvoiceDateDigits = (value = new Date()) => {
+  const dateKey = toDateOnly(value) || getTodayInAppTimeZone();
+  return String(dateKey).replace(/-/g, '').slice(0, 8);
+};
+
+const INVOICE_SUFFIX_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+const generateInvoiceSuffix = () =>
+  Array.from({ length: 4 }, () =>
+    INVOICE_SUFFIX_CHARS[Math.floor(Math.random() * INVOICE_SUFFIX_CHARS.length)],
+  ).join('');
+
+const nextLocalInvoiceNumber = (db, { dateValue = new Date() } = {}) => {
+  const dateDigits = toInvoiceDateDigits(dateValue);
+  const existing = new Set(
+    toArray(db?.invoices).map((inv) => String(inv?.invoice_number || '').toUpperCase()),
+  );
+
+  let candidate;
+  let attempts = 0;
+  do {
+    candidate = `INV-${dateDigits}-${generateInvoiceSuffix()}`;
+    if (++attempts > 100) break;
+  } while (existing.has(candidate));
+
+  return candidate;
+};
+
 const buildSubmissionReviewNotes = ({ reasons = [], note = '' } = {}) => {
   const normalizedReasons = toUniqueTrimmedList(reasons).slice(0, 20);
   const normalizedNote = String(note || '').trim();
@@ -1760,15 +1789,7 @@ export const approvePendingAd = async (pendingAdId) => {
     const now = nowIso();
     const adId = createId('ad');
     const invoiceId = createId('inv');
-    let maxInvoiceDigits = 0;
-    for (const invoice of db.invoices) {
-      const digits = String(invoice?.invoice_number || '').replace(/\D/g, '');
-      const value = Number(digits);
-      if (Number.isFinite(value) && value > maxInvoiceDigits) {
-        maxInvoiceDigits = value;
-      }
-    }
-    const invoiceNumber = `INV-${String(maxInvoiceDigits + 1).padStart(4, '0')}`;
+    const invoiceNumber = nextLocalInvoiceNumber(db);
 
     const nextAd = {
       id: adId,
@@ -1949,7 +1970,7 @@ export const upsertInvoice = async (input) => {
       invoice_number:
         existing?.invoice_number ||
         (input.invoice_number || '').trim() ||
-        `INV-${Date.now().toString().slice(-6)}`,
+        nextLocalInvoiceNumber(db, { dateValue: input.issue_date || new Date() }),
       advertiser_id: normalizedAdvertiserId || '',
       advertiser_name: advertiser?.advertiser_name || input.advertiser_name || '',
       amount: total,

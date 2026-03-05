@@ -2,7 +2,10 @@ import { requireAdmin } from "../../../utils/auth-check.js";
 import { db, table } from "../../../utils/supabase-db.js";
 import { sendEmail } from "../../../utils/send-email.js";
 import { resolveInternalNotificationEmails } from "../../../utils/internal-notification-emails.js";
-import { nextSequentialInvoiceNumber } from "../../../utils/invoice-helpers.js";
+import {
+  fallbackInvoiceNumber,
+  nextSequentialInvoiceNumber,
+} from "../../../utils/invoice-helpers.js";
 import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
@@ -31,8 +34,6 @@ const isMissingColumnError = (error) => {
   const message = String(error?.message || "");
   return code === "42703" || /column .* does not exist/i.test(message);
 };
-
-const fallbackInvoiceNumber = () => `INV-${Date.now().toString().slice(-6)}`;
 
 const fetchInvoiceById = async (supabase, invoiceId) => {
   const normalizedInvoiceId = String(invoiceId || "").trim();
@@ -317,7 +318,7 @@ export async function POST(request) {
 
     const invoiceNumberText =
       String(invoice?.invoice_number || "").trim() ||
-      `INV-${String(invoice?.id || "").replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase()}`;
+      fallbackInvoiceNumber();
     const amountDueText = formatCurrency(readInvoiceAmount(invoice, resolvedAd));
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
     const internalEmails = (

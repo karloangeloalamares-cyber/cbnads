@@ -1,4 +1,5 @@
 import { toNumber } from "./supabase-db.js";
+import { getTodayInAppTimeZone } from "../../../lib/timezone.js";
 
 export function parsePaymentAmount(value) {
   const text = String(value || "").trim();
@@ -21,22 +22,51 @@ export function adAmount(ad) {
   return toNumber(ad?.product_price, 0);
 }
 
-export async function nextSequentialInvoiceNumber(supabase, invoicesTableName) {
+const INVOICE_PREFIX = "INV";
+const SUFFIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const SUFFIX_LENGTH = 4;
+
+const toInvoiceDateDigits = (value = new Date()) => {
+  const dateKey = getTodayInAppTimeZone(value) || getTodayInAppTimeZone();
+  return String(dateKey).replace(/-/g, "").slice(0, 8);
+};
+
+const generateSuffix = () =>
+  Array.from({ length: SUFFIX_LENGTH }, () =>
+    SUFFIX_CHARS[Math.floor(Math.random() * SUFFIX_CHARS.length)],
+  ).join("");
+
+export function formatInvoiceNumber({ date = new Date(), suffix } = {}) {
+  const dateDigits = toInvoiceDateDigits(date);
+  const safeSuffix = suffix || generateSuffix();
+  return `${INVOICE_PREFIX}-${dateDigits}-${safeSuffix}`;
+}
+
+export function fallbackInvoiceNumber(date = new Date()) {
+  return formatInvoiceNumber({ date });
+}
+
+export async function nextSequentialInvoiceNumber(
+  supabase,
+  invoicesTableName,
+  { date = new Date() } = {},
+) {
   const { data, error } = await supabase
     .from(invoicesTableName)
     .select("invoice_number")
     .is("deleted_at", null);
   if (error) throw error;
 
-  let maxValue = 0;
-  for (const row of data || []) {
-    const digits = String(row?.invoice_number || "").replace(/\D/g, "");
-    const value = Number(digits);
-    if (Number.isFinite(value) && value > maxValue) {
-      maxValue = value;
-    }
-  }
+  const existing = new Set(
+    (data || []).map((row) => String(row?.invoice_number || "").toUpperCase()),
+  );
 
-  return `INV-${String(maxValue + 1).padStart(4, "0")}`;
+  let candidate;
+  let attempts = 0;
+  do {
+    candidate = formatInvoiceNumber({ date });
+    if (++attempts > 100) throw new Error("Could not generate a unique invoice number");
+  } while (existing.has(candidate));
+
+  return candidate;
 }
-
