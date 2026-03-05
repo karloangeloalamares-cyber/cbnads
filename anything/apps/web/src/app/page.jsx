@@ -1,36 +1,4 @@
-"use client";
-
 import { Lock } from "lucide-react";
-
-const HOME_TITLE = "CBN Ads - Reach 30,000+ Customers Daily";
-const HOME_DESCRIPTION =
-  "Get your product or services seen by over 30,000 customers daily.";
-const HOME_SOCIAL_IMAGE =
-  "https://ucarecdn.com/7b4d86dd-1ee1-47fb-a808-89c90e81f0d6/-/format/auto/";
-
-export function meta() {
-  return [
-    { title: HOME_TITLE },
-    { name: "description", content: HOME_DESCRIPTION },
-    { property: "og:title", content: HOME_TITLE },
-    { property: "og:description", content: HOME_DESCRIPTION },
-    { property: "og:image", content: HOME_SOCIAL_IMAGE },
-    { property: "og:image:width", content: "1200" },
-    { property: "og:image:height", content: "630" },
-    {
-      property: "og:image:alt",
-      content: "CBN Ads marketing preview showing the 30,000+ customers daily message.",
-    },
-    { name: "twitter:card", content: "summary_large_image" },
-    { name: "twitter:title", content: HOME_TITLE },
-    { name: "twitter:description", content: HOME_DESCRIPTION },
-    { name: "twitter:image", content: HOME_SOCIAL_IMAGE },
-    {
-      name: "twitter:image:alt",
-      content: "CBN Ads marketing preview showing the 30,000+ customers daily message.",
-    },
-  ];
-}
 
 export default function HomePage() {
   return (

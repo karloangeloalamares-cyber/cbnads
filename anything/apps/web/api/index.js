@@ -13,8 +13,8 @@ import * as route_10 from "../src/app/api/ads/archive/route.js";
 import * as route_11 from "../src/app/api/ads/availability/route.js";
 import * as route_12 from "../src/app/api/ads/availability-batch/route.js";
 import * as route_13 from "../src/app/api/ads/bulk-action/route.js";
-import * as route_14 from "../src/app/api/ads/calendar/route.js";
-import * as route_15 from "../src/app/api/ads/create/route.js";
+import * as route_14 from "../src/app/api/ads/create/route.js";
+import * as route_15 from "../src/app/api/ads/calendar/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
 import * as route_17 from "../src/app/api/ads/export/route.js";
 import * as route_18 from "../src/app/api/ads/list/route.js";
@@ -108,10 +108,10 @@ const routes = [
   { regex: new RegExp("^/api/admin/settings$"), module: route_8 },
   { regex: new RegExp("^/api/admin/members$"), module: route_4 },
   { regex: new RegExp("^/api/products/list$"), module: route_33 },
-  { regex: new RegExp("^/api/ads/calendar$"), module: route_14 },
+  { regex: new RegExp("^/api/ads/calendar$"), module: route_15 },
   { regex: new RegExp("^/api/user/profile$"), module: route_39 },
   { regex: new RegExp("^/api/ads/archive$"), module: route_10 },
-  { regex: new RegExp("^/api/ads/create$"), module: route_15 },
+  { regex: new RegExp("^/api/ads/create$"), module: route_14 },
   { regex: new RegExp("^/api/ads/delete$"), module: route_16 },
   { regex: new RegExp("^/api/ads/export$"), module: route_17 },
   { regex: new RegExp("^/api/ads/update$"), module: route_20 },

@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Eye, X } from "lucide-react";
 import { useSubmitAdForm } from "@/hooks/useSubmitAdForm";
@@ -14,13 +12,6 @@ import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { CreateAdvertiserAccountStep } from "@/components/SubmitAdForm/CreateAdvertiserAccountStep";
 import { VerifyAdvertiserEmailStep } from "@/components/SubmitAdForm/VerifyAdvertiserEmailStep";
-
-export function meta() {
-  return [
-    { title: "Submit an Ad Request — CBN Ads" },
-    { name: "description", content: "Submit your ad request to CBN Ads. Reach your audience with one-time, daily, or custom scheduled posts." },
-  ];
-}
 
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
@@ -251,3 +242,4 @@ export function HydrateFallback() {
     </div>
   );
 }
+

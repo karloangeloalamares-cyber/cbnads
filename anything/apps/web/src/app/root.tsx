@@ -2,8 +2,22 @@ import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 import './global.css';
 import AppToaster from "@/components/AppToaster";
 
+const DEFAULT_SITE_URL = 'https://cbnads.com';
+const SITE_URL = String(
+  (typeof process !== 'undefined'
+    ? process.env.APP_URL ||
+      process.env.AUTH_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      process.env.VITE_APP_URL
+    : '') || DEFAULT_SITE_URL,
+)
+  .trim()
+  .replace(/\/+$/, '');
+const SITE_OG_IMAGE =
+  'https://ucarecdn.com/7b4d86dd-1ee1-47fb-a808-89c90e81f0d6/-/format/auto/';
+const SITE_TITLE = 'CBN Ads - Reach 30,000+ Customers Daily';
 const SITE_DESCRIPTION =
-  'Get your product or services seen by over 30,000 customers daily.';
+  'Get Your Product Seen By 30,000+ Customers Daily!';
 
 export const links = () => [];
 
@@ -95,15 +109,23 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         {/* SEO - Issue #9 */}
+        <link rel="canonical" href={SITE_URL} />
         <meta name="description" content={SITE_DESCRIPTION} />
         <meta property="og:site_name" content="CBN Ads" />
-        <meta property="og:title" content="CBN Ads" />
+        <meta property="og:title" content={SITE_TITLE} />
         <meta property="og:description" content={SITE_DESCRIPTION} />
         <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary" />
-        <meta name="twitter:title" content="CBN Ads" />
+        <meta property="og:url" content={SITE_URL} />
+        <meta property="og:image" content={SITE_OG_IMAGE} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content="CBN Ads social preview" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={SITE_TITLE} />
         <meta name="twitter:description" content={SITE_DESCRIPTION} />
-        <title>CBN Ads</title>
+        <meta name="twitter:image" content={SITE_OG_IMAGE} />
+        <meta name="twitter:image:alt" content="CBN Ads social preview" />
+        <title>{SITE_TITLE}</title>
         <Meta />
         <Links />
         {/* Favicon */}
