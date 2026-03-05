@@ -42,15 +42,24 @@ export async function POST(request) {
       .in("id", validAdIds);
     if (affectedAdsError) throw affectedAdsError;
 
+    const matchedAds = Array.isArray(affectedAds) ? affectedAds : [];
+    const matchedAdIds = matchedAds.map((ad) => String(ad.id || "").trim()).filter(Boolean);
     const affectedAdvertisers = [
-      ...new Set((affectedAds || []).map((ad) => ad.advertiser).filter(Boolean)),
+      ...new Set(matchedAds.map((ad) => ad.advertiser).filter(Boolean)),
     ];
 
     if (action === "delete") {
+      if (matchedAdIds.length === 0) {
+        return Response.json(
+          { error: "No matching ads found for deletion." },
+          { status: 404 },
+        );
+      }
+
       const { error: reminderDeleteError } = await supabase
         .from(table("sent_reminders"))
         .delete()
-        .in("ad_id", validAdIds);
+        .in("ad_id", matchedAdIds);
       if (reminderDeleteError && !isMissingRelationError(reminderDeleteError)) {
         throw reminderDeleteError;
       }
@@ -58,12 +67,12 @@ export async function POST(request) {
       const { error: detachInvoiceItemsError } = await supabase
         .from(table("invoice_items"))
         .update({ ad_id: null })
-        .in("ad_id", validAdIds);
+        .in("ad_id", matchedAdIds);
       if (detachInvoiceItemsError && !isMissingRelationError(detachInvoiceItemsError)) {
         throw detachInvoiceItemsError;
       }
 
-      const { error } = await supabase.from(table("ads")).delete().in("id", validAdIds);
+      const { error } = await supabase.from(table("ads")).delete().in("id", matchedAdIds);
       if (error) throw error;
 
       for (const advertiser of affectedAdvertisers) {
@@ -79,7 +88,7 @@ export async function POST(request) {
 
       return Response.json({
         success: true,
-        message: `${validAdIds.length} ad(s) deleted successfully`,
+        message: `${matchedAdIds.length} ad(s) deleted successfully`,
       });
     }
 

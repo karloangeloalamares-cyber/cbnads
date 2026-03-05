@@ -6150,13 +6150,20 @@ export default function AdsPage() {
             : ad.price
               ? "Custom Amount"
               : "TBD");
+        const normalizedStatus = String(ad.status || "").trim().toLowerCase();
+        const resolvedStatus =
+          mode === "draft"
+            ? "Draft"
+            : isNewAdRecord && (!normalizedStatus || normalizedStatus === "draft")
+              ? "Scheduled"
+              : ad.status || "Draft";
 
         const payload = {
           ...ad,
           post_type: toCreateAdPostTypeValue(selectedPostType),
           payment_mode: paymentMode,
           payment: paymentMode === "Paid" ? "Paid" : "Unpaid",
-          status: mode === "draft" ? "Draft" : ad.status || "Draft",
+          status: resolvedStatus,
           custom_dates: customDates,
         };
 
@@ -6518,6 +6525,10 @@ export default function AdsPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to delete ads.");
+      if (hasSupabaseConfig) {
+        invalidateDbCache();
+        await ensureDb();
+      }
       setDb(readDb());
       setSelectedAdIds(new Set());
       appToast.success({ title: "Ads deleted", description: data.message });
