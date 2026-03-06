@@ -2805,15 +2805,38 @@ export default function AdsPage() {
   const canRejectSubmissions = can(userRole, "submissions:reject");
   const canViewNotifications = can(userRole, "notifications:view");
 
+  const refreshPendingSubmissions = async () => {
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/pending-ads/list");
+      if (response?.ok) {
+        const data = await response.json();
+        const pendingAds = Array.isArray(data?.pending_ads) ? data.pending_ads : [];
+        setDb((current) => ({
+          ...(current || readDb()),
+          pending_ads: pendingAds,
+        }));
+        return;
+      }
+    } catch (error) {
+      console.error("[AdsPage] Failed to fetch pending submissions via API:", error);
+    }
+
+    try {
+      invalidateDbCache();
+      await ensureDb();
+      setDb(readDb());
+    } catch (error) {
+      console.error("[AdsPage] Failed to refresh submissions after notification:", error);
+    }
+  };
+
   const openSubmissionsFromNotification = async () => {
     setShowNotificationsDropdown(false);
     setActiveSection("Submissions");
     setView("list");
 
     try {
-      invalidateDbCache();
-      await ensureDb();
-      setDb(readDb());
+      await refreshPendingSubmissions();
     } catch (error) {
       console.error(
         "[AdsPage] Failed to refresh submissions after notification:",
