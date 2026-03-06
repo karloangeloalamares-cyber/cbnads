@@ -71,6 +71,7 @@ Used by production features when enabled:
 
 - `RESEND_API_KEY`
 - `RESEND_FROM_EMAIL`
+- `RESEND_FROM_NAME`
 - `ZAPIER_WEBHOOK_URL`
 - `TELEGRAM_BOT_TOKEN`
 - `APPROVAL_ZELLE_NUMBER`

@@ -1,6 +1,6 @@
 import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/supabase-db.js";
 import { requireInternalUser } from "../../utils/auth-check.js";
-import { sendEmail } from "../../utils/send-email.js";
+import { getDefaultEmailSender, sendEmail } from "../../utils/send-email.js";
 import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
 import {
   sendTelegramMediaToMany,
@@ -483,6 +483,7 @@ export async function POST(request) {
 
     const results = [];
     const debug = [];
+    const defaultSender = getDefaultEmailSender();
 
     for (const ad of upcomingAds) {
       const scheduleEntries = computeScheduledEntries(ad, todayET);
@@ -535,7 +536,7 @@ export async function POST(request) {
             const payload = {
               recipientType: "internal",
               to: internalEmails,
-              from: "Ad Manager <advertise@cbnads.com>",
+              from: defaultSender,
               subject: `Ad Reminder | ${ad.advertiser} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
               adName: ad.ad_name,
               advertiser: ad.advertiser,
@@ -638,7 +639,7 @@ export async function POST(request) {
           to: advertiserInfo.email,
           advertiserEmail: advertiserInfo.email,
           advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
-          from: "Ad Manager <advertise@cbnads.com>",
+          from: defaultSender,
           subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
           advertiserName,
           adName: ad.ad_name,

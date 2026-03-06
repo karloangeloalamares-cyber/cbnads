@@ -1,4 +1,5 @@
 import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
+import { getDefaultEmailSender } from "../../utils/send-email.js";
 
 export async function POST(request) {
   try {
@@ -24,6 +25,7 @@ export async function POST(request) {
 
     const user = await getSessionUser();
     const userName = user?.name || "Admin";
+    const defaultSender = getDefaultEmailSender();
 
     const webhookResponse = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
       method: "POST",
@@ -33,7 +35,7 @@ export async function POST(request) {
       body: JSON.stringify({
         recipientType: "admin",
         to: email,
-        from: "Ad Manager <advertise@cbnads.com>",
+        from: defaultSender,
         subject: "Test Email - Your Ad Reminder System is Working!",
         greeting: "Hello",
         firstName: userName.split(" ")[0],
@@ -74,4 +76,3 @@ export async function POST(request) {
     );
   }
 }
-
