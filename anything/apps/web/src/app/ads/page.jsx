@@ -673,6 +673,16 @@ const buildAdsShareMessage = (ad) => {
   return lines.join("\n");
 };
 
+const buildAdsTelegramCaption = (ad) =>
+  String(ad?.ad_text || ad?.notes || "").trim();
+
+const getPrimaryAdsShareMedia = (ad) =>
+  parseAdMedia(ad?.media).find((item) => {
+    const type = String(item?.type || "").trim().toLowerCase();
+    const url = String(item?.url || item?.cdnUrl || "").trim();
+    return url && (type === "image" || type === "video");
+  }) || null;
+
 const truncateAdsWords = (text, maxWords = 3) => {
   const words = String(text || "").trim().split(/\s+/).filter(Boolean);
   if (words.length <= maxWords) {
@@ -7292,12 +7302,32 @@ export default function AdsPage() {
       return;
     }
 
-    const messageText = buildAdsShareMessage(adItem);
+    const messageText = buildAdsTelegramCaption(adItem);
+    const mediaItem = getPrimaryAdsShareMedia(adItem);
+
+    if (!messageText && !mediaItem) {
+      appToast.warning({
+        title: "Nothing to send",
+        description: "This ad does not have any media or ad copy yet.",
+      });
+      return;
+    }
+
     try {
       const response = await fetchWithSessionAuth("/api/admin/telegram/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_ids: activeChatIds, text: messageText }),
+        body: JSON.stringify({
+          chat_ids: activeChatIds,
+          text: messageText,
+          parse_mode: null,
+          media: mediaItem
+            ? {
+                type: mediaItem.type,
+                url: mediaItem.url || mediaItem.cdnUrl,
+              }
+            : null,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || "Failed to send");

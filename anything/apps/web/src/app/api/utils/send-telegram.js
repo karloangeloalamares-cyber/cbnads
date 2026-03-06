@@ -7,6 +7,17 @@ const createTelegramError = (status, data) => {
   return error;
 };
 
+const normalizeParseMode = (parseMode, fallback = "HTML") => {
+  if (parseMode === null) {
+    return null;
+  }
+  if (parseMode === undefined) {
+    return fallback;
+  }
+  const value = String(parseMode || "").trim();
+  return value || null;
+};
+
 const stripHtmlTags = (value) =>
   String(value || "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -16,16 +27,48 @@ const stripHtmlTags = (value) =>
 const shouldRetryWithoutHtml = (error) =>
   /can't parse entities/i.test(String(error?.message || ""));
 
-const sendTelegram = async ({ token, chatId, text, parseMode = "HTML" }) => {
+const buildTelegramPayload = ({ chatId, text, media, parseMode }) => {
   const payload = {
     chat_id: String(chatId).trim(),
-    text: String(text || ""),
   };
-  if (parseMode) {
-    payload.parse_mode = parseMode;
+  const normalizedParseMode = normalizeParseMode(parseMode);
+
+  if (media?.type === "image") {
+    payload.photo = String(media.url || "").trim();
+    if (text) {
+      payload.caption = String(text);
+    }
+  } else if (media?.type === "video") {
+    payload.video = String(media.url || "").trim();
+    if (text) {
+      payload.caption = String(text);
+    }
+  } else {
+    payload.text = String(text || "");
   }
 
-  const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
+  if (normalizedParseMode && (payload.caption || payload.text)) {
+    payload.parse_mode = normalizedParseMode;
+  }
+
+  return payload;
+};
+
+const resolveTelegramMethod = (media) => {
+  if (media?.type === "image") {
+    return "sendPhoto";
+  }
+  if (media?.type === "video") {
+    return "sendVideo";
+  }
+  return "sendMessage";
+};
+
+const sendTelegram = async ({ token, chatId, text, media = null, parseMode = "HTML" }) => {
+  const payload = buildTelegramPayload({ chatId, text, media, parseMode });
+  const method = resolveTelegramMethod(media);
+
+  const response = await fetch(`${TELEGRAM_API_BASE}/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -39,7 +82,7 @@ const sendTelegram = async ({ token, chatId, text, parseMode = "HTML" }) => {
   return { message_id: data.result?.message_id };
 };
 
-export async function sendTelegramMessage({ chatId, text }) {
+export async function sendTelegramMessage({ chatId, text, parseMode = "HTML" }) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
   if (!token) {
     throw new Error("TELEGRAM_BOT_TOKEN is not configured");
@@ -50,7 +93,7 @@ export async function sendTelegramMessage({ chatId, text }) {
       token,
       chatId,
       text,
-      parseMode: "HTML",
+      parseMode,
     });
   } catch (error) {
     if (!shouldRetryWithoutHtml(error)) {
@@ -71,10 +114,69 @@ export async function sendTelegramMessage({ chatId, text }) {
   }
 }
 
-export async function sendTelegramToMany({ chatIds, text }) {
+export async function sendTelegramMediaMessage({
+  chatId,
+  media,
+  caption = "",
+  parseMode = "HTML",
+}) {
+  const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
+  if (!token) {
+    throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+  }
+
+  try {
+    return await sendTelegram({
+      token,
+      chatId,
+      text: caption,
+      media,
+      parseMode,
+    });
+  } catch (error) {
+    if (!shouldRetryWithoutHtml(error)) {
+      throw error;
+    }
+
+    const plainText = stripHtmlTags(caption);
+    return sendTelegram({
+      token,
+      chatId,
+      text: plainText,
+      media,
+      parseMode: null,
+    });
+  }
+}
+
+export async function sendTelegramToMany({ chatIds, text, parseMode = "HTML" }) {
   if (!chatIds || chatIds.length === 0) return [];
   const results = await Promise.allSettled(
-    chatIds.map((chatId) => sendTelegramMessage({ chatId, text })),
+    chatIds.map((chatId) => sendTelegramMessage({ chatId, text, parseMode })),
+  );
+  return results.map((result, i) => ({
+    chatId: chatIds[i],
+    ok: result.status === "fulfilled",
+    error: result.status === "rejected" ? result.reason?.message : null,
+  }));
+}
+
+export async function sendTelegramMediaToMany({
+  chatIds,
+  media,
+  caption = "",
+  parseMode = "HTML",
+}) {
+  if (!chatIds || chatIds.length === 0) return [];
+  const results = await Promise.allSettled(
+    chatIds.map((chatId) =>
+      sendTelegramMediaMessage({
+        chatId,
+        media,
+        caption,
+        parseMode,
+      }),
+    ),
   );
   return results.map((result, i) => ({
     chatId: chatIds[i],

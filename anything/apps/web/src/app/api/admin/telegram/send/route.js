@@ -1,5 +1,24 @@
 import { requirePermission } from "../../../utils/auth-check.js";
-import { sendTelegramMessage, sendTelegramToMany } from "../../../utils/send-telegram.js";
+import {
+  sendTelegramMediaMessage,
+  sendTelegramMediaToMany,
+  sendTelegramMessage,
+  sendTelegramToMany,
+} from "../../../utils/send-telegram.js";
+
+const normalizeTelegramMedia = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const type = String(value?.type || "").trim().toLowerCase();
+  const url = String(value?.url || value?.cdnUrl || "").trim();
+  if (!url || (type !== "image" && type !== "video")) {
+    return null;
+  }
+
+  return { type, url };
+};
 
 export async function POST(request) {
   try {
@@ -9,15 +28,28 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { chat_id, chat_ids, text } = body;
+    const { chat_id, chat_ids, text, parse_mode } = body;
+    const normalizedText = typeof text === "string" ? text : String(text || "");
+    const media = normalizeTelegramMedia(body?.media);
 
-    if (!text) {
-      return Response.json({ error: "text is required" }, { status: 400 });
+    if (!normalizedText.trim() && !media) {
+      return Response.json({ error: "text or media is required" }, { status: 400 });
     }
 
     // Support single chat_id or array of chat_ids
     if (Array.isArray(chat_ids) && chat_ids.length > 0) {
-      const results = await sendTelegramToMany({ chatIds: chat_ids, text });
+      const results = media
+        ? await sendTelegramMediaToMany({
+            chatIds: chat_ids,
+            media,
+            caption: normalizedText,
+            parseMode: parse_mode,
+          })
+        : await sendTelegramToMany({
+            chatIds: chat_ids,
+            text: normalizedText,
+            parseMode: parse_mode,
+          });
       const failed = results.filter((r) => !r.ok);
       return Response.json({
         success: failed.length === 0,
@@ -30,7 +62,18 @@ export async function POST(request) {
       return Response.json({ error: "chat_id or chat_ids is required" }, { status: 400 });
     }
 
-    const result = await sendTelegramMessage({ chatId: chat_id, text });
+    const result = media
+      ? await sendTelegramMediaMessage({
+          chatId: chat_id,
+          media,
+          caption: normalizedText,
+          parseMode: parse_mode,
+        })
+      : await sendTelegramMessage({
+          chatId: chat_id,
+          text: normalizedText,
+          parseMode: parse_mode,
+        });
     return Response.json({ success: true, message_id: result.message_id });
   } catch (error) {
     console.error("[telegram/send] Error:", error);
