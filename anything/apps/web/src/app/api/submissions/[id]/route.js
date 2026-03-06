@@ -146,6 +146,31 @@ export async function PUT(request, { params }) {
     }
 
     const body = await request.json();
+    const nextProductId = String(body.product_id ?? submission.product_id ?? "").trim();
+    let productRow = null;
+    if (body.product_id !== undefined && !nextProductId) {
+      return Response.json(
+        { error: "Selected product is required." },
+        { status: 400 },
+      );
+    }
+
+    if (nextProductId) {
+      const { data: product, error: productError } = await supabase
+        .from(table("products"))
+        .select("id, product_name, price, placement")
+        .eq("id", nextProductId)
+        .maybeSingle();
+      if (productError) throw productError;
+      if (!product) {
+        return Response.json(
+          { error: "Selected product was not found." },
+          { status: 400 },
+        );
+      }
+      productRow = product;
+    }
+
     const normalizedPhoneNumber =
       body.phone_number !== undefined
         ? normalizeUSPhoneNumber(body.phone_number || "")
@@ -274,6 +299,10 @@ export async function PUT(request, { params }) {
     }
 
     const firstCustomDate = customDateValue(nextCustomDates[0]);
+    const resolvedPlacement =
+      productRow?.placement ||
+      String(body.placement ?? submission.placement ?? "").trim() ||
+      null;
     const patch = {
       advertiser_name: String(body.advertiser_name ?? submission.advertiser_name ?? "").trim(),
       contact_name: String(body.contact_name ?? submission.contact_name ?? "").trim(),
@@ -295,7 +324,10 @@ export async function PUT(request, { params }) {
       post_time: nextPostType === "custom_schedule" ? null : nextPostTime || null,
       reminder_minutes: Number(body.reminder_minutes ?? submission.reminder_minutes) || 15,
       ad_text: String(body.ad_text ?? submission.ad_text ?? "").trim(),
-      placement: String(body.placement ?? submission.placement ?? "").trim() || null,
+      product_id: productRow?.id || submission.product_id || null,
+      product_name: productRow?.product_name || submission.product_name || null,
+      price: productRow?.price ?? submission.price ?? 0,
+      placement: resolvedPlacement,
       notes: String(body.notes ?? submission.notes ?? "").trim() || null,
       updated_at: new Date().toISOString(),
     };

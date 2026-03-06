@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Eye, RefreshCw, Send, X } from "lucide-react";
+import { Eye, RefreshCw, Send, X } from "lucide-react";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
+import { ProductSelectionSection } from "@/components/SubmitAdForm/ProductSelectionSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import {
   checkAdAvailability,
@@ -25,6 +26,8 @@ const blankSubmissionForm = {
   phone_number: "",
   ad_name: "",
   post_type: "One-Time Post",
+  product_id: "",
+  product_name: "",
   post_date_from: "",
   post_date_to: "",
   custom_dates: [],
@@ -33,7 +36,46 @@ const blankSubmissionForm = {
   ad_text: "",
   media: [],
   placement: "",
+  price: "",
   notes: "",
+};
+
+const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
+
+const getScheduleOccurrenceCount = (formData) => {
+  const postType = String(formData?.post_type || "").trim();
+
+  if (postType === "Daily Run") {
+    const start = normalizeDateOnly(formData?.post_date_from);
+    const end = normalizeDateOnly(formData?.post_date_to);
+    if (!start || !end) {
+      return 0;
+    }
+
+    const startDate = new Date(`${start}T00:00:00`);
+    const endDate = new Date(`${end}T00:00:00`);
+    if (
+      Number.isNaN(startDate.valueOf()) ||
+      Number.isNaN(endDate.valueOf()) ||
+      endDate < startDate
+    ) {
+      return 0;
+    }
+
+    return Math.floor((endDate.valueOf() - startDate.valueOf()) / 86400000) + 1;
+  }
+
+  if (postType === "Custom Schedule") {
+    return [
+      ...new Set(
+        normalizeCustomDateEntries(formData?.custom_dates).map((entry) =>
+          normalizeDateOnly(entry?.date || entry),
+        ),
+      ),
+    ].filter(Boolean).length;
+  }
+
+  return 1;
 };
 
 const isFormBlank = (formData) =>
@@ -62,6 +104,7 @@ const buildInitialFormData = ({ advertiser, user }) => ({
 export default function AdvertiserCreateAdSection({
   advertiser = null,
   user = null,
+  products: initialProducts = [],
   fetchWithSessionAuth,
   onSubmitted,
 }) {
@@ -75,6 +118,13 @@ export default function AdvertiserCreateAdSection({
   const [customTime, setCustomTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [products, setProducts] = useState(
+    Array.isArray(initialProducts) ? initialProducts.filter(Boolean) : [],
+  );
+  const [productsLoading, setProductsLoading] = useState(
+    !Array.isArray(initialProducts) || initialProducts.length === 0,
+  );
+  const [productsError, setProductsError] = useState(null);
   const [availabilityError, setAvailabilityError] = useState(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
@@ -85,10 +135,73 @@ export default function AdvertiserCreateAdSection({
   const identityReady =
     String(initialForm.advertiser_name || "").trim() &&
     String(initialForm.email || "").trim();
+  const selectedProduct = useMemo(
+    () =>
+      products.find((item) => String(item?.id || "") === String(formData.product_id || "")) ||
+      null,
+    [formData.product_id, products],
+  );
+  const scheduleOccurrenceCount = useMemo(
+    () => getScheduleOccurrenceCount(formData),
+    [formData],
+  );
 
   useEffect(() => {
     formDataRef.current = formData;
   }, [formData]);
+
+  useEffect(() => {
+    if (Array.isArray(initialProducts) && initialProducts.length > 0) {
+      setProducts(initialProducts.filter(Boolean));
+      setProductsLoading(false);
+      setProductsError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadProducts = async () => {
+      setProductsLoading(true);
+      setProductsError(null);
+
+      try {
+        const response = await submitWithAuth("/api/products/list");
+        const data = await response.json().catch(() => []);
+
+        if (!response.ok) {
+          throw new Error(data?.error || "Failed to load product options.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setProducts(Array.isArray(data) ? data : []);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.error("Failed to load product options:", error);
+        setProducts([]);
+        setProductsError(
+          error instanceof Error
+            ? error.message
+            : "Could not load product options. Please try again.",
+        );
+      } finally {
+        if (!cancelled) {
+          setProductsLoading(false);
+        }
+      }
+    };
+
+    void loadProducts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialProducts, submitWithAuth]);
 
   useEffect(() => {
     setFormData((current) => {
@@ -155,6 +268,20 @@ export default function AdvertiserCreateAdSection({
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
+  };
+
+  const handleProductSelect = (product) => {
+    setFormData((current) => {
+      const next = {
+        ...current,
+        product_id: product?.id || "",
+        product_name: product?.product_name || "",
+        placement: product?.placement || current.placement || "",
+        price: product?.price ?? "",
+      };
+      formDataRef.current = next;
+      return next;
+    });
   };
 
   const addMedia = (mediaItem) => {
@@ -239,6 +366,27 @@ export default function AdvertiserCreateAdSection({
     ) {
       appToast.error({
         title: "Complete all required fields before submitting.",
+      });
+      return false;
+    }
+
+    if (productsLoading) {
+      appToast.error({
+        title: "Product options are still loading.",
+      });
+      return false;
+    }
+
+    if (products.length === 0) {
+      appToast.error({
+        title: "No billable product options are available.",
+      });
+      return false;
+    }
+
+    if (!current.product_id) {
+      appToast.error({
+        title: "Select a product option before submitting.",
       });
       return false;
     }
@@ -395,24 +543,6 @@ export default function AdvertiserCreateAdSection({
           </button>
         </div>
 
-        <div className="mb-6 rounded-2xl border border-gray-200 bg-white px-5 py-4">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 rounded-full bg-gray-100 p-2 text-gray-700">
-              <AlertCircle size={16} />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Linked advertiser account</p>
-              <p className="mt-1 text-sm text-gray-600">
-                This request will be submitted under{" "}
-                <span className="font-medium text-gray-900">
-                  {initialForm.advertiser_name || "your advertiser account"}
-                </span>
-                {initialForm.email ? ` using ${initialForm.email}.` : "."}
-              </p>
-            </div>
-          </div>
-        </div>
-
         {!identityReady ? (
           <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
             Your advertiser profile is missing a linked company name or email. Contact the CBN
@@ -461,6 +591,15 @@ export default function AdvertiserCreateAdSection({
                   fullyBookedDates={fullyBookedDates}
                 />
 
+                <ProductSelectionSection
+                  products={products}
+                  selectedProductId={formData.product_id}
+                  onSelectProduct={handleProductSelect}
+                  loading={productsLoading}
+                  error={productsError}
+                  occurrenceCount={scheduleOccurrenceCount}
+                />
+
                 <NotesSection notes={formData.notes} onChange={handleChange} />
 
                 <div className="flex flex-col gap-3 border-t border-gray-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
@@ -476,7 +615,13 @@ export default function AdvertiserCreateAdSection({
 
                   <button
                     type="submit"
-                    disabled={loading || checkingAvailability || !identityReady}
+                    disabled={
+                      loading ||
+                      checkingAvailability ||
+                      productsLoading ||
+                      products.length === 0 ||
+                      !identityReady
+                    }
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
                   >
                     <Send size={16} />
@@ -500,6 +645,35 @@ export default function AdvertiserCreateAdSection({
                 </div>
               </div>
               <AdPreview formData={formData} />
+              {selectedProduct ? (
+                <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">
+                    Billing Snapshot
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">
+                    {selectedProduct.product_name}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    {selectedProduct.placement || "Standard"} •{" "}
+                    {new Intl.NumberFormat("en-US", {
+                      style: "currency",
+                      currency: "USD",
+                    }).format(Number(selectedProduct.price) || 0)}{" "}
+                    per scheduled post
+                  </p>
+                  <p className="mt-3 text-sm font-semibold text-gray-900">
+                    Estimated total:{" "}
+                    {scheduleOccurrenceCount > 0
+                      ? new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                        }).format(
+                          (Number(selectedProduct.price) || 0) * scheduleOccurrenceCount,
+                        )
+                      : "TBD"}
+                  </p>
+                </div>
+              ) : null}
             </div>
           </aside>
         </div>

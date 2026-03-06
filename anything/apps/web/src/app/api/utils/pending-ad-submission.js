@@ -19,6 +19,12 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(Number(value) || 0);
+
 const toSafeHttpUrl = (value) => {
   try {
     const parsed = new URL(String(value || "").trim());
@@ -106,6 +112,7 @@ export async function createPendingAdSubmission({
     ad_text,
     media,
     placement,
+    product_id,
     notes,
   } = submission;
 
@@ -113,6 +120,8 @@ export async function createPendingAdSubmission({
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
   const normalizedCustomDates = readCustomDates(custom_dates);
+  const normalizedProductId = String(product_id || "").trim();
+  let selectedProduct = null;
 
   if (!advertiser_name || !contact_name || !normalizedEmail || !ad_name || !post_type) {
     return {
@@ -141,6 +150,27 @@ export async function createPendingAdSubmission({
       error: "Phone number must be a complete US number",
       status: 400,
     };
+  }
+
+  if (normalizedProductId) {
+    const { data: productRow, error: productError } = await supabase
+      .from(table("products"))
+      .select("id, product_name, placement, price")
+      .eq("id", normalizedProductId)
+      .maybeSingle();
+
+    if (productError) {
+      throw productError;
+    }
+
+    if (!productRow) {
+      return {
+        error: "Selected product was not found",
+        status: 400,
+      };
+    }
+
+    selectedProduct = productRow;
   }
 
   if (normalizedPostType === "one_time" && post_date_from && post_time) {
@@ -201,6 +231,10 @@ export async function createPendingAdSubmission({
     }
   }
 
+  const resolvedPlacement = String(selectedProduct?.placement || placement || "").trim();
+  const savedPrice = Number(selectedProduct?.price || 0) || 0;
+  const savedPriceText = selectedProduct ? formatCurrency(savedPrice) : "";
+
   const escaped = {
     advertiser_name: escapeHtml(advertiser_name),
     contact_name: escapeHtml(contact_name),
@@ -208,7 +242,9 @@ export async function createPendingAdSubmission({
     phone_number: escapeHtml(normalizedPhoneNumber),
     ad_name: escapeHtml(ad_name),
     post_type: escapeHtml(post_type),
-    placement: escapeHtml(placement),
+    placement: escapeHtml(resolvedPlacement),
+    product_name: escapeHtml(selectedProduct?.product_name || ""),
+    price: escapeHtml(savedPriceText),
     post_date_from: escapeHtml(post_date_from),
     post_date_to: escapeHtml(post_date_to),
     post_time: escapeHtml(post_time),
@@ -276,7 +312,10 @@ export async function createPendingAdSubmission({
     reminder_minutes: reminder_minutes || 15,
     ad_text: ad_text || null,
     media: sanitizedMedia,
-    placement: placement || null,
+    placement: resolvedPlacement || null,
+    product_id: normalizedProductId || null,
+    product_name: selectedProduct?.product_name || null,
+    price: savedPrice,
     notes: notes || null,
     status: "pending",
     viewed_by_admin: false,
@@ -318,7 +357,9 @@ export async function createPendingAdSubmission({
         ${normalizedPhoneNumber ? `<div class="info-row"><span class="label">Phone:</span> ${escaped.phone_number}</div>` : ""}
         <div class="info-row"><span class="label">Ad Name:</span> ${escaped.ad_name}</div>
         <div class="info-row"><span class="label">Post Type:</span> ${escaped.post_type}</div>
-        ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+        ${selectedProduct ? `<div class="info-row"><span class="label">Product:</span> ${escaped.product_name}</div>` : ""}
+        ${resolvedPlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+        ${selectedProduct ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.price} per scheduled post</div>` : ""}
         ${post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${escaped.post_date_from}</div>` : ""}
         ${post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${escaped.post_date_to}</div>` : ""}
         ${post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${escaped.post_time}</div>` : ""}
@@ -387,7 +428,9 @@ export async function createPendingAdSubmission({
         <div class="info-block">
           <div class="info-row"><span class="label">Ad Name:</span> ${escaped.ad_name}</div>
           <div class="info-row"><span class="label">Post Type:</span> ${escaped.post_type}</div>
-          ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+          ${selectedProduct ? `<div class="info-row"><span class="label">Product:</span> ${escaped.product_name}</div>` : ""}
+          ${resolvedPlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+          ${selectedProduct ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.price} per scheduled post</div>` : ""}
         </div>
       </div>
 
@@ -490,7 +533,9 @@ export async function createPendingAdSubmission({
     `<b>Contact:</b> ${escapeHtml(contact_name)} (${escapeHtml(normalizedEmail)})`,
     `<b>Ad:</b> ${escapeHtml(ad_name)}`,
     `<b>Post Type:</b> ${escapeHtml(post_type)}`,
-    placement ? `<b>Placement:</b> ${escapeHtml(placement)}` : "",
+    selectedProduct ? `<b>Product:</b> ${escapeHtml(selectedProduct.product_name)}` : "",
+    resolvedPlacement ? `<b>Placement:</b> ${escapeHtml(resolvedPlacement)}` : "",
+    selectedProduct ? `<b>Quoted Price:</b> ${escapeHtml(savedPriceText)} per scheduled post` : "",
     post_date_from ? `<b>Start Date:</b> ${escapeHtml(post_date_from)}` : "",
     post_date_to ? `<b>End Date:</b> ${escapeHtml(post_date_to)}` : "",
     post_time ? `<b>Post Time:</b> ${escapeHtml(post_time)}` : "",

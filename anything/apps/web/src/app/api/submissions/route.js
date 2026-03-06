@@ -169,6 +169,7 @@ export async function POST(request) {
     const scope = await resolveAdvertiserScope(auth.user);
     const advertiser = await loadAdvertiserForScope(supabase, scope);
     const body = await request.json();
+    const normalizedProductId = String(body?.product_id || "").trim();
 
     const canonicalAdvertiserName =
       String(advertiser?.advertiser_name || scope?.name || auth.user?.advertiser_name || "").trim();
@@ -182,11 +183,19 @@ export async function POST(request) {
       );
     }
 
+    if (!normalizedProductId) {
+      return Response.json(
+        { error: "Please select a product option before submitting." },
+        { status: 400 },
+      );
+    }
+
     const result = await createPendingAdSubmission({
       request,
       supabase,
       submission: {
         ...body,
+        product_id: normalizedProductId,
         advertiser_id: advertiser?.id || scope?.id || auth.user?.advertiser_id || null,
         advertiser_name: canonicalAdvertiserName,
         email: canonicalEmail,

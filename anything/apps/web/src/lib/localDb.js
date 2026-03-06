@@ -979,6 +979,7 @@ const toAdRow = (input) => {
 
 const fromPendingAdRow = (row) => ({
   id: row.id,
+  advertiser_id: row.advertiser_id || '',
   advertiser_name: row.advertiser_name || '',
   contact_name: row.contact_name || '',
   email: row.email || '',
@@ -986,6 +987,8 @@ const fromPendingAdRow = (row) => ({
   phone_number: normalizeUSPhoneNumber(row.phone_number || row.phone || ''),
   business_name: row.business_name || '',
   ad_name: row.ad_name || '',
+  product_id: row.product_id || '',
+  product_name: row.product_name || '',
   post_type: normalizePostType(row.post_type),
   post_date: toDateOnly(row.post_date || row.post_date_from),
   post_date_from: toDateOnly(row.post_date_from || row.post_date),
@@ -996,6 +999,7 @@ const fromPendingAdRow = (row) => ({
   ad_text: row.ad_text || '',
   media: toArray(row.media),
   placement: row.placement || '',
+  price: toMoney(row.price),
   notes: row.notes || '',
   review_notes: row.review_notes || '',
   status: row.status || 'pending',
@@ -1007,6 +1011,7 @@ const fromPendingAdRow = (row) => ({
 
 const toPendingAdRow = (input) => ({
   id: input.id || createId(),
+  advertiser_id: input.advertiser_id || null,
   advertiser_name: String(input.advertiser_name || '').trim(),
   contact_name: String(input.contact_name || '').trim(),
   email: String(input.email || '').trim(),
@@ -1014,6 +1019,8 @@ const toPendingAdRow = (input) => ({
   phone_number: normalizeUSPhoneNumber(input.phone_number || input.phone || ''),
   business_name: String(input.business_name || '').trim(),
   ad_name: String(input.ad_name || '').trim(),
+  product_id: input.product_id || null,
+  product_name: String(input.product_name || '').trim(),
   post_type: normalizePostType(input.post_type),
   post_date: toDateColumn(input.post_date || input.post_date_from),
   post_date_from: toDateColumn(input.post_date_from || input.post_date),
@@ -1024,6 +1031,7 @@ const toPendingAdRow = (input) => ({
   ad_text: String(input.ad_text || '').trim(),
   media: toArray(input.media),
   placement: String(input.placement || '').trim(),
+  price: toMoney(input.price),
   notes: String(input.notes || '').trim(),
   review_notes: String(input.review_notes || '').trim() || null,
   status: input.status || 'pending',

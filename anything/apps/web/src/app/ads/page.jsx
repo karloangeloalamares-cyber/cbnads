@@ -8444,6 +8444,7 @@ export default function AdsPage() {
           {activeSection === "Create Ad" && isAdvertiser && (
             <AdvertiserCreateAdSection
               advertiser={currentAdvertiser}
+              products={products}
               user={user}
               fetchWithSessionAuth={fetchWithSessionAuth}
               onSubmitted={handleAdvertiserSubmissionCreated}
