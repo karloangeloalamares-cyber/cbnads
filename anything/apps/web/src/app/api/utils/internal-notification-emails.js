@@ -1,6 +1,6 @@
 import { table } from "./supabase-db.js";
 
-const INTERNAL_ROLES = new Set(["admin", "manager", "staff", "owner"]);
+const INTERNAL_ROLES = new Set(["admin", "manager", "staff", "assistant", "owner"]);
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const normalizeRole = (value) => String(value || "").trim().toLowerCase();

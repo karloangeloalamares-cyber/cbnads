@@ -2,7 +2,11 @@ import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/su
 import { requireInternalUser } from "../../utils/auth-check.js";
 import { sendEmail } from "../../utils/send-email.js";
 import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
-import { sendTelegramToMany, resolveActiveTelegramChatIds } from "../../utils/send-telegram.js";
+import {
+  sendTelegramMediaToMany,
+  sendTelegramToMany,
+  resolveActiveTelegramChatIds,
+} from "../../utils/send-telegram.js";
 
 const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -29,6 +33,13 @@ const REMINDER_PRESET_MINUTES = {
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 const normalizeStatus = (value) => String(value || "").trim().toLowerCase();
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 
 function parseNaiveDateTime(dateStr, timeStr) {
   if (!dateStr || !timeStr) return null;
@@ -110,24 +121,6 @@ function parseReminderMinutes(value, fallback = 15) {
   return amount;
 }
 
-function timeUntilText(scheduledAt, nowET) {
-  const minutesUntil = Math.round((scheduledAt.getTime() - nowET.getTime()) / (1000 * 60));
-  if (minutesUntil < 0) return "now";
-  if (minutesUntil < 60) return `in ${minutesUntil} minute${minutesUntil !== 1 ? "s" : ""}`;
-  if (minutesUntil < 1440) {
-    const hours = Math.round(minutesUntil / 60);
-    return `in ${hours} hour${hours !== 1 ? "s" : ""}`;
-  }
-  const days = Math.round(minutesUntil / 1440);
-  return `in ${days} day${days !== 1 ? "s" : ""}`;
-}
-
-function greetingForHour(hour) {
-  if (hour >= 17) return "Good Evening";
-  if (hour >= 12) return "Good Afternoon";
-  return "Good Morning";
-}
-
 function computeScheduledEntries(ad, todayET) {
   const type = normalizePostType(ad?.post_type);
   const entries = [];
@@ -196,6 +189,33 @@ function isReminderEligibleStatus(status) {
   return normalized === "scheduled" || normalized === "approved";
 }
 
+function isMissingScheduleKeyError(error) {
+  const text = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  return text.includes("schedule_key") && (
+    text.includes("does not exist") ||
+    text.includes("could not find") ||
+    text.includes("column") ||
+    text.includes("schema cache")
+  );
+}
+
+async function hasRecentReminderLegacy(supabase, adId, recipientType) {
+  const thresholdIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from(table("sent_reminders"))
+    .select("id")
+    .eq("ad_id", adId)
+    .eq("recipient_type", recipientType)
+    .gt("sent_at", thresholdIso)
+    .limit(1);
+  if (error) throw error;
+  return (data || []).length > 0;
+}
+
 async function hasReminderForOccurrence(supabase, adId, recipientType, scheduleKey) {
   const { data, error } = await supabase
     .from(table("sent_reminders"))
@@ -204,7 +224,12 @@ async function hasReminderForOccurrence(supabase, adId, recipientType, scheduleK
     .eq("recipient_type", recipientType)
     .eq("schedule_key", scheduleKey)
     .limit(1);
-  if (error) throw error;
+  if (error) {
+    if (isMissingScheduleKeyError(error)) {
+      return hasRecentReminderLegacy(supabase, adId, recipientType);
+    }
+    throw error;
+  }
   if ((data || []).length > 0) {
     return true;
   }
@@ -219,19 +244,40 @@ async function hasReminderForOccurrence(supabase, adId, recipientType, scheduleK
     .is("schedule_key", null)
     .gt("sent_at", thresholdIso)
     .limit(1);
-  if (legacyError) throw legacyError;
+  if (legacyError) {
+    if (isMissingScheduleKeyError(legacyError)) {
+      return false;
+    }
+    throw legacyError;
+  }
   return (legacyData || []).length > 0;
 }
 
 async function storeReminder(supabase, adId, type, recipientType, scheduleKey) {
-  const { error } = await supabase.from(table("sent_reminders")).insert({
+  const payload = {
     ad_id: adId,
     reminder_type: type,
     recipient_type: recipientType,
     schedule_key: scheduleKey,
     sent_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from(table("sent_reminders")).insert(payload);
+  if (!error) {
+    return;
+  }
+
+  if (!isMissingScheduleKeyError(error)) {
+    throw error;
+  }
+
+  const { error: legacyError } = await supabase.from(table("sent_reminders")).insert({
+    ad_id: payload.ad_id,
+    reminder_type: payload.reminder_type,
+    recipient_type: payload.recipient_type,
+    sent_at: payload.sent_at,
   });
-  if (error) throw error;
+  if (legacyError) throw legacyError;
 }
 
 function buildMediaFields(media) {
@@ -248,6 +294,27 @@ function buildMediaFields(media) {
   });
 
   return { images, videos, fields };
+}
+
+function buildPrimaryMedia(media) {
+  for (const item of Array.isArray(media) ? media : []) {
+    const type = String(item?.type || "").trim().toLowerCase();
+    const url = String(item?.url || item?.cdnUrl || "").trim();
+    if ((type === "image" || type === "video") && url) {
+      return { type, url };
+    }
+  }
+  return null;
+}
+
+function buildReminderBodyText(payload) {
+  const adText = String(payload?.adText || "").trim();
+  if (adText) return adText;
+
+  const adName = String(payload?.adName || "").trim();
+  if (adName) return adName;
+
+  return "Upcoming ad reminder";
 }
 
 async function sendZapier(payload) {
@@ -267,29 +334,24 @@ async function sendZapier(payload) {
   }
 }
 
-function generateReminderHtml(payload, isInternal = false) {
-  const escapeHtml = (value) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+function generateReminderHtml(payload) {
+  const bodyText = buildReminderBodyText(payload);
+  const mediaBlocks = [];
 
-  const mediaLinks = [];
   for (let i = 1; i <= payload.imageCount; i++) {
     const url = payload[`image${i}Url`];
     if (url) {
-      mediaLinks.push(
-        `<div style="margin: 10px 0;"><strong>Image ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`,
+      mediaBlocks.push(
+        `<div style="margin: 0 0 16px;"><img src="${escapeHtml(url)}" alt="" style="display: block; width: 100%; max-width: 100%; height: auto; border: 0; border-radius: 12px;"></div>`,
       );
     }
   }
+
   for (let i = 1; i <= payload.videoCount; i++) {
     const url = payload[`video${i}Url`];
     if (url) {
-      mediaLinks.push(
-        `<div style="margin: 10px 0;"><strong>Video ${i}:</strong> <a href="${escapeHtml(url)}" target="_blank" style="word-break: break-all; color: #3b82f6;">${escapeHtml(url)}</a></div>`,
+      mediaBlocks.push(
+        `<div style="margin: 0 0 16px;"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color: #2563eb; word-break: break-all;">Open video ${i}</a></div>`,
       );
     }
   }
@@ -297,62 +359,10 @@ function generateReminderHtml(payload, isInternal = false) {
   return `
 <!DOCTYPE html>
 <html>
-<head>
-  <style>
-    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
-    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-    .header { text-align: center; padding: 20px 0; border-bottom: 3px solid #3b82f6; }
-    .logo { max-width: 200px; }
-    .content { padding: 30px 0; }
-    .alert { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; }
-    .info-block { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 5px; }
-    .info-row { margin: 10px 0; }
-    .label { font-weight: bold; color: #555; display: inline-block; min-width: 120px; }
-    .media-section { margin-top: 20px; padding: 15px; background: #fff; border: 1px solid #ddd; border-radius: 5px; }
-    .footer { text-align: center; padding: 20px 0; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <img src="https://cbnads.com/icons/icon-512.png" alt="Logo" class="logo">
-    </div>
-    <div class="content">
-      <div class="alert">
-        <h2 style="margin-top: 0; color: #1d4ed8;">${isInternal ? "Internal Team Reminder" : "Upcoming Ad Reminder"}</h2>
-        <p style="margin-bottom: 0;">${escapeHtml(payload.greeting)}, this is a reminder that an ad is scheduled to run ${escapeHtml(payload.timeUntilText)}.</p>
-      </div>
-      
-      <div class="info-block">
-        <div class="info-row"><span class="label">Ad Name:</span> ${escapeHtml(payload.adName)}</div>
-        <div class="info-row"><span class="label">Advertiser:</span> ${escapeHtml(payload.advertiser)}</div>
-        ${isInternal ? `<div class="info-row"><span class="label">Contact:</span> <a href="mailto:${escapeHtml(payload.advertiserEmail)}">${escapeHtml(payload.advertiserEmail)}</a> ${payload.advertiserPhone ? `| ${escapeHtml(payload.advertiserPhone)}` : ""}</div>` : ""}
-        ${payload.placement ? `<div class="info-row"><span class="label">Placement:</span> ${escapeHtml(payload.placement)}</div>` : ""}
-        <div class="info-row"><span class="label">Scheduled For:</span> ${escapeHtml(payload.formattedDate)} at ${escapeHtml(payload.formattedTime)}</div>
-      </div>
-      
-      ${payload.adText
-    ? `
-      <div class="info-block">
-        <div class="label" style="margin-bottom: 5px;">Ad Content:</div>
-        <div style="white-space: pre-wrap;">${escapeHtml(payload.adText)}</div>
-      </div>
-      `
-    : ""}
-      
-      ${mediaLinks.length > 0
-    ? `
-      <div class="media-section">
-        <div class="label" style="margin-bottom: 10px;">Media Files (${mediaLinks.length})</div>
-        ${mediaLinks.join("")}
-      </div>
-      `
-    : ""}
-      
-    </div>
-    <div class="footer">
-      <p>System Notification | ${new Date().toLocaleString()}</p>
-    </div>
+<body style="margin: 0; padding: 24px; background: #ffffff; color: #111827; font-family: Arial, sans-serif;">
+  <div style="max-width: 640px; margin: 0 auto;">
+    ${bodyText ? `<div style="margin: 0 0 ${mediaBlocks.length > 0 ? "20px" : "0"}; white-space: pre-wrap; line-height: 1.6;">${escapeHtml(bodyText)}</div>` : ""}
+    ${mediaBlocks.join("")}
   </div>
 </body>
 </html>
@@ -494,12 +504,15 @@ export async function POST(request) {
       if (!dueEntry) continue;
 
       const scheduleMeta = formatScheduledDateTime(dueEntry.scheduledAt);
-      const untilText = timeUntilText(dueEntry.scheduledAt, nowET.pseudoDate);
-      const greeting = greetingForHour(nowET.hour);
       const media = buildMediaFields(ad.media);
+      const primaryMedia = buildPrimaryMedia(ad.media);
       const advertiserInfo = resolveAdvertiserInfo(ad, {
         byId: advertiserById,
         byName: advertiserByName,
+      });
+      const reminderBodyText = buildReminderBodyText({
+        adName: ad.ad_name,
+        adText: ad.ad_text,
       });
 
       if (internalEmails.length > 0) {
@@ -524,8 +537,6 @@ export async function POST(request) {
               to: internalEmails,
               from: "Ad Manager <advertise@cbnads.com>",
               subject: `Ad Reminder | ${ad.advertiser} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
-              greeting,
-              firstName: "Team",
               adName: ad.ad_name,
               advertiser: ad.advertiser,
               advertiserEmail: advertiserInfo?.email || "",
@@ -533,7 +544,6 @@ export async function POST(request) {
               placement: ad.placement,
               formattedTime: `${scheduleMeta.formattedTime} ET`,
               formattedDate: scheduleMeta.formattedDate,
-              timeUntilText: untilText,
               adText: ad.ad_text || "",
               imageCount: media.images.length,
               videoCount: media.videos.length,
@@ -544,19 +554,24 @@ export async function POST(request) {
             await sendEmail({
               to: internalEmails,
               subject: payload.subject,
-              html: generateReminderHtml(payload, true),
+              html: generateReminderHtml(payload),
+              text: reminderBodyText,
             });
 
+            let telegramResults = [];
             if (activeTelegramChatIds.length > 0) {
-              const telegramText =
-                `<b>Ad Reminder</b>\n\n` +
-                `<b>${ad.ad_name}</b>\n` +
-                `Advertiser: ${ad.advertiser}\n` +
-                `Placement: ${ad.placement}\n` +
-                `Scheduled: ${scheduleMeta.formattedDate} at ${scheduleMeta.formattedTime} ET\n` +
-                `${untilText ? `Due: ${untilText}` : ""}`.trim();
-              await sendTelegramToMany({ chatIds: activeTelegramChatIds, text: telegramText })
-                .catch((err) => console.error("[send-reminders] Telegram send failed:", err));
+              telegramResults = primaryMedia
+                ? await sendTelegramMediaToMany({
+                    chatIds: activeTelegramChatIds,
+                    media: primaryMedia,
+                    caption: reminderBodyText,
+                    parseMode: null,
+                  })
+                : await sendTelegramToMany({
+                    chatIds: activeTelegramChatIds,
+                    text: reminderBodyText,
+                    parseMode: null,
+                  });
             }
 
             await storeReminder(supabase, ad.id, "email", "internal", dueEntry.scheduleKey);
@@ -565,7 +580,7 @@ export async function POST(request) {
               to: internalEmails,
               ad_name: ad.ad_name,
               status: "sent",
-              telegram_sent: activeTelegramChatIds.length > 0,
+              telegram_sent: telegramResults.some((entry) => entry.ok),
             });
           } catch (error) {
             results.push({
@@ -616,9 +631,6 @@ export async function POST(request) {
       }
 
       const advertiserName = advertiserInfo.contact_name || advertiserInfo.advertiser_name;
-      const advertiserFirstName = String(advertiserName || "Advertiser")
-        .split(" ")
-        .filter(Boolean)[0];
 
       try {
         const payload = {
@@ -628,15 +640,12 @@ export async function POST(request) {
           advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
           from: "Ad Manager <advertise@cbnads.com>",
           subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
-          greeting: `Hello ${advertiserFirstName}`,
-          firstName: advertiserFirstName,
           advertiserName,
           adName: ad.ad_name,
           advertiser: ad.advertiser,
           placement: ad.placement,
           formattedTime: `${scheduleMeta.formattedTime} ET`,
           formattedDate: scheduleMeta.formattedDate,
-          timeUntilText: untilText,
           adText: ad.ad_text || "",
           imageCount: media.images.length,
           videoCount: media.videos.length,
@@ -647,7 +656,8 @@ export async function POST(request) {
         await sendEmail({
           to: advertiserInfo.email,
           subject: payload.subject,
-          html: generateReminderHtml(payload, false),
+          html: generateReminderHtml(payload),
+          text: reminderBodyText,
         });
 
         await storeReminder(supabase, ad.id, "email", "advertiser", dueEntry.scheduleKey);

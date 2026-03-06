@@ -6604,12 +6604,13 @@ export default function AdsPage() {
         if (!invoice.advertiser_id) {
           throw new Error("Advertiser required");
         }
-        const hasExplicitAmount =
-          String(invoice.total || invoice.amount || "").trim().length > 0;
         const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
         const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
-        if (!hasExplicitAmount && !hasLineItems && !hasLinkedAds) {
-          throw new Error("Amount required");
+        const explicitAmountValue =
+          Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
+        const hasPositiveAmount = explicitAmountValue > 0;
+        if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
+          throw new Error("Link at least one ad, add line items, or enter a positive amount.");
         }
 
         let existingInvoice = null;
@@ -12051,7 +12052,7 @@ export default function AdsPage() {
                     </div>
                     <p className="text-sm text-gray-500">
                       Reminder emails are sent to internal team members
-                      (owner/admin/manager/staff) and the advertiser based on the
+                      (owner/admin/manager/staff/assistant) and the advertiser based on the
                       reminder time set on each ad.
                     </p>
                   </div>

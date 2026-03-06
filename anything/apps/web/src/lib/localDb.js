@@ -2302,6 +2302,14 @@ export const upsertInvoice = async (input) => {
     const discount = toMoney(input.discount);
     const tax = toMoney(input.tax);
     const total = toMoney(subtotal - numberOrZero(discount) + numberOrZero(tax));
+    const hasLinkedAds = adIds.length > 0;
+    const hasItems = items.length > 0;
+    const hasPositiveTotal = numberOrZero(total) > 0;
+
+    if (!hasLinkedAds && !hasItems && !hasPositiveTotal) {
+      throw new Error("Invoice requires linked ads, line items, or a positive amount.");
+    }
+
     const status = input.status || 'Unpaid';
     const amountPaid =
       normalizeText(status) === 'paid' ? total : toMoney(input.amount_paid);
