@@ -29,7 +29,7 @@ const initialFormData = {
   post_date_to: "",
   custom_dates: [],
   post_time: "",
-  reminder_minutes: 15,
+  reminder_minutes: "15-min",
   ad_text: "",
   media: [],
   placement: "",

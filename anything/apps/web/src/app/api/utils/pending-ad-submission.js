@@ -10,6 +10,7 @@ import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
 } from "../../../lib/phone.js";
+import { parseReminderMinutes } from "./reminder-minutes.js";
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -69,32 +70,53 @@ const buildReviewSubmissionUrl = (request) => {
   }
 };
 
+const optionalPendingSubmissionColumns = new Set([
+  "advertiser_id",
+  "product_id",
+  "product_name",
+  "price",
+]);
+
+const missingColumnName = (error) => {
+  const message = String(error?.message || "");
+  const postgresMatch = message.match(/column\s+(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s+does not exist/i);
+  if (postgresMatch?.[1]) {
+    return postgresMatch[1].toLowerCase();
+  }
+
+  const schemaCacheMatch = message.match(/could not find the '([^']+)' column/i);
+  return schemaCacheMatch?.[1] ? schemaCacheMatch[1].toLowerCase() : "";
+};
+
 const insertPendingAd = async (supabase, payload) => {
   const insertPayload = { ...payload };
-  let query = supabase.from(table("pending_ads")).insert(insertPayload).select("*").single();
-  let result = await query;
 
-  if (
-    result.error &&
-    insertPayload.advertiser_id &&
-    /advertiser_id/i.test(String(result.error.message || ""))
-  ) {
-    delete insertPayload.advertiser_id;
-    query = supabase.from(table("pending_ads")).insert(insertPayload).select("*").single();
-    result = await query;
-  }
+  while (true) {
+    const result = await supabase.from(table("pending_ads")).insert(insertPayload).select("*").single();
 
-  if (result.error) {
+    if (!result.error) {
+      return result.data;
+    }
+
+    const missingColumn = missingColumnName(result.error);
+    if (
+      missingColumn &&
+      optionalPendingSubmissionColumns.has(missingColumn) &&
+      Object.prototype.hasOwnProperty.call(insertPayload, missingColumn)
+    ) {
+      delete insertPayload[missingColumn];
+      continue;
+    }
+
     throw result.error;
   }
-
-  return result.data;
 };
 
 export async function createPendingAdSubmission({
   request,
   submission = {},
   supabase = db(),
+  requirePhoneNumber = true,
 }) {
   const {
     advertiser_id,
@@ -145,7 +167,14 @@ export async function createPendingAdSubmission({
     };
   }
 
-  if (!isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+  if (requirePhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
+    return {
+      error: "Phone number must be a complete US number",
+      status: 400,
+    };
+  }
+
+  if (!requirePhoneNumber && normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
     return {
       error: "Phone number must be a complete US number",
       status: 400,
@@ -294,6 +323,7 @@ export async function createPendingAdSubmission({
 
   const reviewSubmissionUrl = buildReviewSubmissionUrl(request);
   const nowIso = new Date().toISOString();
+  const reminderMinutesValue = parseReminderMinutes(reminder_minutes, 15);
 
   const insertedPendingAd = await insertPendingAd(supabase, {
     advertiser_id: advertiser_id || null,
@@ -309,7 +339,7 @@ export async function createPendingAdSubmission({
     post_date_to: post_date_to || null,
     custom_dates: normalizedCustomDates,
     post_time: post_time || null,
-    reminder_minutes: reminder_minutes || 15,
+    reminder_minutes: reminderMinutesValue,
     ad_text: ad_text || null,
     media: sanitizedMedia,
     placement: resolvedPlacement || null,

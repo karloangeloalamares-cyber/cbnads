@@ -16,6 +16,7 @@ import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
+import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
 
 const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
 
@@ -45,6 +46,53 @@ const normalizeCustomDateEntries = (entries) =>
 
 const customDateValue = (entry) =>
   entry && typeof entry === "object" ? normalizeDateOnly(entry.date) : normalizeDateOnly(entry);
+
+const optionalPendingSubmissionColumns = new Set([
+  "advertiser_id",
+  "product_id",
+  "product_name",
+  "price",
+]);
+
+const missingColumnName = (error) => {
+  const message = String(error?.message || "");
+  const postgresMatch = message.match(/column\s+(?:[a-z0-9_]+\.)?([a-z0-9_]+)\s+does not exist/i);
+  if (postgresMatch?.[1]) {
+    return postgresMatch[1].toLowerCase();
+  }
+
+  const schemaCacheMatch = message.match(/could not find the '([^']+)' column/i);
+  return schemaCacheMatch?.[1] ? schemaCacheMatch[1].toLowerCase() : "";
+};
+
+const updatePendingSubmissionRecord = async (supabase, submissionId, patch) => {
+  const updatePatch = { ...patch };
+
+  while (true) {
+    const result = await supabase
+      .from(table("pending_ads"))
+      .update(updatePatch)
+      .eq("id", submissionId)
+      .select("*")
+      .maybeSingle();
+
+    if (!result.error) {
+      return result.data;
+    }
+
+    const missingColumn = missingColumnName(result.error);
+    if (
+      missingColumn &&
+      optionalPendingSubmissionColumns.has(missingColumn) &&
+      Object.prototype.hasOwnProperty.call(updatePatch, missingColumn)
+    ) {
+      delete updatePatch[missingColumn];
+      continue;
+    }
+
+    throw result.error;
+  }
+};
 
 export async function GET(request, { params }) {
   try {
@@ -322,7 +370,10 @@ export async function PUT(request, { params }) {
       post_date_to: nextPostType === "daily_run" ? nextPostDateTo || null : null,
       custom_dates: nextCustomDates,
       post_time: nextPostType === "custom_schedule" ? null : nextPostTime || null,
-      reminder_minutes: Number(body.reminder_minutes ?? submission.reminder_minutes) || 15,
+      reminder_minutes: parseReminderMinutes(
+        body.reminder_minutes ?? submission.reminder_minutes,
+        15,
+      ),
       ad_text: String(body.ad_text ?? submission.ad_text ?? "").trim(),
       product_id: productRow?.id || submission.product_id || null,
       product_name: productRow?.product_name || submission.product_name || null,
@@ -336,13 +387,7 @@ export async function PUT(request, { params }) {
       patch.advertiser_id = scope.id;
     }
 
-    const { data: updatedSubmission, error: updateError } = await supabase
-      .from(table("pending_ads"))
-      .update(patch)
-      .eq("id", submissionId)
-      .select("*")
-      .maybeSingle();
-    if (updateError) throw updateError;
+    const updatedSubmission = await updatePendingSubmissionRecord(supabase, submissionId, patch);
     if (!updatedSubmission) {
       return Response.json({ error: "Submission not found" }, { status: 404 });
     }

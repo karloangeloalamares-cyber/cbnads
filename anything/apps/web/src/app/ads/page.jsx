@@ -8447,6 +8447,7 @@ export default function AdsPage() {
               products={products}
               user={user}
               fetchWithSessionAuth={fetchWithSessionAuth}
+              onBack={() => setActiveSection("Dashboard")}
               onSubmitted={handleAdvertiserSubmissionCreated}
             />
           )}

@@ -7,6 +7,7 @@ import {
   sendTelegramToMany,
   resolveActiveTelegramChatIds,
 } from "../../utils/send-telegram.js";
+import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
 
 const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -18,17 +19,6 @@ const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   second: "2-digit",
   hour12: false,
 });
-
-const REMINDER_PRESET_MINUTES = {
-  "15-min": 15,
-  "15m": 15,
-  "30-min": 30,
-  "30m": 30,
-  "1-hour": 60,
-  "1h": 60,
-  "1-day": 1440,
-  "1d": 1440,
-};
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
@@ -85,40 +75,6 @@ function getNowInET() {
     hour: Number(parts.hour || 0),
     pseudoDate,
   };
-}
-
-function parseReminderMinutes(value, fallback = 15) {
-  const fallbackMinutes = Math.max(1, toNumber(fallback, 15));
-
-  if (value === null || value === undefined || value === "") {
-    return fallbackMinutes;
-  }
-
-  if (typeof value === "number") {
-    return Math.max(1, toNumber(value, fallbackMinutes));
-  }
-
-  const text = String(value).trim().toLowerCase();
-  if (!text) return fallbackMinutes;
-
-  if (/^\d+$/.test(text)) {
-    return Math.max(1, Number(text));
-  }
-
-  if (REMINDER_PRESET_MINUTES[text]) {
-    return REMINDER_PRESET_MINUTES[text];
-  }
-
-  const unitMatch = text.match(/^(\d+)\s*(minute|minutes|min|mins|hour|hours|day|days)$/i);
-  if (!unitMatch) {
-    return fallbackMinutes;
-  }
-
-  const amount = Math.max(1, Number(unitMatch[1]));
-  const unit = String(unitMatch[2] || "").toLowerCase();
-  if (unit.startsWith("day")) return amount * 1440;
-  if (unit.startsWith("hour")) return amount * 60;
-  return amount;
 }
 
 function computeScheduledEntries(ad, todayET) {

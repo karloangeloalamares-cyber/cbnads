@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
+import { Eye, EyeOff } from "lucide-react";
 import {
   completeOAuthSignIn,
   getSignedInUser,
@@ -51,6 +52,7 @@ export default function SignInPage() {
   const hasRedirectedRef = useRef(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -449,15 +451,26 @@ export default function SignInPage() {
                           Forgot password?
                         </button>
                       </div>
-                      <input
-                        id="password"
-                        type="password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        required
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
-                        placeholder="********"
-                      />
+                      <div className="relative">
+                        <input
+                          id="password"
+                          type={showPassword ? "text" : "password"}
+                          value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          required
+                          className="w-full rounded-lg border border-gray-300 px-4 py-3 pr-11 outline-none transition focus:border-transparent focus:ring-2 focus:ring-red-500"
+                          placeholder="********"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((current) => !current)}
+                          className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-gray-400 transition hover:text-gray-600"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          aria-pressed={showPassword}
+                        >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
                     </div>
 
                     <button
