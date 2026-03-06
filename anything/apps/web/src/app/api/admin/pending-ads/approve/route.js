@@ -15,6 +15,7 @@ import {
   nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
+import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-dashboard-url.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
@@ -463,6 +464,11 @@ export async function POST(request) {
     const amountDueValue = Math.max(recordedInvoiceAmount, derivedInvoiceAmount);
     const amountDueText = formatCurrency(amountDueValue);
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
+    const dashboardSignInUrl = buildAdvertiserDashboardSignInUrl({
+      request,
+      email: ad.email,
+      section: "Ads",
+    });
 
     try {
       const advertiserEmailHTML = `
@@ -477,8 +483,10 @@ export async function POST(request) {
     .content { padding: 30px 0; }
     .info-block { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 5px; }
     .payment-block { background: #ecfdf5; border: 1px solid #a7f3d0; padding: 18px; margin: 20px 0; border-radius: 6px; }
+    .dashboard-block { background: #eff6ff; border: 1px solid #bfdbfe; padding: 18px; margin: 20px 0; border-radius: 6px; }
     .info-row { margin: 10px 0; }
     .label { font-weight: bold; color: #555; }
+    .button { display: inline-block; background: #111827; color: #ffffff !important; text-decoration: none; padding: 12px 18px; border-radius: 8px; font-weight: 600; }
     .footer { text-align: center; padding: 20px 0; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
     ol { margin: 10px 0 0 18px; padding: 0; }
     li { margin-bottom: 8px; }
@@ -507,6 +515,12 @@ export async function POST(request) {
           <li>Use <strong>${escapeHtml(invoiceNumberText)}</strong> in the payment memo/reference.</li>
           <li>Reply with payment confirmation so our team can verify quickly.</li>
         </ol>
+      </div>
+      <div class="dashboard-block">
+        <p style="margin-top: 0;">You can sign in to your advertiser dashboard anytime to monitor this ad, its schedule, and billing.</p>
+        <p style="margin: 16px 0 0;">
+          <a href="${dashboardSignInUrl}" class="button">Open advertiser dashboard</a>
+        </p>
       </div>
       <p>If you have any questions, contact us and include your invoice number for faster support.</p>
       <p>Best regards,<br>The Team</p>

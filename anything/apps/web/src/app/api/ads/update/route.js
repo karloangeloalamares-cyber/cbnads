@@ -1,5 +1,5 @@
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
-import { requirePermission } from "../../utils/auth-check.js";
+import { requireInternalUser } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
 import {
@@ -77,9 +77,9 @@ const recalcInvoiceStatus = async (supabase, invoiceId) => {
 
 export async function PUT(request) {
   try {
-    const auth = await requirePermission("ads:edit", request);
+    const auth = await requireInternalUser(request);
     if (!auth.authorized) {
-      return Response.json({ error: auth.error }, { status: auth.status || 401 });
+      return Response.json({ error: auth.error }, { status: auth.status || 403 });
     }
 
     const supabase = db();

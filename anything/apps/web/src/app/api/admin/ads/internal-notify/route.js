@@ -1,5 +1,5 @@
 import { db, table } from "../../../utils/supabase-db.js";
-import { requirePermission } from "../../../utils/auth-check.js";
+import { requireInternalUser } from "../../../utils/auth-check.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 
 const escapeHtml = (value) =>
@@ -65,9 +65,9 @@ const buildInternalEmailHtml = ({
 
 export async function POST(request) {
   try {
-    const auth = await requirePermission("ads:edit", request);
+    const auth = await requireInternalUser(request);
     if (!auth.authorized) {
-      return Response.json({ error: auth.error }, { status: auth.status || 401 });
+      return Response.json({ error: auth.error }, { status: auth.status || 403 });
     }
 
     const body = await request.json();

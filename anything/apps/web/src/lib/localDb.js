@@ -7,7 +7,7 @@ import {
   normalizeDateKey,
 } from '@/lib/timezone';
 import { normalizeUSPhoneNumber } from '@/lib/phone';
-import { normalizeAppRole } from '@/lib/permissions';
+import { isInternalRole, normalizeAppRole } from '@/lib/permissions';
 import { formatPostTypeLabel, normalizePostTypeValue } from '@/lib/postType';
 
 const DB_KEY = withNamespace('local.db.v1');
@@ -1427,6 +1427,16 @@ const fetchDbFromSupabase = async () => {
   );
 };
 
+const ensureSupabaseDashboardWriteAccess = async (supabase) => {
+  const currentUser = await resolveSupabaseSessionUser(supabase);
+  if (!currentUser?.id) {
+    throw new Error('Please sign in to modify dashboard data.');
+  }
+  if (!isInternalRole(currentUser.role)) {
+    throw new Error('Dashboard write access requires an internal account.');
+  }
+};
+
 const rowsEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 const syncIdTable = async (
@@ -1604,6 +1614,7 @@ const persistDbToSupabase = async (previousValue, value) => {
   const previousDb = refreshDerivedFields(normalizeDb(previousValue));
   const db = refreshDerivedFields(normalizeDb(value));
   const supabase = getSupabaseClient();
+  await ensureSupabaseDashboardWriteAccess(supabase);
   const previousAdvertiserRows = previousDb.advertisers.map(toAdvertiserRow);
   const previousProductRows = previousDb.products.map(toProductRow);
   const previousTeamMemberRows = previousDb.team_members.map(toTeamMemberRow);

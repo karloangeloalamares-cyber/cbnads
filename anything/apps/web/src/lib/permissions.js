@@ -70,7 +70,6 @@ const permissionMatrix = {
     "calendar:view",
     "submissions:view",
     "ads:view",
-    "ads:edit",
     "billing:view",
   ]),
 };
