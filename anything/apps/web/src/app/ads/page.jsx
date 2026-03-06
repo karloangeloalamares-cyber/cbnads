@@ -1832,6 +1832,21 @@ const getAdsForDate = (expandedAds, targetDate) =>
       item.date.getDate() === targetDate.getDate(),
   );
 
+const sortCalendarItemsByTime = (items) =>
+  [...items].sort((left, right) => {
+    const leftTime = parseAdsTimeToMinutes(left?.ad?.post_time) ?? Number.MAX_SAFE_INTEGER;
+    const rightTime = parseAdsTimeToMinutes(right?.ad?.post_time) ?? Number.MAX_SAFE_INTEGER;
+    if (leftTime !== rightTime) {
+      return leftTime - rightTime;
+    }
+    return String(left?.ad?.ad_name || "").localeCompare(String(right?.ad?.ad_name || ""));
+  });
+
+const formatCalendarLiveTime = (value) => {
+  const formatted = formatAdsTime(value);
+  return formatted === "N/A" ? "Time TBD" : formatted;
+};
+
 const getCalendarStatusColor = (status, isPublished) => {
   if (isPublished !== undefined) {
     return isPublished
@@ -1961,7 +1976,7 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
       <div className="grid grid-cols-7">
         {weekDays.map((date) => {
-          const dayAds = getAdsForDate(ads, date);
+          const dayAds = sortCalendarItemsByTime(getAdsForDate(ads, date));
           const today = toDateKey(date) === getTodayInAppTimeZone();
 
           return (
@@ -1993,6 +2008,11 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
                       item.ad.status,
                     )}`}
                   >
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
+                        {formatCalendarLiveTime(item.ad.post_time)}
+                      </span>
+                    </div>
                     <div className="font-medium truncate">{item.ad.ad_name}</div>
                     <div className="text-[10px] truncate opacity-75 mt-0.5">
                       {item.ad.advertiser}
@@ -2009,7 +2029,7 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
 }
 
 function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
-  const dayAds = getAdsForDate(ads, currentDate);
+  const dayAds = sortCalendarItemsByTime(getAdsForDate(ads, currentDate));
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -2037,30 +2057,42 @@ function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
           {dayAds.map((item, index) => (
             <div
               key={`${item.ad.id || item.ad.ad_name}-${index}`}
-              onClick={() => onAdClick(item.ad)}
-              className={`p-4 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${getCalendarStatusColor(
-                item.ad.status,
-              )}`}
+              className="grid grid-cols-[88px_minmax(0,1fr)] gap-4 items-start"
             >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-base">{item.ad.ad_name}</h3>
-                  <p className="text-sm opacity-75 mt-1">{item.ad.advertiser}</p>
-                  <div className="flex gap-4 mt-2 text-xs">
-                    <span>
-                      <span className="font-medium">Type:</span> {item.ad.post_type}
-                    </span>
-                    <span>
-                      <span className="font-medium">Placement:</span> {item.ad.placement}
-                    </span>
-                    <span>
-                      <span className="font-medium">Payment:</span> {item.ad.payment}
-                    </span>
-                  </div>
+              <div className="pt-3 text-right">
+                <div className="text-xs font-semibold text-gray-700">
+                  {formatCalendarLiveTime(item.ad.post_time)}
                 </div>
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-white bg-opacity-50">
-                  {item.ad.status}
-                </span>
+                <div className="text-[10px] uppercase tracking-wide text-gray-400 mt-1">
+                  Live
+                </div>
+              </div>
+              <div
+                onClick={() => onAdClick(item.ad)}
+                className={`p-4 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${getCalendarStatusColor(
+                  item.ad.status,
+                )}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-base">{item.ad.ad_name}</h3>
+                    <p className="text-sm opacity-75 mt-1">{item.ad.advertiser}</p>
+                    <div className="flex flex-wrap gap-4 mt-2 text-xs">
+                      <span>
+                        <span className="font-medium">Type:</span> {item.ad.post_type}
+                      </span>
+                      <span>
+                        <span className="font-medium">Placement:</span> {item.ad.placement}
+                      </span>
+                      <span>
+                        <span className="font-medium">Payment:</span> {item.ad.payment}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-white bg-opacity-50 shrink-0">
+                    {item.ad.status}
+                  </span>
+                </div>
               </div>
             </div>
           ))}
