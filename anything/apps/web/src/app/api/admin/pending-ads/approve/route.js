@@ -1,4 +1,4 @@
-import { db, table } from "../../../utils/supabase-db.js";
+import { db, normalizePostType, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE, getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
@@ -8,7 +8,13 @@ import {
   expandDateRange,
 } from "../../../utils/ad-availability.js";
 import { sendEmail } from "../../../utils/send-email.js";
-import { adAmount, nextSequentialInvoiceNumber } from "../../../utils/invoice-helpers.js";
+import {
+  adAmount,
+  buildInvoiceLineItemsForAd,
+  extractAdScheduleDateKeys,
+  nextSequentialInvoiceNumber,
+  sumInvoiceItemAmounts,
+} from "../../../utils/invoice-helpers.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
@@ -19,29 +25,6 @@ const isMissingColumnError = (error) => {
   const code = String(error?.code || "");
   const message = String(error?.message || "");
   return code === "42703" || /column .* does not exist/i.test(message);
-};
-
-const normalizePostType = (value) =>
-  String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[-\s]+/g, "_");
-
-const countCustomScheduleDates = (value) => {
-  if (Array.isArray(value)) {
-    return value.filter(Boolean).length;
-  }
-  if (typeof value === "string" && value.trim()) {
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) {
-        return parsed.filter(Boolean).length;
-      }
-    } catch {
-      return 1;
-    }
-  }
-  return 0;
 };
 
 const formatCurrency = (value) =>
@@ -94,10 +77,7 @@ const resolveApprovalPricing = async ({ supabase, pendingAd }) => {
     }),
   );
 
-  const invoiceMultiplier =
-    normalizePostType(pendingAd?.post_type) === "custom_schedule"
-      ? Math.max(1, countCustomScheduleDates(pendingAd?.custom_dates))
-      : 1;
+  const invoiceMultiplier = Math.max(1, extractAdScheduleDateKeys(pendingAd).length);
 
   return {
     resolvedProduct,
@@ -217,12 +197,21 @@ export async function POST(request) {
 
     const adStatus = advertiserInactive ? "Draft" : "Scheduled";
     const nowIso = new Date().toISOString();
+    const normalizedPostType = normalizePostType(ad.post_type);
+    if (!["one_time", "daily_run", "custom_schedule"].includes(normalizedPostType)) {
+      return Response.json({ error: "Unsupported post type on pending submission." }, { status: 400 });
+    }
+    const scheduleDateKeys = extractAdScheduleDateKeys(ad);
+    const primaryScheduleDate =
+      scheduleDateKeys[0] ||
+      String(ad.post_date_from || ad.post_date || "").slice(0, 10) ||
+      null;
 
-    if (ad.post_type === "One-Time Post" && ad.post_date_from) {
+    if (normalizedPostType === "one_time" && primaryScheduleDate) {
       const availability = await checkSingleDateAvailability({
         supabase,
-        date: ad.post_date_from,
-        postType: ad.post_type,
+        date: primaryScheduleDate,
+        postType: normalizedPostType,
         postTime: ad.post_time,
         excludeId: pending_ad_id,
       });
@@ -239,7 +228,7 @@ export async function POST(request) {
       }
     }
 
-    if (ad.post_type === "Daily Run" && ad.post_date_from && ad.post_date_to) {
+    if (normalizedPostType === "daily_run" && ad.post_date_from && ad.post_date_to) {
       const availability = await checkBatchAvailability({
         supabase,
         dates: expandDateRange(ad.post_date_from, ad.post_date_to),
@@ -262,7 +251,7 @@ export async function POST(request) {
     }
 
     if (
-      ad.post_type === "Custom Schedule" &&
+      normalizedPostType === "custom_schedule" &&
       Array.isArray(ad.custom_dates) &&
       ad.custom_dates.length > 0
     ) {
@@ -296,21 +285,26 @@ export async function POST(request) {
 
     let { data: newAd, error: createAdError } = await supabase
       .from(table("ads"))
-      .insert({
+        .insert({
         ad_name: ad.ad_name,
         advertiser: advertiserName,
         advertiser_id: advertiserId,
         product_id: resolvedProduct?.id || ad.product_id || null,
         product_name: resolvedProduct?.product_name || ad.product_name || null,
         status: adStatus,
-        post_type: ad.post_type,
+        post_type: normalizedPostType,
         placement: ad.placement || "Standard",
         payment: "Pending",
-        schedule: ad.post_type === "One-Time Post" ? ad.post_date_from : null,
-        post_date: ad.post_type === "One-Time Post" ? ad.post_date_from : null,
-        post_date_from: ad.post_date_from || null,
-        post_date_to: ad.post_date_to || null,
-        custom_dates: Array.isArray(ad.custom_dates) ? ad.custom_dates : [],
+        schedule: normalizedPostType === "one_time" ? primaryScheduleDate : null,
+        post_date: normalizedPostType === "one_time" ? primaryScheduleDate : null,
+        post_date_from:
+          normalizedPostType === "custom_schedule"
+            ? null
+            : normalizedPostType === "daily_run"
+              ? ad.post_date_from || primaryScheduleDate
+              : primaryScheduleDate,
+        post_date_to: normalizedPostType === "daily_run" ? ad.post_date_to || null : null,
+        custom_dates: normalizedPostType === "custom_schedule" && Array.isArray(ad.custom_dates) ? ad.custom_dates : [],
         post_time: ad.post_time || null,
         scheduled_timezone: APP_TIME_ZONE,
         reminder_minutes: ad.reminder_minutes || 15,
@@ -326,11 +320,23 @@ export async function POST(request) {
     if (createAdError) throw createAdError;
 
     let approvedInvoice = null;
+    let approvedInvoiceAmount = invoiceAmount;
     try {
       const invoiceNumber = await nextSequentialInvoiceNumber(
         supabase,
         table("invoices"),
       );
+      const approvedInvoiceItems = buildInvoiceLineItemsForAd({
+        ad: newAd,
+        unitAmount,
+        invoiceId: null,
+        productId: resolvedProduct?.id || newAd?.product_id || null,
+        productName: resolvedProduct?.product_name || newAd?.product_name || null,
+        createdAt: nowIso,
+      });
+      const derivedInvoiceAmount = sumInvoiceItemAmounts(approvedInvoiceItems);
+      const invoiceTotalAmount = Math.max(0, derivedInvoiceAmount || invoiceAmount);
+      approvedInvoiceAmount = invoiceTotalAmount;
       const invoiceInsertPayload = {
         invoice_number: invoiceNumber,
         advertiser_id: advertiserId || null,
@@ -343,8 +349,8 @@ export async function POST(request) {
         status: "Pending",
         discount: 0,
         tax: 0,
-        total: invoiceAmount,
-        amount: invoiceAmount,
+        total: invoiceTotalAmount,
+        amount: invoiceTotalAmount,
         amount_paid: 0,
         notes: "Auto-generated on ad approval.",
         created_at: nowIso,
@@ -365,7 +371,7 @@ export async function POST(request) {
             advertiser_id: advertiserId || null,
             advertiser_name: advertiserName || ad.advertiser_name || null,
             ad_ids: [newAd.id],
-            amount: invoiceAmount,
+            amount: invoiceTotalAmount,
             status: "Pending",
             created_at: nowIso,
             updated_at: nowIso,
@@ -414,23 +420,26 @@ export async function POST(request) {
       }
 
       try {
-        await supabase.from(table("invoice_items")).insert({
+        const invoiceItemsPayload = approvedInvoiceItems.map((item) => ({
+          ...item,
           invoice_id: approvedInvoice.id,
-          ad_id: newAd.id,
-          product_id: resolvedProduct?.id || null,
-          description: resolvedProduct?.product_name
-            ? `${resolvedProduct.product_name}${ad.ad_name ? ` | Ad: ${ad.ad_name}` : ""}`
-            : ad.ad_name || "Ad placement",
-          quantity: 1,
-          unit_price: invoiceAmount,
-          amount: invoiceAmount,
-          created_at: nowIso,
-        });
+        }));
+        if (invoiceItemsPayload.length > 0) {
+          await supabase.from(table("invoice_items")).insert(invoiceItemsPayload);
+        }
       } catch (invoiceItemError) {
         console.error("[approve] Unable to create invoice item:", invoiceItemError);
+        throw invoiceItemError;
       }
     } catch (invoiceError) {
       console.error("[approve] Invoice creation failed. Rolling back ad:", invoiceError);
+      if (approvedInvoice?.id) {
+        try {
+          await supabase.from(table("invoices")).delete().eq("id", approvedInvoice.id);
+        } catch (invoiceRollbackError) {
+          console.error("[approve] Invoice rollback failed:", invoiceRollbackError);
+        }
+      }
       try {
         await supabase.from(table("ads")).delete().eq("id", newAd.id);
       } catch (rollbackError) {
@@ -448,8 +457,10 @@ export async function POST(request) {
 
     const invoiceNumberText =
       String(approvedInvoice?.invoice_number || "").trim() || "Pending assignment";
-    const amountDueValue =
-      Number(approvedInvoice?.total ?? approvedInvoice?.amount ?? invoiceAmount) || 0;
+    const recordedInvoiceAmount =
+      Number(approvedInvoice?.total ?? approvedInvoice?.amount ?? 0) || 0;
+    const derivedInvoiceAmount = Number(approvedInvoiceAmount) || 0;
+    const amountDueValue = Math.max(recordedInvoiceAmount, derivedInvoiceAmount);
     const amountDueText = formatCurrency(amountDueValue);
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
 

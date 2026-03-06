@@ -3,8 +3,10 @@ import { db, table } from "../../../utils/supabase-db.js";
 import { sendEmail } from "../../../utils/send-email.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 import {
+  buildInvoiceLineItemsForAd,
   fallbackInvoiceNumber,
   nextSequentialInvoiceNumber,
+  sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
 import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
@@ -26,8 +28,56 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const readInvoiceAmount = (invoice, ad) =>
-  Number(invoice?.total ?? invoice?.amount ?? ad?.price ?? 0) || 0;
+const readNumber = (value) => Number(value || 0) || 0;
+
+const readInvoiceRecordedAmount = (invoice) =>
+  readNumber(invoice?.total ?? invoice?.amount ?? 0);
+
+const readInvoiceScheduleAmount = (ad) => {
+  const unitAmount = Math.max(0, readNumber(ad?.price));
+  if (unitAmount <= 0) {
+    return 0;
+  }
+  const scheduleItems = buildInvoiceLineItemsForAd({
+    ad,
+    unitAmount,
+    invoiceId: null,
+    productId: ad?.product_id || null,
+    productName: ad?.product_name || null,
+  });
+  return sumInvoiceItemAmounts(scheduleItems);
+};
+
+const resolveAmountDue = ({ invoice, invoiceItemsTotal = 0, ad }) => {
+  const recorded = readInvoiceRecordedAmount(invoice);
+  const discount = readNumber(invoice?.discount);
+  const tax = readNumber(invoice?.tax);
+  const hasAdjustments = Math.abs(discount) > 0.009 || Math.abs(tax) > 0.009;
+  const adjustedItemsTotal =
+    invoiceItemsTotal > 0 ? Math.max(0, invoiceItemsTotal - discount + tax) : 0;
+  const scheduleAmount = readInvoiceScheduleAmount(ad);
+
+  // If invoice header/items are stale but schedule clearly indicates a higher due amount, trust schedule.
+  if (
+    !hasAdjustments &&
+    scheduleAmount > 0 &&
+    scheduleAmount > Math.max(recorded, adjustedItemsTotal) + 0.009
+  ) {
+    return scheduleAmount;
+  }
+
+  // Prefer structured invoice items (+tax-discount) when that total exceeds stale header totals.
+  if (adjustedItemsTotal > 0 && adjustedItemsTotal > recorded + 0.009) {
+    return adjustedItemsTotal;
+  }
+  if (recorded > 0) {
+    return recorded;
+  }
+  if (adjustedItemsTotal > 0) {
+    return adjustedItemsTotal;
+  }
+  return scheduleAmount;
+};
 
 const isMissingColumnError = (error) => {
   const code = String(error?.code || "");
@@ -65,6 +115,31 @@ const fetchInvoiceByInvoiceItem = async (supabase, adId) => {
   }
 
   return fetchInvoiceById(supabase, invoiceItem.invoice_id);
+};
+
+const fetchInvoiceItemsTotal = async (supabase, invoiceId) => {
+  const normalizedInvoiceId = String(invoiceId || "").trim();
+  if (!normalizedInvoiceId) {
+    return 0;
+  }
+
+  const { data, error } = await supabase
+    .from(table("invoice_items"))
+    .select("amount, unit_price, quantity")
+    .eq("invoice_id", normalizedInvoiceId);
+  if (error) {
+    throw error;
+  }
+
+  return (Array.isArray(data) ? data : []).reduce((sum, item) => {
+    const amount = readNumber(item?.amount);
+    if (amount > 0) {
+      return sum + amount;
+    }
+    const unitPrice = readNumber(item?.unit_price);
+    const quantity = Math.max(1, readNumber(item?.quantity) || 1);
+    return sum + unitPrice * quantity;
+  }, 0);
 };
 
 const fetchInvoiceByAdArrayLink = async (supabase, adId) => {
@@ -108,7 +183,16 @@ const resolveInvoiceNumber = async (supabase) => {
 
 const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
   const nowIso = new Date().toISOString();
-  const invoiceAmount = Math.max(0, Number(ad?.price || 0) || 0);
+  const unitAmount = Math.max(0, Number(ad?.price || 0) || 0);
+  const derivedInvoiceItems = buildInvoiceLineItemsForAd({
+    ad,
+    unitAmount,
+    invoiceId: null,
+    productId: ad?.product_id || null,
+    productName: ad?.product_name || null,
+    createdAt: nowIso,
+  });
+  const invoiceAmount = sumInvoiceItemAmounts(derivedInvoiceItems);
   const invoiceNumber = await resolveInvoiceNumber(supabase);
 
   const invoicePayload = {
@@ -164,18 +248,22 @@ const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
   }
 
   try {
-    await supabase.from(table("invoice_items")).insert({
+    const invoiceItemsPayload = derivedInvoiceItems.map((item) => ({
+      ...item,
       invoice_id: invoice.id,
-      ad_id: ad.id,
-      product_id: ad?.product_id || null,
-      description: ad?.ad_name || "Ad placement",
-      quantity: 1,
-      unit_price: invoiceAmount,
-      amount: invoiceAmount,
-      created_at: nowIso,
-    });
+    }));
+    if (invoiceItemsPayload.length > 0) {
+      const { error: invoiceItemsError } = await supabase
+        .from(table("invoice_items"))
+        .insert(invoiceItemsPayload);
+      if (invoiceItemsError) {
+        throw invoiceItemsError;
+      }
+    }
   } catch (invoiceItemError) {
     console.error("[admin/ads/send-approval-email] Unable to create invoice item:", invoiceItemError);
+    await supabase.from(table("invoices")).delete().eq("id", invoice.id);
+    throw invoiceItemError;
   }
 
   let adUpdateResult = await supabase
@@ -203,6 +291,7 @@ const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
   }
 
   if (adUpdateResult.error) {
+    await supabase.from(table("invoices")).delete().eq("id", invoice.id);
     throw adUpdateResult.error;
   }
 
@@ -319,7 +408,13 @@ export async function POST(request) {
     const invoiceNumberText =
       String(invoice?.invoice_number || "").trim() ||
       fallbackInvoiceNumber();
-    const amountDueText = formatCurrency(readInvoiceAmount(invoice, resolvedAd));
+    const invoiceItemsTotal = await fetchInvoiceItemsTotal(supabase, invoice?.id);
+    const amountDueValue = resolveAmountDue({
+      invoice,
+      invoiceItemsTotal,
+      ad: resolvedAd,
+    });
+    const amountDueText = formatCurrency(amountDueValue);
     const zelleNumberText = escapeHtml(APPROVAL_ZELLE_NUMBER || "(555) 010-2026");
     const contactName = String(
       advertiser?.contact_name || body?.contact_name || "there",

@@ -1,4 +1,4 @@
-import { db, table } from "../../utils/supabase-db.js";
+import { db, normalizePostType, table } from "../../utils/supabase-db.js";
 import { sendEmail } from "../../utils/send-email.js";
 import { notifyInternalChannels } from "../../utils/internal-notification-channels.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
@@ -104,6 +104,7 @@ export async function POST(request) {
       notes,
       website,
     } = body;
+    const normalizedPostType = normalizePostType(post_type);
     const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
 
     // Honeypot for basic bot filtering.
@@ -115,6 +116,13 @@ export async function POST(request) {
     if (!advertiser_name || !contact_name || !email || !ad_name || !post_type) {
       return Response.json(
         { error: "Missing required fields" },
+        { status: 400 },
+      );
+    }
+
+    if (!["one_time", "daily_run", "custom_schedule"].includes(normalizedPostType)) {
+      return Response.json(
+        { error: "Unsupported post type" },
         { status: 400 },
       );
     }
@@ -182,11 +190,11 @@ export async function POST(request) {
       ? new URL("/pending-submissions", safeAppUrl).toString()
       : null;
 
-    if (post_type === "One-Time Post" && post_date_from && post_time) {
+    if (normalizedPostType === "one_time" && post_date_from && post_time) {
       const availability = await checkSingleDateAvailability({
         supabase,
         date: post_date_from,
-        postType: post_type,
+        postType: normalizedPostType,
         postTime: post_time,
       });
 
@@ -202,7 +210,7 @@ export async function POST(request) {
       }
     }
 
-    if (post_type === "Daily Run" && post_date_from && post_date_to) {
+    if (normalizedPostType === "daily_run" && post_date_from && post_date_to) {
       const availability = await checkBatchAvailability({
         supabase,
         dates: expandDateRange(post_date_from, post_date_to),
@@ -224,7 +232,7 @@ export async function POST(request) {
       }
     }
 
-    if (post_type === "Custom Schedule" && Array.isArray(custom_dates) && custom_dates.length > 0) {
+    if (normalizedPostType === "custom_schedule" && Array.isArray(custom_dates) && custom_dates.length > 0) {
       const availability = await checkBatchAvailability({
         supabase,
         dates: custom_dates.map((entry) =>
@@ -266,7 +274,7 @@ export async function POST(request) {
         phone_number: normalizedPhoneNumber || null,
         phone: normalizedPhoneNumber || null,
         ad_name,
-        post_type,
+        post_type: normalizedPostType,
         post_date: post_date_from || null,
         post_date_from: post_date_from || null,
         post_date_to: post_date_to || null,

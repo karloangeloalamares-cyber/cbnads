@@ -1482,6 +1482,8 @@ const parseCalendarDate = (value) => {
   return parsed;
 };
 
+const parseDateOnly = (value) => parseCalendarDate(value);
+
 const normalizeCalendarPostType = (value) => {
   const text = String(value || "").toLowerCase();
   if (text.includes("daily")) {
@@ -1515,6 +1517,125 @@ const toCreateAdPostTypeValue = (value) => {
     return "custom_schedule";
   }
   return "one_time";
+};
+
+const toScheduleDateKey = (value) => {
+  if (!value) {
+    return "";
+  }
+
+  const raw =
+    typeof value === "object" && value !== null
+      ? value.date
+      : value;
+  const text = String(raw || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const parsed = parseDateOnly(text);
+  if (parsed) {
+    return formatDateKeyFromDate(parsed);
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+  return "";
+};
+
+const expandScheduleDateKeys = (from, to) => {
+  const startKey = toScheduleDateKey(from);
+  const endKey = toScheduleDateKey(to || from);
+  if (!startKey || !endKey) {
+    return [];
+  }
+
+  const start = parseDateOnly(startKey);
+  const end = parseDateOnly(endKey);
+  if (!start || !end || end < start) {
+    return [];
+  }
+
+  const dates = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(formatDateKeyFromDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+};
+
+const getAdOccurrenceDateKeys = (adRecord) => {
+  const postType = normalizeCreateAdPostType(adRecord?.post_type || adRecord?.postType);
+  if (postType === "Daily Run") {
+    const expanded = expandScheduleDateKeys(
+      adRecord?.post_date_from || adRecord?.postDateFrom || adRecord?.post_date || adRecord?.postDate,
+      adRecord?.post_date_to || adRecord?.postDateTo,
+    );
+    if (expanded.length > 0) {
+      return expanded;
+    }
+  }
+
+  if (postType === "Custom Schedule") {
+    const customDates = (Array.isArray(adRecord?.custom_dates)
+      ? adRecord.custom_dates
+      : Array.isArray(adRecord?.customDates)
+        ? adRecord.customDates
+        : [])
+      .map((entry) => toScheduleDateKey(entry))
+      .filter(Boolean);
+    if (customDates.length > 0) {
+      return [...new Set(customDates)];
+    }
+  }
+
+  const singleDate = toScheduleDateKey(
+    adRecord?.post_date_from ||
+    adRecord?.postDateFrom ||
+    adRecord?.post_date ||
+    adRecord?.postDate ||
+    adRecord?.schedule,
+  );
+  return singleDate ? [singleDate] : [];
+};
+
+const formatInvoiceOccurrenceDate = (dateKey) => {
+  const parsed = parseDateOnly(dateKey);
+  if (!parsed) {
+    return dateKey;
+  }
+  return parsed.toLocaleDateString("en-US");
+};
+
+const buildInvoiceItemsFromAd = ({ adRecord, unitPrice = 0 } = {}) => {
+  const safeUnitPrice = Number(unitPrice) || 0;
+  const dateKeys = getAdOccurrenceDateKeys(adRecord);
+  const adId = String(adRecord?.id || "").trim() || null;
+  const productId = String(adRecord?.product_id || "").trim() || null;
+  const baseDescription =
+    adRecord?.product_name
+      ? `${adRecord.product_name}${adRecord?.ad_name ? ` | Ad: ${adRecord.ad_name}` : ""}`
+      : adRecord?.ad_name || "Advertising services";
+
+  const toItem = (description) => ({
+    id: createId(),
+    invoice_id: null,
+    ad_id: adId,
+    product_id: productId,
+    description,
+    quantity: 1,
+    unit_price: safeUnitPrice,
+    amount: safeUnitPrice,
+  });
+
+  if (dateKeys.length <= 1) {
+    return [toItem(baseDescription)];
+  }
+
+  return dateKeys.map((dateKey) =>
+    toItem(`${baseDescription} - ${formatInvoiceOccurrenceDate(dateKey)}`),
+  );
 };
 
 const toStringArray = (value) => {
@@ -2285,11 +2406,27 @@ export default function AdsPage() {
   const canConvertSubmissions = can(userRole, "submissions:convert");
   const canRejectSubmissions = can(userRole, "submissions:reject");
   const canViewNotifications = can(userRole, "notifications:view");
+
+  const openSubmissionsFromNotification = async () => {
+    setShowNotificationsDropdown(false);
+    setActiveSection("Submissions");
+    setView("list");
+
+    try {
+      invalidateDbCache();
+      await ensureDb();
+      setDb(readDb());
+    } catch (error) {
+      console.error(
+        "[AdsPage] Failed to refresh submissions after notification:",
+        error,
+      );
+    }
+  };
+
   const { unreadCount, markAllAsRead } = useSubmissionNotifications(canViewNotifications, {
     onViewPending: async () => {
-      setShowNotificationsDropdown(false);
-      setActiveSection("Submissions");
-      setView("list");
+      await openSubmissionsFromNotification();
     },
   });
   const totalUnreadCount = unreadCount + adsUnreadCount;
@@ -2898,11 +3035,6 @@ export default function AdsPage() {
     [invoice.status],
   );
 
-  const invoicePreviewAmount = useMemo(
-    () => Number(invoice.total || invoice.amount || 0) || 0,
-    [invoice.amount, invoice.total],
-  );
-
   const invoicePreviewLinkedAds = useMemo(
     () =>
       (
@@ -2917,55 +3049,67 @@ export default function AdsPage() {
     [ads, invoice.ad_ids, invoice.items],
   );
 
-  const invoicePreviewLineItem = useMemo(() => {
+  const invoicePreviewItems = useMemo(() => {
     const invoiceItems = Array.isArray(invoice.items) ? invoice.items : [];
-    if (invoiceItems.length === 1) {
-      return {
-        title: invoiceItems[0].description || "Advertising services",
-        detail: invoicePreviewLinkedAds[0]?.placement || "",
-        amount: Number(invoiceItems[0].amount || invoicePreviewAmount) || 0,
-      };
+    if (invoiceItems.length > 0) {
+      return invoiceItems.map((item, index) => ({
+        key: String(item?.id || item?.ad_id || index),
+        title: item?.description || "Advertising services",
+        detail: "",
+        amount: Number(item?.amount ?? item?.unit_price ?? 0) || 0,
+      }));
     }
 
-    if (invoiceItems.length > 1) {
-      return {
-        title: `${invoiceItems.length} line items`,
-        detail: invoiceItems.map((item) => item.description).join(" • "),
-        amount: invoicePreviewAmount,
-      };
+    if (invoicePreviewLinkedAds.length > 0) {
+      return invoicePreviewLinkedAds.flatMap((linkedAd, adIndex) => {
+        const linkedUnitPrice = Number(linkedAd?.price || 0) || 0;
+        return buildInvoiceItemsFromAd({
+          adRecord: linkedAd,
+          unitPrice: linkedUnitPrice,
+        }).map((item, itemIndex) => ({
+          key: `${linkedAd?.id || adIndex}-${itemIndex}`,
+          title: item.description || linkedAd?.ad_name || "Advertising services",
+          detail: linkedAd?.placement || "",
+          amount: Number(item.amount ?? item.unit_price ?? linkedUnitPrice) || 0,
+        }));
+      });
     }
 
-    if (invoicePreviewLinkedAds.length === 1) {
-      return {
-        title:
-          invoicePreviewLinkedAds[0].product_name
-            ? `${invoicePreviewLinkedAds[0].product_name}${invoicePreviewLinkedAds[0].ad_name ? ` | Ad: ${invoicePreviewLinkedAds[0].ad_name}` : ""}`
-            : invoicePreviewLinkedAds[0].ad_name || "Advertising services",
-        detail: invoicePreviewLinkedAds[0].placement || "",
-        amount: invoicePreviewAmount,
-      };
-    }
-
-    if (invoicePreviewLinkedAds.length > 1) {
-      return {
-        title: `${invoicePreviewLinkedAds.length} linked ads`,
-        detail: invoicePreviewLinkedAds.map((item) => item.ad_name).join(" • "),
-        amount: invoicePreviewAmount,
-      };
-    }
-
-    return {
-      title: selectedInvoiceAdvertiser?.advertiser_name || "Advertising services",
-      detail: "No ads selected yet",
-      amount: invoicePreviewAmount,
-    };
+    return [
+      {
+        key: "empty",
+        title: selectedInvoiceAdvertiser?.advertiser_name || "Advertising services",
+        detail: "No ads selected yet",
+        amount: Number(invoice.amount || invoice.total || 0) || 0,
+      },
+    ];
   }, [
     invoice.items,
-    invoicePreviewAmount,
+    invoice.amount,
+    invoice.total,
     invoicePreviewLinkedAds,
     selectedInvoiceAdvertiser?.advertiser_name,
   ]);
 
+  const invoicePreviewSubtotal = useMemo(
+    () => invoicePreviewItems.reduce((sum, item) => sum + (Number(item?.amount) || 0), 0),
+    [invoicePreviewItems],
+  );
+
+  const invoicePreviewDiscount = useMemo(
+    () => Number(invoice.discount || 0) || 0,
+    [invoice.discount],
+  );
+
+  const invoicePreviewTax = useMemo(
+    () => Number(invoice.tax || 0) || 0,
+    [invoice.tax],
+  );
+
+  const invoicePreviewAmount = useMemo(
+    () => Math.max(0, invoicePreviewSubtotal - invoicePreviewDiscount + invoicePreviewTax),
+    [invoicePreviewDiscount, invoicePreviewSubtotal, invoicePreviewTax],
+  );
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
     const paidAds = ads.filter((item) => item.payment === "Paid");
@@ -4142,6 +4286,20 @@ export default function AdsPage() {
         title: error instanceof Error ? error.message : "Action failed",
       });
     }
+  };
+
+  const refreshDbFromSupabase = async () => {
+    if (!hasSupabaseConfig) {
+      const nextDb = readDb();
+      setDb(nextDb);
+      return nextDb;
+    }
+
+    invalidateDbCache();
+    await ensureDb();
+    const nextDb = readDb();
+    setDb(nextDb);
+    return nextDb;
   };
 
   const handleApprovePendingAd = async (pendingAdId) => {
@@ -6017,11 +6175,38 @@ export default function AdsPage() {
         if (!invoice.advertiser_id) {
           throw new Error("Advertiser required");
         }
-        if (!String(invoice.amount || "").trim()) {
+        const hasExplicitAmount =
+          String(invoice.total || invoice.amount || "").trim().length > 0;
+        const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
+        const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
+        if (!hasExplicitAmount && !hasLineItems && !hasLinkedAds) {
           throw new Error("Amount required");
         }
+
+        let existingInvoice = null;
+        if (invoice.id) {
+          const refreshedDb = await refreshDbFromSupabase();
+          existingInvoice =
+            (Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : []).find(
+              (item) => String(item?.id || "") === String(invoice.id || ""),
+            ) || null;
+        }
+
         await upsertInvoice({
+          ...(existingInvoice || {}),
           ...invoice,
+          ad_ids:
+            Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
+              ? invoice.ad_ids
+              : Array.isArray(existingInvoice?.ad_ids)
+                ? existingInvoice.ad_ids
+                : [],
+          items:
+            Array.isArray(invoice.items) && invoice.items.length > 0
+              ? invoice.items
+              : Array.isArray(existingInvoice?.items)
+                ? existingInvoice.items
+                : [],
           issue_date: issueDate,
           status: normalizeInvoiceStatus(invoice.status),
         });
@@ -6497,6 +6682,20 @@ export default function AdsPage() {
           }
         }
 
+        let refreshedInvoices = invoices;
+        if (
+          hasSupabaseConfig &&
+          (approvalEmailResult?.invoice_id ||
+            approvalEmailResult?.invoice?.id ||
+            savedAd?.paid_via_invoice_id ||
+            savedAd?.invoice_id ||
+            payload.paid_via_invoice_id ||
+            payload.invoice_id)
+        ) {
+          const refreshedDb = await refreshDbFromSupabase();
+          refreshedInvoices = Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : [];
+        }
+
         if (mode === "continue") {
           const linkedInvoiceId =
             savedAd?.paid_via_invoice_id ||
@@ -6506,7 +6705,7 @@ export default function AdsPage() {
             approvalEmailResult?.invoice_id ||
             null;
           const linkedInvoiceFromState = linkedInvoiceId
-            ? invoices.find((item) => String(item.id) === String(linkedInvoiceId))
+            ? refreshedInvoices.find((item) => String(item.id) === String(linkedInvoiceId))
             : null;
           const linkedInvoice = linkedInvoiceFromState || approvalEmailResult?.invoice || null;
 
@@ -6524,10 +6723,21 @@ export default function AdsPage() {
                   : [],
             });
           } else {
+            const invoiceUnitPrice = Number(savedAd?.price || payload.price || 0) || 0;
+            const derivedInvoiceItems = buildInvoiceItemsFromAd({
+              adRecord: savedAd || payload,
+              unitPrice: invoiceUnitPrice,
+            });
+            const derivedInvoiceTotal = derivedInvoiceItems.reduce(
+              (sum, item) => sum + (Number(item.amount ?? item.unit_price ?? 0) || 0),
+              0,
+            );
             setInvoice({
               ...createBlankInvoice(),
               advertiser_id: payload.advertiser_id || "",
-              amount: savedAd?.price || payload.price || "",
+              amount: derivedInvoiceTotal || invoiceUnitPrice || "",
+              total: derivedInvoiceTotal || invoiceUnitPrice || "",
+              items: derivedInvoiceItems,
               ad_ids: savedAd?.id ? [savedAd.id] : [],
             });
           }
@@ -7278,9 +7488,7 @@ export default function AdsPage() {
                             type="button"
                             onClick={async () => {
                               await markAllAsRead();
-                              setShowNotificationsDropdown(false);
-                              setActiveSection("Submissions");
-                              setView("list");
+                              await openSubmissionsFromNotification();
                             }}
                             className="w-full rounded-xl border border-gray-200 bg-gray-50 p-3 text-left hover:bg-gray-100 transition-colors"
                           >
@@ -10957,34 +11165,47 @@ export default function AdsPage() {
                         Amount
                       </div>
                     </div>
-                    <div className="flex justify-between py-3 border-b border-gray-100 gap-4">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-900">
-                          {invoicePreviewLineItem.title}
-                        </div>
-                        {invoicePreviewLineItem.detail ? (
-                          <div className="text-xs text-gray-500 mt-0.5 truncate">
-                            {invoicePreviewLineItem.detail}
+                    {invoicePreviewItems.map((previewItem) => (
+                      <div
+                        key={previewItem.key}
+                        className="flex justify-between py-3 border-b border-gray-100 gap-4"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-gray-900">
+                            {previewItem.title}
                           </div>
-                        ) : null}
+                          {previewItem.detail ? (
+                            <div className="text-xs text-gray-500 mt-0.5 truncate">
+                              {previewItem.detail}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="text-sm font-semibold text-gray-900 whitespace-nowrap">
+                          {formatCurrency(previewItem.amount)}
+                        </div>
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 whitespace-nowrap">
-                        {formatCurrency(invoicePreviewLineItem.amount)}
-                      </div>
-                    </div>
+                    ))}
                   </div>
 
                   <div className="space-y-3 mb-10 pb-8 border-b border-gray-200">
                     <div className="flex justify-between text-sm">
                       <div className="text-gray-600">Subtotal</div>
                       <div className="font-medium text-gray-900">
-                        {formatCurrency(invoicePreviewAmount)}
+                        {formatCurrency(invoicePreviewSubtotal)}
                       </div>
                     </div>
+                    {invoicePreviewDiscount > 0 ? (
+                      <div className="flex justify-between text-sm">
+                        <div className="text-gray-600">Discount</div>
+                        <div className="font-medium text-gray-900">
+                          -{formatCurrency(invoicePreviewDiscount)}
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex justify-between text-sm">
                       <div className="text-gray-600">Tax</div>
                       <div className="font-medium text-gray-900">
-                        {formatCurrency(0)}
+                        {formatCurrency(invoicePreviewTax)}
                       </div>
                     </div>
                     <div className="flex justify-between text-base font-bold pt-3 border-t border-gray-200">

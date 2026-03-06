@@ -1,6 +1,11 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
-import { adAmount, nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
+import {
+  adAmount,
+  buildInvoiceLineItemsForAd,
+  nextSequentialInvoiceNumber,
+  sumInvoiceItemAmounts,
+} from "../../utils/invoice-helpers.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
@@ -22,7 +27,9 @@ export async function POST(request) {
 
     const { data: ads, error: adsError } = await supabase
       .from(table("ads"))
-      .select("id, ad_name, advertiser, advertiser_id, product_id, product_name, payment, price, post_type, custom_dates")
+      .select(
+        "id, ad_name, advertiser, advertiser_id, product_id, product_name, payment, price, post_type, schedule, post_date, post_date_from, post_date_to, custom_dates",
+      )
       .in("id", uniqueAdIds);
     if (adsError) throw adsError;
 
@@ -73,50 +80,44 @@ export async function POST(request) {
       table("invoices"),
     );
 
+    const nowIso = new Date().toISOString();
     let subtotal = 0;
     const unresolvedAds = [];
-    const lineItems = ads.map((ad) => {
+    const lineItems = ads.flatMap((ad) => {
       const product = productsById.get(ad.product_id);
-      let amount = adAmount({
+      const unitAmount = adAmount({
         payment: ad.payment,
         price: ad.price,
         product_price: product?.price,
       });
-
-      if (ad.post_type === "Custom Schedule") {
-        let datesCount = 0;
-        if (Array.isArray(ad.custom_dates)) {
-          datesCount = ad.custom_dates.length;
-        } else if (typeof ad.custom_dates === "string") {
-          try {
-            datesCount = JSON.parse(ad.custom_dates).length;
-          } catch (e) {
-            datesCount = 1;
-          }
-        }
-        if (datesCount > 1) {
-          amount *= datesCount;
-        }
-      }
       const resolvedProductName =
         String(ad.product_name || product?.product_name || "").trim();
-      if (!resolvedProductName || amount <= 0) {
+      if (!resolvedProductName || unitAmount <= 0) {
         unresolvedAds.push({
           id: ad.id,
           ad_name: ad.ad_name || "Untitled ad",
         });
+        return [];
       }
-      subtotal += amount;
-      return {
-        ad_id: ad.id,
-        product_id: ad.product_id || null,
-        description: resolvedProductName
-          ? `${resolvedProductName}${ad.ad_name ? ` | Ad: ${ad.ad_name}` : ""}`
-          : ad.ad_name || "Ad placement",
-        quantity: 1,
-        unit_price: amount,
-        amount,
-      };
+
+      const adLineItems = buildInvoiceLineItemsForAd({
+        ad,
+        unitAmount,
+        invoiceId: null,
+        productId: ad.product_id || null,
+        productName: resolvedProductName,
+        createdAt: nowIso,
+      });
+      subtotal += sumInvoiceItemAmounts(adLineItems);
+
+      return adLineItems.map((item) => ({
+        ad_id: item.ad_id,
+        product_id: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        amount: item.amount,
+      }));
     });
 
     if (unresolvedAds.length > 0) {
@@ -134,35 +135,39 @@ export async function POST(request) {
     const tax = toNumber(invoiceData.tax, 0);
     const total = subtotal - discount + tax;
     const status = invoiceData.status || "Pending";
-    const nowIso = new Date().toISOString();
 
-    const { data: invoice, error: invoiceError } = await supabase
-      .from(table("invoices"))
-      .insert({
-        invoice_number: invoiceNumber,
-        advertiser_id: advertiser?.id || null,
-        advertiser_name: targetAdvertiserName,
-        ad_ids: uniqueAdIds,
-        contact_name: invoiceData.contactName || advertiser?.contact_name || null,
-        contact_email: invoiceData.contactEmail || advertiser?.email || null,
-        bill_to: invoiceData.billTo || targetAdvertiserName || null,
-        issue_date: getTodayInAppTimeZone(),
-        status,
-        discount,
-        tax,
-        total,
-        amount: total,
-        amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
-        notes: invoiceData.notes || null,
-        created_at: nowIso,
-        updated_at: nowIso,
-      })
-      .select("*")
-      .single();
-    if (invoiceError) throw invoiceError;
+    let invoice = null;
+    try {
+      const createInvoiceResult = await supabase
+        .from(table("invoices"))
+        .insert({
+          invoice_number: invoiceNumber,
+          advertiser_id: advertiser?.id || null,
+          advertiser_name: targetAdvertiserName,
+          ad_ids: uniqueAdIds,
+          contact_name: invoiceData.contactName || advertiser?.contact_name || null,
+          contact_email: invoiceData.contactEmail || advertiser?.email || null,
+          bill_to: invoiceData.billTo || targetAdvertiserName || null,
+          issue_date: getTodayInAppTimeZone(),
+          status,
+          discount,
+          tax,
+          total,
+          amount: total,
+          amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
+          notes: invoiceData.notes || null,
+          created_at: nowIso,
+          updated_at: nowIso,
+        })
+        .select("*")
+        .single();
+      if (createInvoiceResult.error) throw createInvoiceResult.error;
+      invoice = createInvoiceResult.data || null;
+      if (!invoice?.id) {
+        throw new Error("Invoice record was not created.");
+      }
 
-    for (const item of lineItems) {
-      const { error: itemError } = await supabase.from(table("invoice_items")).insert({
+      const invoiceItemsPayload = lineItems.map((item) => ({
         invoice_id: invoice.id,
         ad_id: item.ad_id,
         product_id: item.product_id,
@@ -171,21 +176,31 @@ export async function POST(request) {
         unit_price: item.unit_price,
         amount: item.amount,
         created_at: nowIso,
-      });
-      if (itemError) throw itemError;
-    }
+      }));
+      if (invoiceItemsPayload.length > 0) {
+        const { error: itemError } = await supabase
+          .from(table("invoice_items"))
+          .insert(invoiceItemsPayload);
+        if (itemError) throw itemError;
+      }
 
-    const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
-    const { error: adUpdateError } = await supabase
-      .from(table("ads"))
-      .update({
-        payment: nextPaymentStatus,
-        invoice_id: invoice.id,
-        paid_via_invoice_id: invoice.id,
-        updated_at: nowIso,
-      })
-      .in("id", uniqueAdIds);
-    if (adUpdateError) throw adUpdateError;
+      const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
+      const { error: adUpdateError } = await supabase
+        .from(table("ads"))
+        .update({
+          payment: nextPaymentStatus,
+          invoice_id: invoice.id,
+          paid_via_invoice_id: invoice.id,
+          updated_at: nowIso,
+        })
+        .in("id", uniqueAdIds);
+      if (adUpdateError) throw adUpdateError;
+    } catch (creationError) {
+      if (invoice?.id) {
+        await supabase.from(table("invoices")).delete().eq("id", invoice.id);
+      }
+      throw creationError;
+    }
 
     if (String(status).toLowerCase() === "paid") {
       if (advertiser?.id) {

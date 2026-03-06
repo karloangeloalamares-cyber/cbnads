@@ -21,16 +21,38 @@ const isExcluded = (item, excludeId) => String(item?.id || "") === String(exclud
 
 const includesDate = (item, date) => adDatesForDayCheck(item).includes(date);
 
+const isMissingColumnError = (error) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "42703" || /column .* does not exist/i.test(message);
+};
+
+const hasLinkedRecord = (value) => String(value || "").trim().length > 0;
+
 const isCountableAd = (item) => {
   const status = String(item?.status || "").trim().toLowerCase();
-  if (!status || status === "archived" || status === "deleted") {
+  if (!status || status === "archived" || status === "deleted" || item?.archived === true) {
     return false;
   }
   return activeAdStatuses.has(status);
 };
 
-const isCountablePendingAd = (item) =>
-  activePendingStatuses.has(String(item?.status || "").trim().toLowerCase());
+const isCountablePendingAd = (item) => {
+  const status = String(item?.status || "").trim().toLowerCase();
+  if (!activePendingStatuses.has(status)) {
+    return false;
+  }
+
+  if (item?.rejected_at) {
+    return false;
+  }
+
+  if (hasLinkedRecord(item?.linked_ad_id) || hasLinkedRecord(item?.linked_invoice_id)) {
+    return false;
+  }
+
+  return true;
+};
 
 export const expandDateRange = (from, to) => {
   const start = dateOnly(from);
@@ -84,10 +106,10 @@ const getMaxAdsPerDay = async (supabase) => {
 // - Records with null post_date_to are always included (custom schedules, ongoing daily runs).
 // The JS-level includesDate() check is the authoritative filter; this just reduces fetch size.
 const getScheduledRecords = async (supabase, { minDate, maxDate } = {}) => {
-  const buildQuery = (tableName) => {
+  const buildQuery = (tableName, selectClause) => {
     let q = supabase
       .from(tableName)
-      .select("id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time");
+      .select(selectClause);
 
     if (minDate) {
       const max = maxDate || minDate;
@@ -100,16 +122,33 @@ const getScheduledRecords = async (supabase, { minDate, maxDate } = {}) => {
     return q;
   };
 
+  const fetchRows = async (tableName, selectClauses) => {
+    for (const selectClause of selectClauses) {
+      const result = await buildQuery(tableName, selectClause);
+      if (!result.error) {
+        return result.data || [];
+      }
+      if (!isMissingColumnError(result.error)) {
+        throw result.error;
+      }
+    }
+
+    return [];
+  };
+
   const [adsResult, pendingResult] = await Promise.all([
-    buildQuery(table("ads")),
-    buildQuery(table("pending_ads")),
+    fetchRows(table("ads"), [
+      "id, status, archived, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time",
+      "id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time",
+    ]),
+    fetchRows(table("pending_ads"), [
+      "id, status, linked_ad_id, linked_invoice_id, rejected_at, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time",
+      "id, status, post_type, post_date, post_date_from, post_date_to, custom_dates, post_time",
+    ]),
   ]);
 
-  if (adsResult.error) throw adsResult.error;
-  if (pendingResult.error) throw pendingResult.error;
-
-  const ads = (adsResult.data || []).filter(isCountableAd);
-  const pendingAds = (pendingResult.data || []).filter(isCountablePendingAd);
+  const ads = adsResult.filter(isCountableAd);
+  const pendingAds = pendingResult.filter(isCountablePendingAd);
 
   return [...ads, ...pendingAds];
 };

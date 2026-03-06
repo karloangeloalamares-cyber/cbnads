@@ -1,4 +1,4 @@
-import { db, table } from "../../utils/supabase-db.js";
+import { db, normalizePostType, table } from "../../utils/supabase-db.js";
 import {
   getRequestStatusForError,
   isAdvertiserUser,
@@ -23,11 +23,28 @@ const normalizeCustomDateEntries = (entries) =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
       if (entry && typeof entry === "object") {
-        return normalizeDateOnly(entry.date);
+        const date = normalizeDateOnly(entry.date);
+        if (!date) {
+          return null;
+        }
+        const normalized = {
+          ...entry,
+          date,
+        };
+        if (entry.time !== undefined) {
+          normalized.time = String(entry.time || "").trim();
+        }
+        if (entry.reminder !== undefined) {
+          normalized.reminder = String(entry.reminder || "").trim();
+        }
+        return normalized;
       }
       return normalizeDateOnly(entry);
     })
     .filter(Boolean);
+
+const customDateValue = (entry) =>
+  entry && typeof entry === "object" ? normalizeDateOnly(entry.date) : normalizeDateOnly(entry);
 
 export async function GET(request, { params }) {
   try {
@@ -141,7 +158,13 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const nextPostType = String(body.post_type || submission.post_type || "").trim();
+    const nextPostType = normalizePostType(body.post_type || submission.post_type || "");
+    if (!["one_time", "daily_run", "custom_schedule"].includes(nextPostType)) {
+      return Response.json(
+        { error: "Unsupported post type." },
+        { status: 400 },
+      );
+    }
     const nextPostDateFrom = normalizeDateOnly(body.post_date_from ?? submission.post_date_from);
     const nextPostDateTo = normalizeDateOnly(body.post_date_to ?? submission.post_date_to);
     const nextPostTime = String(body.post_time ?? submission.post_time ?? "").trim();
@@ -162,7 +185,7 @@ export async function PUT(request, { params }) {
       );
     }
 
-    if (nextPostType === "One-Time Post" || nextPostType === "one_time") {
+    if (nextPostType === "one_time") {
       if (!nextPostDateFrom || !nextPostTime) {
         return Response.json(
           { error: "Post date and time are required for one-time submissions." },
@@ -190,7 +213,7 @@ export async function PUT(request, { params }) {
       }
     }
 
-    if (nextPostType === "Daily Run" || nextPostType === "daily_run") {
+    if (nextPostType === "daily_run") {
       if (!nextPostDateFrom || !nextPostDateTo) {
         return Response.json(
           { error: "Start date and end date are required for a daily run." },
@@ -220,7 +243,7 @@ export async function PUT(request, { params }) {
       }
     }
 
-    if (nextPostType === "Custom Schedule" || nextPostType === "custom_schedule") {
+    if (nextPostType === "custom_schedule") {
       if (nextCustomDates.length === 0) {
         return Response.json(
           { error: "Add at least one date for a custom schedule." },
@@ -230,7 +253,7 @@ export async function PUT(request, { params }) {
 
       const availability = await checkBatchAvailability({
         supabase,
-        dates: nextCustomDates,
+        dates: nextCustomDates.map((entry) => customDateValue(entry)),
         excludeId: submissionId,
       });
 
@@ -250,6 +273,7 @@ export async function PUT(request, { params }) {
       }
     }
 
+    const firstCustomDate = customDateValue(nextCustomDates[0]);
     const patch = {
       advertiser_name: String(body.advertiser_name ?? submission.advertiser_name ?? "").trim(),
       contact_name: String(body.contact_name ?? submission.contact_name ?? "").trim(),
@@ -258,11 +282,17 @@ export async function PUT(request, { params }) {
       phone: normalizedPhoneNumber || null,
       ad_name: String(body.ad_name ?? submission.ad_name ?? "").trim(),
       post_type: nextPostType,
-      post_date: nextPostDateFrom || (nextCustomDates[0] || null),
-      post_date_from: nextPostDateFrom || null,
-      post_date_to: nextPostDateTo || null,
+      post_date:
+        nextPostType === "custom_schedule"
+          ? firstCustomDate || null
+          : nextPostDateFrom || null,
+      post_date_from:
+        nextPostType === "daily_run" || nextPostType === "one_time"
+          ? nextPostDateFrom || null
+          : null,
+      post_date_to: nextPostType === "daily_run" ? nextPostDateTo || null : null,
       custom_dates: nextCustomDates,
-      post_time: nextPostTime || null,
+      post_time: nextPostType === "custom_schedule" ? null : nextPostTime || null,
       reminder_minutes: Number(body.reminder_minutes ?? submission.reminder_minutes) || 15,
       ad_text: String(body.ad_text ?? submission.ad_text ?? "").trim(),
       placement: String(body.placement ?? submission.placement ?? "").trim() || null,

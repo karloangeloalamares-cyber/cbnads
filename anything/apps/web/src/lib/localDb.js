@@ -144,6 +144,54 @@ const normalizePostType = (value) => normalizePostTypeValue(value);
 const toMoney = (value) => numberOrZero(value).toFixed(2);
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
+const normalizeCustomDateEntry = (entry) => {
+  if (entry && typeof entry === 'object') {
+    const date = toDateOnly(entry.date);
+    if (!date) {
+      return null;
+    }
+
+    const normalized = {
+      ...entry,
+      date,
+    };
+    const time = toTimeOnly(entry.time || entry.post_time);
+    if (time) {
+      normalized.time = time;
+    } else {
+      delete normalized.time;
+    }
+
+    const reminder = String(entry.reminder || '').trim();
+    if (reminder) {
+      normalized.reminder = reminder;
+    } else {
+      delete normalized.reminder;
+    }
+
+    return normalized;
+  }
+
+  const date = toDateOnly(entry);
+  return date || null;
+};
+const normalizeCustomDateEntries = (value) =>
+  toArray(value).map(normalizeCustomDateEntry).filter(Boolean);
+const customDateEntryToDateKey = (entry) => {
+  if (entry && typeof entry === 'object') {
+    return toDateOnly(entry.date);
+  }
+  return toDateOnly(entry);
+};
+const firstCustomDateKey = (value) => {
+  for (const entry of normalizeCustomDateEntries(value)) {
+    const date = customDateEntryToDateKey(entry);
+    if (date) {
+      return date;
+    }
+  }
+  return '';
+};
 const toUniqueTrimmedList = (value) => {
   const source = Array.isArray(value) ? value : [];
   const seen = new Set();
@@ -191,6 +239,104 @@ const nextLocalInvoiceNumber = (db, { dateValue = new Date() } = {}) => {
   } while (existing.has(candidate));
 
   return candidate;
+};
+
+const formatInvoiceDateLabel = (dateKey) => {
+  const normalizedDate = toDateOnly(dateKey);
+  if (!normalizedDate) {
+    return '';
+  }
+  const parsed = new Date(`${normalizedDate}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf())) {
+    return normalizedDate;
+  }
+  return parsed.toLocaleDateString('en-US');
+};
+
+const expandDateRangeKeys = (from, to) => {
+  const startKey = toDateOnly(from);
+  const endKey = toDateOnly(to || from);
+  if (!startKey || !endKey) {
+    return [];
+  }
+
+  const start = new Date(`${startKey}T00:00:00`);
+  const end = new Date(`${endKey}T00:00:00`);
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || start > end) {
+    return [];
+  }
+
+  const dates = [];
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(formatDateKeyFromDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+};
+
+const extractScheduleDateKeys = (adItem) => {
+  const postType = normalizePostType(adItem?.post_type);
+  if (postType === 'daily_run') {
+    const from = adItem?.post_date_from || adItem?.post_date || adItem?.schedule;
+    const to = adItem?.post_date_to || from;
+    const expanded = expandDateRangeKeys(from, to);
+    if (expanded.length > 0) {
+      return expanded;
+    }
+  }
+
+  if (postType === 'custom_schedule') {
+    const customDates = normalizeCustomDateEntries(adItem?.custom_dates)
+      .map((entry) => customDateEntryToDateKey(entry))
+      .filter(Boolean);
+    if (customDates.length > 0) {
+      return Array.from(new Set(customDates));
+    }
+  }
+
+  const singleDate = toDateOnly(adItem?.post_date_from || adItem?.post_date || adItem?.schedule);
+  return singleDate ? [singleDate] : [];
+};
+
+const buildDerivedInvoiceItemsForAd = ({ adItem, invoiceId, existingItems = [], now }) => {
+  const existingByIndex = toArray(existingItems);
+  const dateKeys = extractScheduleDateKeys(adItem);
+  const unitPrice = toMoney(adItem?.price);
+  const baseDescription = adItem?.product_name
+    ? `${adItem.product_name}${adItem.ad_name ? ` | Ad: ${adItem.ad_name}` : ''}`
+    : adItem?.ad_name || 'Advertising services';
+
+  if (dateKeys.length <= 1) {
+    return [
+      {
+        id: existingByIndex[0]?.id || createId('inv_item'),
+        invoice_id: invoiceId,
+        ad_id: adItem.id,
+        product_id: adItem.product_id || null,
+        description:
+          dateKeys[0] && baseDescription
+            ? `${baseDescription} - ${formatInvoiceDateLabel(dateKeys[0])}`
+            : baseDescription,
+        quantity: 1,
+        unit_price: unitPrice,
+        amount: unitPrice,
+        created_at: existingByIndex[0]?.created_at || now,
+      },
+    ];
+  }
+
+  return dateKeys.map((dateKey, index) => ({
+    id: existingByIndex[index]?.id || createId('inv_item'),
+    invoice_id: invoiceId,
+    ad_id: adItem.id,
+    product_id: adItem.product_id || null,
+    description: `${baseDescription} - ${formatInvoiceDateLabel(dateKey)}`,
+    quantity: 1,
+    unit_price: unitPrice,
+    amount: unitPrice,
+    created_at: existingByIndex[index]?.created_at || now,
+  }));
 };
 
 const buildSubmissionReviewNotes = ({ reasons = [], note = '' } = {}) => {
@@ -773,7 +919,7 @@ const fromAdRow = (row) => {
     post_date_from: toDateOnly(row.post_date_from || row.post_date || row.schedule),
     post_date_to: toDateOnly(row.post_date_to),
     post_time: toTimeOnly(row.post_time),
-    custom_dates: toArray(row.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+    custom_dates: normalizeCustomDateEntries(row.custom_dates),
     notes: row.notes || '',
     ad_text: row.ad_text || '',
     media: toArray(row.media),
@@ -811,7 +957,7 @@ const toAdRow = (input) => {
     post_date_from: toDateColumn(postDateFrom),
     post_date_to: toDateColumn(input.post_date_to),
     post_time: toTimeColumn(input.post_time),
-    custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+    custom_dates: normalizeCustomDateEntries(input.custom_dates),
     notes: String(input.notes || '').trim(),
     ad_text: String(input.ad_text || '').trim(),
     media: toArray(input.media),
@@ -844,7 +990,7 @@ const fromPendingAdRow = (row) => ({
   post_date: toDateOnly(row.post_date || row.post_date_from),
   post_date_from: toDateOnly(row.post_date_from || row.post_date),
   post_date_to: toDateOnly(row.post_date_to),
-  custom_dates: toArray(row.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+  custom_dates: normalizeCustomDateEntries(row.custom_dates),
   post_time: toTimeOnly(row.post_time),
   reminder_minutes: Number(row.reminder_minutes) || 15,
   ad_text: row.ad_text || '',
@@ -872,7 +1018,7 @@ const toPendingAdRow = (input) => ({
   post_date: toDateColumn(input.post_date || input.post_date_from),
   post_date_from: toDateColumn(input.post_date_from || input.post_date),
   post_date_to: toDateColumn(input.post_date_to),
-  custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+  custom_dates: normalizeCustomDateEntries(input.custom_dates),
   post_time: toTimeColumn(input.post_time),
   reminder_minutes: Number(input.reminder_minutes) || 15,
   ad_text: String(input.ad_text || '').trim(),
@@ -1252,6 +1398,7 @@ const fetchDbFromSupabase = async () => {
   }
 
   const users = currentUser ? normalizeUsers([currentUser]) : [];
+  const activeInvoiceRows = (invoiceRows || []).filter((row) => !row?.deleted_at);
   const invoiceItemsByInvoiceId = new Map();
   for (const item of invoiceItemRows || []) {
     const list = invoiceItemsByInvoiceId.get(item.invoice_id) || [];
@@ -1266,7 +1413,7 @@ const fetchDbFromSupabase = async () => {
       products: productRows.map(fromProductRow),
       ads: adRows.map(fromAdRow),
       pending_ads: pendingRows.map(fromPendingAdRow),
-      invoices: invoiceRows.map((row) =>
+      invoices: activeInvoiceRows.map((row) =>
         fromInvoiceRow({
           ...row,
           items: invoiceItemsByInvoiceId.get(row.id) || [],
@@ -1280,12 +1427,41 @@ const fetchDbFromSupabase = async () => {
   );
 };
 
-const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) => {
-  const table = tableName(baseName);
-  const normalizedRows = rows.filter((row) => row && row.id);
+const rowsEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
-  if (normalizedRows.length > 0) {
-    const upsertResult = await supabase.from(table).upsert(normalizedRows, { onConflict: 'id' });
+const syncIdTable = async (
+  supabase,
+  baseName,
+  previousRows,
+  nextRows,
+  {
+    optional = false,
+    deleteMode = 'hard',
+    skipDeleteIds = [],
+  } = {},
+) => {
+  const table = tableName(baseName);
+  const previousById = new Map(
+    toArray(previousRows)
+      .filter((row) => row && row.id)
+      .map((row) => [String(row.id), row]),
+  );
+  const nextById = new Map(
+    toArray(nextRows)
+      .filter((row) => row && row.id)
+      .map((row) => [String(row.id), row]),
+  );
+
+  const upsertRows = [];
+  for (const [id, row] of nextById.entries()) {
+    const previousRow = previousById.get(id);
+    if (!previousRow || !rowsEqual(previousRow, row)) {
+      upsertRows.push(row);
+    }
+  }
+
+  if (upsertRows.length > 0) {
+    const upsertResult = await supabase.from(table).upsert(upsertRows, { onConflict: 'id' });
     if (upsertResult.error) {
       if (optional && isOptionalSyncError(upsertResult.error)) {
         return;
@@ -1294,29 +1470,27 @@ const syncIdTable = async (supabase, baseName, rows, { optional = false } = {}) 
     }
   }
 
-  const selectResult = await supabase.from(table).select('id');
-  if (selectResult.error) {
-    if (optional && isOptionalSyncError(selectResult.error)) {
-      return;
-    }
-    throwIfSupabaseError(`select ids ${baseName}`, selectResult.error);
-  }
-
-  const keepIds = new Set(normalizedRows.map((row) => String(row.id)));
-  const deleteIds = (selectResult.data || [])
-    .map((row) => row.id)
-    .filter((id) => !keepIds.has(String(id)));
+  const skipDeleteIdSet = new Set(toArray(skipDeleteIds).map((id) => String(id)));
+  const deleteIds = [...previousById.keys()].filter(
+    (id) => !nextById.has(id) && !skipDeleteIdSet.has(id),
+  );
 
   if (deleteIds.length === 0) {
     return;
   }
 
-  const deleteResult = await supabase.from(table).delete().in('id', deleteIds);
+  const deleteResult =
+    deleteMode === 'soft'
+      ? await supabase
+        .from(table)
+        .update({ deleted_at: nowIso(), updated_at: nowIso() })
+        .in('id', deleteIds)
+      : await supabase.from(table).delete().in('id', deleteIds);
   if (deleteResult.error) {
     if (optional && isOptionalSyncError(deleteResult.error)) {
       return;
     }
-    throwIfSupabaseError(`delete missing ${baseName}`, deleteResult.error);
+    throwIfSupabaseError(`delete ${baseName}`, deleteResult.error);
   }
 };
 
@@ -1426,21 +1600,51 @@ const syncAdminNotificationPreferencesViaApi = async (
   );
 };
 
-const persistDbToSupabase = async (value) => {
+const persistDbToSupabase = async (previousValue, value) => {
+  const previousDb = refreshDerivedFields(normalizeDb(previousValue));
   const db = refreshDerivedFields(normalizeDb(value));
   const supabase = getSupabaseClient();
-  const invoiceRows = db.invoices.map(toInvoiceRow);
-  const invoiceItemRows = db.invoices.flatMap((invoice) =>
+  const previousAdvertiserRows = previousDb.advertisers.map(toAdvertiserRow);
+  const previousProductRows = previousDb.products.map(toProductRow);
+  const previousTeamMemberRows = previousDb.team_members.map(toTeamMemberRow);
+  const previousPendingRows = previousDb.pending_ads.map(toPendingAdRow);
+  const previousInvoiceRows = previousDb.invoices.map(toInvoiceRow);
+  const previousAdRows = previousDb.ads.map(toAdRow);
+  const previousInvoiceItemRows = previousDb.invoices.flatMap((invoice) =>
     toArray(invoice.items).map((item) => toInvoiceItemRow(invoice.id, item)),
   );
 
-  await syncIdTable(supabase, 'advertisers', db.advertisers.map(toAdvertiserRow));
-  await syncIdTable(supabase, 'products', db.products.map(toProductRow));
-  await syncIdTable(supabase, 'team_members', db.team_members.map(toTeamMemberRow));
-  await syncIdTable(supabase, 'pending_ads', db.pending_ads.map(toPendingAdRow));
-  await syncIdTable(supabase, 'invoices', invoiceRows);
-  await syncIdTable(supabase, 'ads', db.ads.map(toAdRow));
-  await syncIdTable(supabase, 'invoice_items', invoiceItemRows, { optional: true });
+  const advertiserRows = db.advertisers.map(toAdvertiserRow);
+  const productRows = db.products.map(toProductRow);
+  const teamMemberRows = db.team_members.map(toTeamMemberRow);
+  const pendingRows = db.pending_ads.map(toPendingAdRow);
+  const invoiceRows = db.invoices.map(toInvoiceRow);
+  const adRows = db.ads.map(toAdRow);
+  const invoiceItemRows = db.invoices.flatMap((invoice) =>
+    toArray(invoice.items).map((item) => toInvoiceItemRow(invoice.id, item)),
+  );
+  const removedInvoiceIdSet = new Set(
+    previousInvoiceRows
+      .map((row) => String(row?.id || ''))
+      .filter(Boolean)
+      .filter((id) => !invoiceRows.some((row) => String(row?.id || '') === id)),
+  );
+  const preservedRemovedInvoiceItemIds = previousInvoiceItemRows
+    .filter((item) => removedInvoiceIdSet.has(String(item?.invoice_id || '')))
+    .map((item) => item.id);
+
+  await syncIdTable(supabase, 'advertisers', previousAdvertiserRows, advertiserRows);
+  await syncIdTable(supabase, 'products', previousProductRows, productRows);
+  await syncIdTable(supabase, 'team_members', previousTeamMemberRows, teamMemberRows);
+  await syncIdTable(supabase, 'pending_ads', previousPendingRows, pendingRows);
+  await syncIdTable(supabase, 'invoices', previousInvoiceRows, invoiceRows, {
+    deleteMode: 'soft',
+  });
+  await syncIdTable(supabase, 'ads', previousAdRows, adRows);
+  await syncIdTable(supabase, 'invoice_items', previousInvoiceItemRows, invoiceItemRows, {
+    optional: true,
+    skipDeleteIds: preservedRemovedInvoiceItemIds,
+  });
 
   await syncSingletonTable(
     supabase,
@@ -1507,6 +1711,7 @@ export const readDb = () => {
 
 export const writeDb = async (value) => {
   await ensureDb();
+  const previous = clone(dbCache);
   const normalized = refreshDerivedFields(normalizeDb(value));
   persistLocalUsers(normalized.users);
 
@@ -1514,7 +1719,7 @@ export const writeDb = async (value) => {
     throw new Error('Supabase configuration is required to persist app data.');
   }
 
-  await persistDbToSupabase(normalized);
+  await persistDbToSupabase(previous, normalized);
   return setDbCache(normalized, { emit: true });
 };
 
@@ -1744,7 +1949,7 @@ export const upsertAd = async (input) => {
       post_date_from: toDateOnly(input.post_date_from || postDate),
       post_date_to: toDateOnly(input.post_date_to),
       post_time: toTimeOnly(input.post_time),
-      custom_dates: toArray(input.custom_dates).map((date) => toDateOnly(date)).filter(Boolean),
+      custom_dates: normalizeCustomDateEntries(input.custom_dates),
       notes: input.notes || '',
       ad_text: input.ad_text || '',
       media: toArray(input.media),
@@ -1847,7 +2052,7 @@ export const submitPendingAd = async (input) => {
   await updateDb((db) => {
     const postDateFrom = input.post_date_from || input.post_date || '';
     const postDateTo = input.post_date_to || '';
-    const customDates = Array.isArray(input.custom_dates) ? input.custom_dates.filter(Boolean) : [];
+    const customDates = normalizeCustomDateEntries(input.custom_dates);
     const phone = normalizeUSPhoneNumber(input.phone || input.phone_number || '');
     const payload = {
       id: input.id || createId('pending'),
@@ -1859,10 +2064,10 @@ export const submitPendingAd = async (input) => {
       business_name: (input.business_name || '').trim(),
       ad_name: (input.ad_name || '').trim(),
       post_type: normalizePostType(input.post_type || 'one_time'),
-      post_date: toDateOnly(input.post_date || postDateFrom || customDates[0]),
+      post_date: toDateOnly(input.post_date || postDateFrom || firstCustomDateKey(customDates)),
       post_date_from: toDateOnly(postDateFrom),
       post_date_to: toDateOnly(postDateTo),
-      custom_dates: customDates.map((date) => toDateOnly(date)).filter(Boolean),
+      custom_dates: customDates,
       post_time: toTimeOnly(input.post_time),
       reminder_minutes: Number(input.reminder_minutes) || 15,
       ad_text: input.ad_text || '',
@@ -1892,7 +2097,7 @@ export const approvePendingAd = async (pendingAdId) => {
     const postDate =
       pending.post_date ||
       pending.post_date_from ||
-      (Array.isArray(pending.custom_dates) ? pending.custom_dates[0] : '') ||
+      firstCustomDateKey(pending.custom_dates) ||
       '';
 
     let advertiser =
@@ -1923,14 +2128,28 @@ export const approvePendingAd = async (pendingAdId) => {
     const adId = createId('ad');
     const invoiceId = createId('inv');
     const invoiceNumber = nextLocalInvoiceNumber(db);
+    const pendingProductId = normalizeId(pending.product_id);
+    let resolvedProduct = pendingProductId
+      ? db.products.find((item) => sameId(item.id, pendingProductId))
+      : null;
+
+    if (!resolvedProduct) {
+      const normalizedPlacement = String(pending.placement || '').trim().toLowerCase();
+      if (normalizedPlacement) {
+        resolvedProduct =
+          db.products.find(
+            (item) => String(item.placement || '').trim().toLowerCase() === normalizedPlacement,
+          ) || null;
+      }
+    }
 
     const nextAd = {
       id: adId,
       ad_name: pending.ad_name || 'Submitted ad',
       advertiser_id: advertiser.id,
       advertiser: advertiser.advertiser_name,
-      product_id: '',
-      product_name: '',
+      product_id: resolvedProduct?.id || pendingProductId || '',
+      product_name: resolvedProduct?.product_name || pending.product_name || '',
       post_type: normalizePostType(pending.post_type || 'one_time'),
       status: 'Draft',
       payment: 'Pending',
@@ -1945,7 +2164,7 @@ export const approvePendingAd = async (pendingAdId) => {
       placement: pending.placement || '',
       reminder_minutes: Number(pending.reminder_minutes) || 15,
       notes: pending.notes || '',
-      price: '0.00',
+      price: toMoney(pending.price || resolvedProduct?.price || 0),
       media_urls: [],
       invoice_id: invoiceId,
       paid_via_invoice_id: invoiceId,
@@ -1953,7 +2172,14 @@ export const approvePendingAd = async (pendingAdId) => {
       updated_at: now,
     };
 
-    const invoiceLineAmount = toMoney(nextAd.price);
+    const invoiceItems = buildDerivedInvoiceItemsForAd({
+      adItem: nextAd,
+      invoiceId,
+      now,
+    });
+    const invoiceLineAmount = toMoney(
+      invoiceItems.reduce((sum, item) => sum + numberOrZero(item.amount), 0),
+    );
     db.ads.unshift(nextAd);
     db.invoices.unshift({
       id: invoiceId,
@@ -1965,19 +2191,7 @@ export const approvePendingAd = async (pendingAdId) => {
       status: 'Pending',
       paid_date: '',
       ad_ids: [adId],
-      items: [
-        {
-          id: createId('inv_item'),
-          invoice_id: invoiceId,
-          ad_id: adId,
-          product_id: null,
-          description: pending.ad_name || 'Ad placement',
-          quantity: 1,
-          unit_price: invoiceLineAmount,
-          amount: invoiceLineAmount,
-          created_at: now,
-        },
-      ],
+      items: invoiceItems,
       contact_name: pending.contact_name || '',
       contact_email: pending.email || '',
       bill_to: pending.advertiser_name || advertiser.advertiser_name || '',
@@ -2073,24 +2287,18 @@ export const upsertInvoice = async (input) => {
     const selectedAds = adIds
       .map((adId) => db.ads.find((item) => sameId(item.id, adId)))
       .filter(Boolean);
-    const derivedItems = selectedAds.map((adItem) => ({
-      id:
-        existing?.items?.find((item) => sameId(item.ad_id, adItem.id))?.id ||
-        createId('inv_item'),
-      invoice_id: invoiceId,
-      ad_id: adItem.id,
-      product_id: adItem.product_id || null,
-      description: adItem.product_name
-        ? `${adItem.product_name}${adItem.ad_name ? ` | Ad: ${adItem.ad_name}` : ''}`
-        : adItem.ad_name || 'Advertising services',
-      quantity: 1,
-      unit_price: toMoney(adItem.price),
-      amount: toMoney(adItem.price),
-      created_at:
-        existing?.items?.find((item) => sameId(item.ad_id, adItem.id))?.created_at || now,
-    }));
+    const derivedItems = selectedAds.flatMap((adItem) =>
+      buildDerivedInvoiceItemsForAd({
+        adItem,
+        invoiceId,
+        existingItems: toArray(existing?.items).filter((item) => sameId(item?.ad_id, adItem.id)),
+        now,
+      }),
+    );
     const items = Array.isArray(input.items) && input.items.length > 0 ? input.items : derivedItems;
-    const subtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
+    const explicitAmount = toMoney(input.total ?? input.amount);
+    const derivedSubtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
+    const subtotal = items.length > 0 ? derivedSubtotal : explicitAmount;
     const discount = toMoney(input.discount);
     const tax = toMoney(input.tax);
     const total = toMoney(subtotal - numberOrZero(discount) + numberOrZero(tax));

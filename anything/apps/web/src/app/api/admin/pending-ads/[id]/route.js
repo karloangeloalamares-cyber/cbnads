@@ -1,4 +1,4 @@
-import { db, table } from "../../../utils/supabase-db.js";
+import { db, normalizePostType, table } from "../../../utils/supabase-db.js";
 import { requireAdmin } from "../../../utils/auth-check.js";
 import {
   isCompleteUSPhoneNumber,
@@ -43,6 +43,8 @@ export async function PUT(request, { params }) {
         patch[field] =
           field === "phone_number"
             ? normalizedPhoneNumber || null
+            : field === "post_type"
+              ? normalizePostType(body[field])
             : body[field];
       }
     }

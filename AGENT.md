@@ -1,6 +1,6 @@
 # CBN Ads Agent Handbook
 
-Last updated: March 5, 2026
+Last updated: March 6, 2026
 
 ## Scope
 
@@ -15,6 +15,17 @@ It also defines reusable personas/skills for:
 - Frontend audit
 - Backend audit
 - Debugging workflow
+
+## Critical Safety Rule (Production Data)
+
+Production/live website data is now real customer/business data.
+
+Non-negotiable rule for all future work:
+
+1. Do not delete, truncate, reset, purge, or hard-overwrite production/live data.
+2. Do not run destructive SQL (`DELETE`, `TRUNCATE`, `DROP`, destructive `UPDATE`) against live data by default.
+3. Any destructive data change requires explicit written approval from the user in the current task before execution.
+4. Default approach must be additive and reversible (safe migrations, backups, soft-delete, or no-op when uncertain).
 
 ## Current Product State
 

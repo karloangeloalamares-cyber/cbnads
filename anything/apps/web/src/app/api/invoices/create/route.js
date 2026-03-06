@@ -56,60 +56,77 @@ export async function POST(request) {
       ),
     ];
 
-    const { data: invoice, error: invoiceError } = await supabase
-      .from(table("invoices"))
-      .insert({
-        invoice_number: invoiceNumber,
-        advertiser_id: advertiser_id || null,
-        advertiser_name,
-        ad_ids: linkedAdIds,
-        contact_name: contact_name || null,
-        contact_email: contact_email || null,
-        bill_to: bill_to || advertiser_name,
-        issue_date: getTodayInAppTimeZone(),
-        status,
-        discount: toNumber(discount, 0),
-        tax: toNumber(tax, 0),
-        total,
-        amount: total,
-        amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
-        notes: notes || null,
-        created_at: nowIso,
-        updated_at: nowIso,
-      })
-      .select("*")
-      .single();
-    if (invoiceError) throw invoiceError;
-
-    for (const item of items) {
-      const quantity = toNumber(item.quantity, 1) || 1;
-      const unitPrice = toNumber(item.unit_price, 0);
-      const amount = toNumber(item.amount, quantity * unitPrice);
-      const { error: itemError } = await supabase.from(table("invoice_items")).insert({
-        invoice_id: invoice.id,
-        ad_id: item.ad_id || null,
-        product_id: item.product_id || null,
-        description: item.description || "",
-        quantity,
-        unit_price: unitPrice,
-        amount,
-        created_at: nowIso,
-      });
-      if (itemError) throw itemError;
-    }
-
-    if (linkedAdIds.length > 0) {
-      const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
-      const { error: adUpdateError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: nextPaymentStatus,
-          invoice_id: invoice.id,
-          paid_via_invoice_id: invoice.id,
+    let invoice = null;
+    try {
+      const createInvoiceResult = await supabase
+        .from(table("invoices"))
+        .insert({
+          invoice_number: invoiceNumber,
+          advertiser_id: advertiser_id || null,
+          advertiser_name,
+          ad_ids: linkedAdIds,
+          contact_name: contact_name || null,
+          contact_email: contact_email || null,
+          bill_to: bill_to || advertiser_name,
+          issue_date: getTodayInAppTimeZone(),
+          status,
+          discount: toNumber(discount, 0),
+          tax: toNumber(tax, 0),
+          total,
+          amount: total,
+          amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
+          notes: notes || null,
+          created_at: nowIso,
           updated_at: nowIso,
         })
-        .in("id", linkedAdIds);
-      if (adUpdateError) throw adUpdateError;
+        .select("*")
+        .single();
+      if (createInvoiceResult.error) throw createInvoiceResult.error;
+      invoice = createInvoiceResult.data || null;
+      if (!invoice?.id) {
+        throw new Error("Invoice record was not created.");
+      }
+
+      const invoiceItemsPayload = items.map((item) => {
+        const quantity = toNumber(item.quantity, 1) || 1;
+        const unitPrice = toNumber(item.unit_price, 0);
+        const amount = toNumber(item.amount, quantity * unitPrice);
+        return {
+          invoice_id: invoice.id,
+          ad_id: item.ad_id || null,
+          product_id: item.product_id || null,
+          description: item.description || "",
+          quantity,
+          unit_price: unitPrice,
+          amount,
+          created_at: nowIso,
+        };
+      });
+      if (invoiceItemsPayload.length > 0) {
+        const { error: itemError } = await supabase
+          .from(table("invoice_items"))
+          .insert(invoiceItemsPayload);
+        if (itemError) throw itemError;
+      }
+
+      if (linkedAdIds.length > 0) {
+        const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
+        const { error: adUpdateError } = await supabase
+          .from(table("ads"))
+          .update({
+            payment: nextPaymentStatus,
+            invoice_id: invoice.id,
+            paid_via_invoice_id: invoice.id,
+            updated_at: nowIso,
+          })
+          .in("id", linkedAdIds);
+        if (adUpdateError) throw adUpdateError;
+      }
+    } catch (creationError) {
+      if (invoice?.id) {
+        await supabase.from(table("invoices")).delete().eq("id", invoice.id);
+      }
+      throw creationError;
     }
 
     const { data: invoiceItems, error: itemsError } = await supabase
