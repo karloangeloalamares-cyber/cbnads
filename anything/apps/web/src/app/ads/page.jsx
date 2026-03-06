@@ -4549,6 +4549,67 @@ export default function AdsPage() {
     }
   };
 
+  const sendAdLifecycleNotification = async ({
+    event = "updated",
+    adRecord = null,
+    fallbackPayload = null,
+  } = {}) => {
+    if (!isInternalUserRole || !hasSupabaseConfig) {
+      return { skipped: true };
+    }
+
+    const adId = String(adRecord?.id || fallbackPayload?.id || "").trim();
+    const payload = {
+      event,
+      ad_id: adId || null,
+      ad_name:
+        adRecord?.ad_name || fallbackPayload?.ad_name || "",
+      advertiser_name:
+        adRecord?.advertiser ||
+        fallbackPayload?.advertiser ||
+        fallbackPayload?.advertiser_name ||
+        "",
+      status: adRecord?.status || fallbackPayload?.status || "",
+      post_type: adRecord?.post_type || fallbackPayload?.post_type || "",
+      placement: adRecord?.placement || fallbackPayload?.placement || "",
+      post_date_from:
+        adRecord?.post_date_from ||
+        fallbackPayload?.post_date_from ||
+        fallbackPayload?.post_date ||
+        "",
+      post_date_to: adRecord?.post_date_to || fallbackPayload?.post_date_to || "",
+      post_time: adRecord?.post_time || fallbackPayload?.post_time || "",
+      actor_name: user?.name || "",
+      actor_email: user?.email || "",
+    };
+
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/ads/internal-notify", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          skipped: false,
+          error: data?.error || `Failed to send ${event} notification.`,
+        };
+      }
+      return data || { skipped: false };
+    } catch (error) {
+      return {
+        skipped: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : `Failed to send ${event} notification.`,
+      };
+    }
+  };
+
   const resetSubmissionEditState = () => {
     submissionEditFormRef.current = blankSubmissionEditForm;
     submissionEditAvailabilityRequestIdRef.current += 1;
@@ -6416,6 +6477,26 @@ export default function AdsPage() {
           }
         }
 
+        const shouldNotifyLifecycle =
+          isInternalUserRole && mode !== "draft";
+        const skipLifecycleNotification =
+          isAdmin && shouldNotifyAdCreated && approvalEmailResult?.success;
+
+        if (shouldNotifyLifecycle && !skipLifecycleNotification) {
+          const lifecycleResult = await sendAdLifecycleNotification({
+            event: isNewAdRecord ? "created" : "updated",
+            adRecord: savedAd,
+            fallbackPayload: payload,
+          });
+
+          if (lifecycleResult?.error) {
+            appToast.warning({
+              title: "Ad saved, but Telegram/email internal alert failed.",
+              description: lifecycleResult.error,
+            });
+          }
+        }
+
         if (mode === "continue") {
           const linkedInvoiceId =
             savedAd?.paid_via_invoice_id ||
@@ -6606,7 +6687,22 @@ export default function AdsPage() {
     if (!isAdmin) {
       return;
     }
-    return run(() => updateAdStatus(adId, "Published"), "Ad marked as published.");
+    return run(async () => {
+      await updateAdStatus(adId, "Published");
+      const latestAd = readDb().ads.find(
+        (item) => String(item?.id || "") === String(adId || ""),
+      );
+      const lifecycleResult = await sendAdLifecycleNotification({
+        event: "published",
+        adRecord: latestAd,
+      });
+      if (lifecycleResult?.error) {
+        appToast.warning({
+          title: "Ad published, but internal alert failed.",
+          description: lifecycleResult.error,
+        });
+      }
+    }, "Ad marked as published.");
   };
 
   const deleteAdRecord = async (adId) => {
@@ -6631,6 +6727,9 @@ export default function AdsPage() {
     );
 
     const toastId = `delete-ad-${normalizedAdId}`;
+    const adBeforeDelete = ads.find(
+      (item) => String(item?.id || "").trim() === normalizedAdId,
+    );
     appToast.info({
       id: toastId,
       title: "Deleting ad...",
@@ -6641,6 +6740,16 @@ export default function AdsPage() {
     try {
       await deleteAd(normalizedAdId);
       setDb(readDb());
+      const lifecycleResult = await sendAdLifecycleNotification({
+        event: "deleted",
+        adRecord: adBeforeDelete,
+      });
+      if (lifecycleResult?.error) {
+        appToast.warning({
+          title: "Ad deleted, but internal alert failed.",
+          description: lifecycleResult.error,
+        });
+      }
       appToast.success({
         title: "Ad deleted.",
       });
