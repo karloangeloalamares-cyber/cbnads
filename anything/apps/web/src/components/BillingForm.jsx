@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { Globe, Calendar, ChevronLeft, Plus, Trash2 } from "lucide-react";
+import {
+  INVOICE_COMPANY_ADDRESS,
+  INVOICE_COMPANY_EMAIL,
+  INVOICE_COMPANY_NAME,
+} from "@/lib/invoiceCompany";
 import { appToast } from "@/lib/toast";
 import { getTodayInAppTimeZone } from "@/lib/timezone";
 
@@ -631,12 +636,11 @@ export default function BillingForm({
                     />
                   </div>
                   <div className="text-base font-bold text-gray-900 mb-2">
-                    CBN Media LLC
+                    {INVOICE_COMPANY_NAME}
                   </div>
                   <div className="text-xs text-gray-500 space-y-0.5">
-                    <div>2345 Manhattan Ave</div>
-                    <div>advertise@cbnads.com</div>
-                    <div>800.938.0499</div>
+                    <div>{INVOICE_COMPANY_ADDRESS}</div>
+                    <div>{INVOICE_COMPANY_EMAIL}</div>
                   </div>
                 </div>
                 <div className="text-right">

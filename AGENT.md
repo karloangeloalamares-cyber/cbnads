@@ -182,6 +182,17 @@ npx vercel --prod --yes
    - local storage keys
    - future storage buckets
 
+## UI Overlay Rule (Strict)
+
+All future UI work by agents/LLMs in this repo must follow this rule for dropdowns, action menus, popovers, tooltips, and similar overlays:
+
+1. Do not render these overlays with in-flow or container-bound absolute positioning when they appear inside tables, scroll regions, cards, sticky panels, modals, or any parent that can clip overflow.
+2. Render them in a portal attached to `document.body` (or equivalent top-level overlay root) and position them with viewport-aware `fixed` coordinates.
+3. Clamp overlay placement so it stays on-screen, and flip above/left when there is not enough room below/right.
+4. Prevent trigger clicks from bubbling into parent row/card click handlers.
+5. Close these overlays cleanly on outside click, `Escape`, and on window resize/scroll when appropriate.
+6. Treat this as a required design/system rule, not an optional enhancement.
+
 ## Recent Fixes (March 5, 2026)
 
 1. Destructive actions in Ads UI now use app toasts (no browser `window.confirm` dialogs):

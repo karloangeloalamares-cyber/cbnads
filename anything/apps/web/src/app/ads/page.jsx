@@ -84,6 +84,11 @@ import {
   isPastDateTimeInAppTimeZone,
 } from "@/lib/timezone";
 import {
+  INVOICE_COMPANY_ADDRESS,
+  INVOICE_COMPANY_EMAIL,
+  INVOICE_COMPANY_NAME,
+} from "@/lib/invoiceCompany";
+import {
   approvePendingAd,
   createId,
   deleteAd,
@@ -719,6 +724,9 @@ function AdsSortableHeader({ label, sortKey, sortConfig, onSort }) {
 
 function AdsScheduleCell({ ad }) {
   const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
+  const tooltipTriggerRef = useRef(null);
+  const tooltipRef = useRef(null);
 
   const customDates = useMemo(
     () =>
@@ -778,6 +786,90 @@ function AdsScheduleCell({ ad }) {
     });
   }, [customDates, nextCustomDate, publishedDates, today]);
 
+  useEffect(() => {
+    if (!showTooltip || typeof window === "undefined") {
+      return undefined;
+    }
+
+    const updateTooltipPosition = () => {
+      if (!tooltipTriggerRef.current) {
+        return;
+      }
+
+      const triggerRect = tooltipTriggerRef.current.getBoundingClientRect();
+      const tooltipWidth = 256;
+      const gap = 8;
+      const viewportPadding = 12;
+      const tooltipHeight = tooltipRef.current?.offsetHeight || 180;
+
+      const left = Math.max(
+        viewportPadding,
+        Math.min(triggerRect.left, window.innerWidth - tooltipWidth - viewportPadding),
+      );
+
+      const top =
+        triggerRect.bottom + gap + tooltipHeight <= window.innerHeight - viewportPadding
+          ? triggerRect.bottom + gap
+          : Math.max(viewportPadding, triggerRect.top - tooltipHeight - gap);
+
+      setTooltipPosition({ top, left });
+    };
+
+    updateTooltipPosition();
+    const animationFrameId = window.requestAnimationFrame(updateTooltipPosition);
+
+    window.addEventListener("resize", updateTooltipPosition);
+    window.addEventListener("scroll", updateTooltipPosition, true);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId);
+      window.removeEventListener("resize", updateTooltipPosition);
+      window.removeEventListener("scroll", updateTooltipPosition, true);
+    };
+  }, [categorizedDates.length, showTooltip]);
+
+  useEffect(() => {
+    if (!showTooltip || typeof document === "undefined") {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      const target = event.target;
+      if (tooltipTriggerRef.current?.contains(target) || tooltipRef.current?.contains(target)) {
+        return;
+      }
+      setShowTooltip(false);
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === "Escape") {
+        setShowTooltip(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [showTooltip]);
+
+  const handleTriggerMouseLeave = (event) => {
+    if (tooltipRef.current?.contains(event.relatedTarget)) {
+      return;
+    }
+    setShowTooltip(false);
+  };
+
+  const handleTooltipMouseLeave = (event) => {
+    if (tooltipTriggerRef.current?.contains(event.relatedTarget)) {
+      return;
+    }
+    setShowTooltip(false);
+  };
+
   if (customDates.length === 0) {
     return <span className="text-xs text-gray-700 font-medium">{formatAdsDate(ad.schedule)}</span>;
   }
@@ -793,14 +885,39 @@ function AdsScheduleCell({ ad }) {
   return (
     <div className="relative flex items-center gap-1.5">
       <span className="text-xs text-gray-700 font-medium">{formatAdsDate(nextCustomDate)}</span>
-      <div
-        className="relative"
+      <button
+        ref={tooltipTriggerRef}
+        type="button"
+        className="rounded-sm text-gray-400 transition-colors hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+        onClick={(event) => {
+          event.stopPropagation();
+          setShowTooltip(true);
+        }}
         onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
+        onMouseLeave={handleTriggerMouseLeave}
+        onFocus={() => setShowTooltip(true)}
+        onBlur={() => setShowTooltip(false)}
+        aria-label={`View custom schedule details for ${ad.ad_name || "this ad"}`}
+        aria-expanded={showTooltip}
+        aria-haspopup="dialog"
       >
-        <Info size={14} className="text-gray-400 cursor-help" />
-        {showTooltip ? (
-          <div className="absolute left-0 top-6 z-50 w-64 bg-white border border-gray-200 rounded-lg shadow-xl p-3">
+        <Info size={14} className="cursor-help" />
+      </button>
+      {showTooltip && typeof document !== "undefined"
+        ? createPortal(
+          <div
+            ref={tooltipRef}
+            className="fixed z-[220] w-64 bg-white border border-gray-200 rounded-lg shadow-xl p-3"
+            style={{
+              top: `${tooltipPosition.top}px`,
+              left: `${tooltipPosition.left}px`,
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={handleTooltipMouseLeave}
+            role="dialog"
+            aria-label="Custom schedule details"
+          >
             <div className="text-xs font-semibold text-gray-900 mb-2 pb-2 border-b border-gray-100">
               Custom Schedule ({completionStatus.total} dates)
               <span className="ml-2 text-gray-500 font-normal">
@@ -842,9 +959,10 @@ function AdsScheduleCell({ ad }) {
                 );
               })}
             </div>
-          </div>
-        ) : null}
-      </div>
+          </div>,
+          document.body,
+        )
+        : null}
     </div>
   );
 }
@@ -2242,9 +2360,9 @@ export default function AdsPage() {
   const [calendarSidebarMinimized, setCalendarSidebarMinimized] = useState(false);
   const [advertiserSearch, setAdvertiserSearch] = useState("");
   const [openAdvertiserMenuId, setOpenAdvertiserMenuId] = useState(null);
-  const [advertiserMenuPosition, setAdvertiserMenuPosition] = useState({
-    vertical: "bottom",
-    horizontal: "right",
+  const [advertiserMenuCoordinates, setAdvertiserMenuCoordinates] = useState({
+    top: 0,
+    left: 0,
   });
   const [advertiserViewModal, setAdvertiserViewModal] = useState(null);
   const [advertiserEditModal, setAdvertiserEditModal] = useState(null);
@@ -2262,9 +2380,9 @@ export default function AdsPage() {
   });
   const [productCreateOpen, setProductCreateOpen] = useState(false);
   const [openProductMenuId, setOpenProductMenuId] = useState(null);
-  const [productMenuPosition, setProductMenuPosition] = useState({
-    vertical: "bottom",
-    horizontal: "right",
+  const [productMenuCoordinates, setProductMenuCoordinates] = useState({
+    top: 0,
+    left: 0,
   });
   const [productEditModal, setProductEditModal] = useState(null);
   const [productDeleteModal, setProductDeleteModal] = useState(null);
@@ -2716,9 +2834,11 @@ export default function AdsPage() {
 
   useEffect(() => {
     const onClickOutside = (event) => {
+      const advertiserMenuTrigger = event.target?.closest?.("[data-advertiser-menu-trigger='true']");
       if (
         advertiserMenuRef.current &&
-        !advertiserMenuRef.current.contains(event.target)
+        !advertiserMenuRef.current.contains(event.target) &&
+        !advertiserMenuTrigger
       ) {
         setOpenAdvertiserMenuId(null);
       }
@@ -2728,10 +2848,26 @@ export default function AdsPage() {
   }, []);
 
   useEffect(() => {
+    if (!openAdvertiserMenuId) {
+      return undefined;
+    }
+
+    const closeMenu = () => setOpenAdvertiserMenuId(null);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openAdvertiserMenuId]);
+
+  useEffect(() => {
     const onClickOutside = (event) => {
+      const productMenuTrigger = event.target?.closest?.("[data-product-menu-trigger='true']");
       if (
         productMenuRef.current &&
-        !productMenuRef.current.contains(event.target)
+        !productMenuRef.current.contains(event.target) &&
+        !productMenuTrigger
       ) {
         setOpenProductMenuId(null);
       }
@@ -2739,6 +2875,20 @@ export default function AdsPage() {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!openProductMenuId) {
+      return undefined;
+    }
+
+    const closeMenu = () => setOpenProductMenuId(null);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [openProductMenuId]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -3268,10 +3418,9 @@ export default function AdsPage() {
         <div>
           ${invoiceLogoHtml}
 
-          <div class="company">CBN Media LLC</div>
-          <div class="muted">2345 Manhattan Ave</div>
-          <div class="muted">advertise@cbnads.com</div>
-          <div class="muted">800.938.0499</div>
+          <div class="company">${escapeHtml(INVOICE_COMPANY_NAME)}</div>
+          <div class="muted">${escapeHtml(INVOICE_COMPANY_ADDRESS)}</div>
+          <div class="muted">${escapeHtml(INVOICE_COMPANY_EMAIL)}</div>
         </div>
         <div style="text-align:right;">
           <div class="muted">#${escapeHtml(details.invoiceNumber)}</div>
@@ -7064,13 +7213,29 @@ export default function AdsPage() {
 
   const openAdvertiserMenu = (advertiserId, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.right;
-    const menuHeight = 300;
-    const menuWidth = 200;
-    setAdvertiserMenuPosition({
-      vertical: spaceBelow < menuHeight ? "top" : "bottom",
-      horizontal: spaceRight < menuWidth ? "left" : "right",
+    const menuWidth = 160;
+    const menuHeight = 124;
+    const gap = 6;
+    const viewportPadding = 8;
+
+    let top = rect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      top = rect.top - menuHeight - gap;
+    }
+    top = Math.max(
+      viewportPadding,
+      Math.min(top, window.innerHeight - menuHeight - viewportPadding),
+    );
+
+    let left = rect.right - menuWidth;
+    left = Math.max(
+      viewportPadding,
+      Math.min(left, window.innerWidth - menuWidth - viewportPadding),
+    );
+
+    setAdvertiserMenuCoordinates({
+      top,
+      left,
     });
     setOpenAdvertiserMenuId((current) =>
       current === advertiserId ? null : advertiserId,
@@ -7235,14 +7400,29 @@ export default function AdsPage() {
 
   const openProductMenu = (productId, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const spaceRight = window.innerWidth - rect.right;
-    const menuHeight = 350;
-    const menuWidth = 200;
+    const menuWidth = 192;
+    const menuHeight = 108;
+    const gap = 6;
+    const viewportPadding = 8;
 
-    setProductMenuPosition({
-      vertical: spaceBelow < menuHeight ? "top" : "bottom",
-      horizontal: spaceRight < menuWidth ? "left" : "right",
+    let top = rect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      top = rect.top - menuHeight - gap;
+    }
+    top = Math.max(
+      viewportPadding,
+      Math.min(top, window.innerHeight - menuHeight - viewportPadding),
+    );
+
+    let left = rect.right - menuWidth;
+    left = Math.max(
+      viewportPadding,
+      Math.min(left, window.innerWidth - menuWidth - viewportPadding),
+    );
+
+    setProductMenuCoordinates({
+      top,
+      left,
     });
     setOpenProductMenuId((current) => (current === productId ? null : productId));
   };
@@ -9648,50 +9828,52 @@ export default function AdsPage() {
                                   <button
                                     type="button"
                                     onClick={(event) => openAdvertiserMenu(item.id, event)}
+                                    data-advertiser-menu-trigger="true"
                                     className="p-1 hover:bg-gray-100 rounded transition-colors"
                                   >
                                     <MoreVertical size={18} className="text-gray-600" />
                                   </button>
-                                  {openAdvertiserMenuId === item.id ? (
-                                    <div
-                                      ref={advertiserMenuRef}
-                                      className={`absolute ${advertiserMenuPosition.vertical === "top"
-                                        ? "bottom-full mb-1"
-                                        : "top-full mt-1"
-                                        } ${advertiserMenuPosition.horizontal === "left"
-                                          ? "right-0"
-                                          : "left-auto"
-                                        } w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => openAdvertiserView(item)}
-                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                      >
-                                        <Eye size={16} />
-                                        View
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => openAdvertiserEdit(item)}
-                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-                                      >
-                                        <Edit2 size={16} />
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setAdvertiserDeleteModal(item);
-                                          setOpenAdvertiserMenuId(null);
-                                        }}
-                                        className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
-                                      >
-                                        <Trash2 size={16} />
-                                        Delete
-                                      </button>
-                                    </div>
-                                  ) : null}
+                                  {openAdvertiserMenuId === item.id && typeof document !== "undefined"
+                                    ? createPortal(
+                                        <div
+                                          ref={advertiserMenuRef}
+                                          className="fixed w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[200]"
+                                          style={{
+                                            top: `${advertiserMenuCoordinates.top}px`,
+                                            left: `${advertiserMenuCoordinates.left}px`,
+                                          }}
+                                        >
+                                          <button
+                                            type="button"
+                                            onClick={() => openAdvertiserView(item)}
+                                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                          >
+                                            <Eye size={16} />
+                                            View
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => openAdvertiserEdit(item)}
+                                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                                          >
+                                            <Edit2 size={16} />
+                                            Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setAdvertiserDeleteModal(item);
+                                              setOpenAdvertiserMenuId(null);
+                                            }}
+                                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                          >
+                                            <Trash2 size={16} />
+                                            Delete
+                                          </button>
+                                        </div>,
+                                        document.body,
+                                      )
+                                    : null}
                                 </td>
                               </tr>
                             );
@@ -10171,41 +10353,43 @@ export default function AdsPage() {
                             <button
                               type="button"
                               onClick={(event) => openProductMenu(item.id, event)}
+                              data-product-menu-trigger="true"
                               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                             >
                               <MoreVertical size={18} className="text-gray-500" />
                             </button>
 
-                            {openProductMenuId === item.id ? (
-                              <div
-                                ref={productMenuRef}
-                                className={`absolute ${productMenuPosition.vertical === "top"
-                                  ? "bottom-full mb-1"
-                                  : "top-full mt-1"
-                                  } ${productMenuPosition.horizontal === "left"
-                                    ? "right-0"
-                                    : "left-auto"
-                                  } w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[100] py-1`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => openProductEdit(item)}
-                                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <Edit2 size={16} className="text-gray-400" />
-                                  Edit
-                                </button>
-                                <div className="border-t border-gray-100 my-1" />
-                                <button
-                                  type="button"
-                                  onClick={() => openProductDelete(item)}
-                                  className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <Trash2 size={16} className="text-red-500" />
-                                  Delete
-                                </button>
-                              </div>
-                            ) : null}
+                            {openProductMenuId === item.id && typeof document !== "undefined"
+                              ? createPortal(
+                                  <div
+                                    ref={productMenuRef}
+                                    className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+                                    style={{
+                                      top: `${productMenuCoordinates.top}px`,
+                                      left: `${productMenuCoordinates.left}px`,
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => openProductEdit(item)}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                    >
+                                      <Edit2 size={16} className="text-gray-400" />
+                                      Edit
+                                    </button>
+                                    <div className="border-t border-gray-100 my-1" />
+                                    <button
+                                      type="button"
+                                      onClick={() => openProductDelete(item)}
+                                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                                    >
+                                      <Trash2 size={16} className="text-red-500" />
+                                      Delete
+                                    </button>
+                                  </div>,
+                                  document.body,
+                                )
+                              : null}
                           </td>
                         </tr>
                       ))}
@@ -10797,12 +10981,11 @@ export default function AdsPage() {
                               />
                             </div>
                             <div className="text-sm font-bold text-gray-900 mb-1">
-                              CBN Media LLC
+                              {INVOICE_COMPANY_NAME}
                             </div>
                             <div className="text-xs text-gray-500 space-y-0.5">
-                              <div>2345 Manhattan Ave</div>
-                              <div>advertise@cbnads.com</div>
-                              <div>800.938.0499</div>
+                              <div>{INVOICE_COMPANY_ADDRESS}</div>
+                              <div>{INVOICE_COMPANY_EMAIL}</div>
                             </div>
                           </div>
                           <div className="text-right">
@@ -11097,11 +11280,10 @@ export default function AdsPage() {
                           className="h-20 w-auto"
                         />
                       </div>
-                      <div className="text-base font-bold text-gray-900 mb-2">CBN Media LLC</div>
+                      <div className="text-base font-bold text-gray-900 mb-2">{INVOICE_COMPANY_NAME}</div>
                       <div className="text-xs text-gray-500 space-y-0.5">
-                        <div>2345 Manhattan Ave</div>
-                        <div>advertise@cbnads.com</div>
-                        <div>800.938.0499</div>
+                        <div>{INVOICE_COMPANY_ADDRESS}</div>
+                        <div>{INVOICE_COMPANY_EMAIL}</div>
                       </div>
                     </div>
                     <div className="text-right">
