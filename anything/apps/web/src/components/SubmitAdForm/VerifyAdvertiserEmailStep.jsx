@@ -54,6 +54,10 @@ export function VerifyAdvertiserEmailStep({
             Verify the account first, then sign in as Advertiser.
           </p>
 
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-8">
+            If you do not see the email in a few minutes, check your Spam or Junk folder.
+          </p>
+
           <div className="flex flex-col sm:flex-row gap-3">
             <button
               type="button"
