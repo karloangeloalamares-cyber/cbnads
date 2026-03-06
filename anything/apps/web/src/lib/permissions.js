@@ -87,7 +87,7 @@ export const isAdvertiserRole = (role) => normalizeAppRole(role) === "advertiser
 export const getVisibleSectionsForRole = (role) => {
   const normalizedRole = normalizeAppRole(role);
   if (normalizedRole === "advertiser") {
-    return ["Dashboard", "Calendar", "Submissions", "Ads", "Billing"];
+    return ["Dashboard", "Create Ad", "Calendar", "Submissions", "Ads", "Billing"];
   }
   if (normalizedRole === "staff") {
     return ["Dashboard", "Calendar", "Submissions", "Ads"];

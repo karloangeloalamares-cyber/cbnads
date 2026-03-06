@@ -60,6 +60,7 @@ import {
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import { Modal } from "@/components/Modal";
+import AdvertiserCreateAdSection from "@/components/AdvertiserCreateAdSection";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
@@ -119,6 +120,7 @@ import { getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 
 const sections = [
   "Dashboard",
+  "Create Ad",
   "Calendar",
   "Submissions",
   "WhatsApp",
@@ -4754,6 +4756,12 @@ export default function AdsPage() {
     return nextDb;
   };
 
+  const handleAdvertiserSubmissionCreated = async () => {
+    await refreshDbFromSupabase();
+    setActiveSection("Submissions");
+    setView("list");
+  };
+
   const handleApprovePendingAd = async (pendingAdId) => {
     const normalizedPendingAdId = String(pendingAdId || "").trim();
     if (!normalizedPendingAdId || pendingSubmissionApproveIdSet.has(normalizedPendingAdId)) {
@@ -8431,6 +8439,15 @@ export default function AdsPage() {
                 </div>
               </div>
             </div>
+          )}
+
+          {activeSection === "Create Ad" && isAdvertiser && (
+            <AdvertiserCreateAdSection
+              advertiser={currentAdvertiser}
+              user={user}
+              fetchWithSessionAuth={fetchWithSessionAuth}
+              onSubmitted={handleAdvertiserSubmissionCreated}
+            />
           )}
 
           {activeSection === "Calendar" && (

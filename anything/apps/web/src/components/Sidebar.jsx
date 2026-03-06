@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard,
+  PlusCircle,
   Calendar,
   FileText,
   MessageCircle,
@@ -20,6 +21,7 @@ import { can, getVisibleSectionsForRole, normalizeAppRole } from "@/lib/permissi
 
 const menuItemsCatalog = [
   { icon: LayoutDashboard, label: "Dashboard", id: "Dashboard" },
+  { icon: PlusCircle, label: "Create Ad", id: "Create Ad" },
   { icon: Calendar, label: "Calendar", id: "Calendar" },
   { icon: FileText, label: "Submissions", id: "Submissions", badgeType: "submissions" },
   { icon: MessageCircle, label: "WhatsApp", id: "WhatsApp" },

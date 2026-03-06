@@ -2,10 +2,12 @@ import { db, table } from "../utils/supabase-db.js";
 import {
   getRequestStatusForError,
   isAdvertiserUser,
-  matchesAdvertiserScope,
+  requireAuth,
   requireAdminOrAdvertiser,
   resolveAdvertiserScope,
+  matchesAdvertiserScope,
 } from "../utils/auth-check.js";
+import { createPendingAdSubmission } from "../utils/pending-ad-submission.js";
 
 const submissionPriority = (status) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -95,5 +97,124 @@ export async function GET(request) {
   } catch (error) {
     console.error("Error fetching submissions:", error);
     return Response.json({ error: "Failed to fetch submissions" }, { status: 500 });
+  }
+}
+
+const loadAdvertiserForScope = async (supabase, scope) => {
+  const advertiserId = String(scope?.id || "").trim();
+  const advertiserEmail = String(scope?.email || "").trim().toLowerCase();
+  const advertiserName = String(scope?.name || "").trim();
+
+  if (advertiserId) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("id, advertiser_name, contact_name, email, phone, phone_number")
+      .eq("id", advertiserId)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  if (advertiserEmail) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("id, advertiser_name, contact_name, email, phone, phone_number")
+      .ilike("email", advertiserEmail)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  if (advertiserName) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("id, advertiser_name, contact_name, email, phone, phone_number")
+      .eq("advertiser_name", advertiserName)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data?.id) {
+      return data;
+    }
+  }
+
+  return null;
+};
+
+export async function POST(request) {
+  try {
+    const auth = await requireAuth(request);
+    if (!auth.authorized) {
+      return Response.json(
+        { error: auth.error },
+        { status: auth.status || getRequestStatusForError(auth.error) },
+      );
+    }
+
+    if (!isAdvertiserUser(auth.user)) {
+      return Response.json(
+        { error: "Unauthorized - Advertiser access required" },
+        { status: 403 },
+      );
+    }
+
+    const supabase = db();
+    const scope = await resolveAdvertiserScope(auth.user);
+    const advertiser = await loadAdvertiserForScope(supabase, scope);
+    const body = await request.json();
+
+    const canonicalAdvertiserName =
+      String(advertiser?.advertiser_name || scope?.name || auth.user?.advertiser_name || "").trim();
+    const canonicalEmail =
+      String(advertiser?.email || scope?.email || auth.user?.email || "").trim().toLowerCase();
+
+    if (!canonicalAdvertiserName || !canonicalEmail) {
+      return Response.json(
+        { error: "Advertiser account is not linked correctly. Please contact support." },
+        { status: 403 },
+      );
+    }
+
+    const result = await createPendingAdSubmission({
+      request,
+      supabase,
+      submission: {
+        ...body,
+        advertiser_id: advertiser?.id || scope?.id || auth.user?.advertiser_id || null,
+        advertiser_name: canonicalAdvertiserName,
+        email: canonicalEmail,
+        contact_name: String(
+          body?.contact_name || advertiser?.contact_name || auth.user?.name || "",
+        ).trim(),
+        phone_number: String(
+          body?.phone_number || advertiser?.phone_number || advertiser?.phone || "",
+        ).trim(),
+      },
+    });
+
+    if (result?.error) {
+      return Response.json(
+        {
+          error: result.error,
+          fully_booked_dates: result.fully_booked_dates,
+        },
+        { status: result.status || 400 },
+      );
+    }
+
+    return Response.json({
+      success: true,
+      pending_ad: result.pendingAd,
+    });
+  } catch (error) {
+    console.error("Error creating advertiser submission:", error);
+    return Response.json({ error: "Failed to submit ad" }, { status: 500 });
   }
 }

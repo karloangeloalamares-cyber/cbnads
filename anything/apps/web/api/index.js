@@ -16,8 +16,8 @@ import * as route_13 from "../src/app/api/ads/bulk-action/route.js";
 import * as route_14 from "../src/app/api/ads/calendar/route.js";
 import * as route_15 from "../src/app/api/ads/create/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
-import * as route_17 from "../src/app/api/ads/export/route.js";
-import * as route_18 from "../src/app/api/ads/list/route.js";
+import * as route_17 from "../src/app/api/ads/list/route.js";
+import * as route_18 from "../src/app/api/ads/export/route.js";
 import * as route_19 from "../src/app/api/ads/mark-published/route.js";
 import * as route_20 from "../src/app/api/ads/update/route.js";
 import * as route_21 from "../src/app/api/advertisers/create/route.js";
@@ -48,8 +48,8 @@ import * as route_45 from "../src/app/api/admin/members/[id]/route.js";
 import * as route_46 from "../src/app/api/admin/pending-ads/approve/route.js";
 import * as route_47 from "../src/app/api/admin/pending-ads/cleanup/route.js";
 import * as route_48 from "../src/app/api/admin/pending-ads/list/route.js";
-import * as route_49 from "../src/app/api/admin/pending-ads/mark-read/route.js";
-import * as route_50 from "../src/app/api/admin/pending-ads/reject/route.js";
+import * as route_49 from "../src/app/api/admin/pending-ads/reject/route.js";
+import * as route_50 from "../src/app/api/admin/pending-ads/mark-read/route.js";
 import * as route_51 from "../src/app/api/admin/pending-ads/unread-count/route.js";
 import * as route_52 from "../src/app/api/admin/pending-ads/[id]/route.js";
 import * as route_53 from "../src/app/api/admin/telegram/send/route.js";
@@ -70,12 +70,12 @@ const routes = [
   { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_59 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_51 },
   { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_43 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_49 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_50 },
   { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_60 },
   { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_42 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_46 },
   { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_47 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_50 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_49 },
   { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_56 },
   { regex: new RegExp("^/api/admin/pending\\-ads/list$"), module: route_48 },
   { regex: new RegExp("^/api/admin/telegram/verify$"), module: route_54 },
@@ -115,11 +115,11 @@ const routes = [
   { regex: new RegExp("^/api/ads/archive$"), module: route_10 },
   { regex: new RegExp("^/api/ads/create$"), module: route_15 },
   { regex: new RegExp("^/api/ads/delete$"), module: route_16 },
-  { regex: new RegExp("^/api/ads/export$"), module: route_17 },
+  { regex: new RegExp("^/api/ads/export$"), module: route_18 },
   { regex: new RegExp("^/api/ads/update$"), module: route_20 },
   { regex: new RegExp("^/api/auth/token$"), module: route_26 },
   { regex: new RegExp("^/api/user/role$"), module: route_40 },
-  { regex: new RegExp("^/api/ads/list$"), module: route_18 },
+  { regex: new RegExp("^/api/ads/list$"), module: route_17 },
   { regex: new RegExp("^/api/advertisers/(?<id>[^/]+)$"), module: route_23 },
   { regex: new RegExp("^/api/submissions/(?<id>[^/]+)$"), module: route_37 },
   { regex: new RegExp("^/api/products/(?<id>[^/]+)$"), module: route_34 },
