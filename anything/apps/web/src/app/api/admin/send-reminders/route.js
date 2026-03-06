@@ -38,6 +38,24 @@ function parseNaiveDateTime(dateStr, timeStr) {
   return new Date(Date.UTC(year, month - 1, day, hour, minute, Number.isFinite(second) ? second : 0));
 }
 
+function buildScheduleKey(scheduledAt) {
+  if (!(scheduledAt instanceof Date) || Number.isNaN(scheduledAt.valueOf())) {
+    return "";
+  }
+  return scheduledAt.toISOString().slice(0, 19);
+}
+
+function createScheduledEntry(scheduledAt, reminderMinutes) {
+  if (!scheduledAt) return null;
+  const scheduleKey = buildScheduleKey(scheduledAt);
+  if (!scheduleKey) return null;
+  return {
+    scheduledAt,
+    reminderMinutes,
+    scheduleKey,
+  };
+}
+
 function getNowInET() {
   const parts = {};
   for (const part of ET_DATE_TIME_FORMATTER.formatToParts(new Date())) {
@@ -118,11 +136,9 @@ function computeScheduledEntries(ad, todayET) {
   if (type === "one_time") {
     const dateStr = dateOnly(ad?.schedule || ad?.post_date_from || ad?.post_date);
     const scheduledAt = parseNaiveDateTime(dateStr, ad?.post_time);
-    if (scheduledAt) {
-      entries.push({
-        scheduledAt,
-        reminderMinutes: defaultReminderMinutes,
-      });
+    const scheduledEntry = createScheduledEntry(scheduledAt, defaultReminderMinutes);
+    if (scheduledEntry) {
+      entries.push(scheduledEntry);
     }
     return entries;
   }
@@ -134,11 +150,9 @@ function computeScheduledEntries(ad, todayET) {
     if (todayET < from || todayET > to) return entries;
 
     const scheduledAt = parseNaiveDateTime(todayET, ad?.post_time);
-    if (scheduledAt) {
-      entries.push({
-        scheduledAt,
-        reminderMinutes: defaultReminderMinutes,
-      });
+    const scheduledEntry = createScheduledEntry(scheduledAt, defaultReminderMinutes);
+    if (scheduledEntry) {
+      entries.push(scheduledEntry);
     }
     return entries;
   }
@@ -149,11 +163,9 @@ function computeScheduledEntries(ad, todayET) {
     for (const entry of ad.custom_dates) {
       if (typeof entry === "string") {
         const scheduledAt = parseNaiveDateTime(dateOnly(entry), ad?.post_time);
-        if (scheduledAt) {
-          entries.push({
-            scheduledAt,
-            reminderMinutes: defaultReminderMinutes,
-          });
+        const scheduledEntry = createScheduledEntry(scheduledAt, defaultReminderMinutes);
+        if (scheduledEntry) {
+          entries.push(scheduledEntry);
         }
         continue;
       }
@@ -161,16 +173,17 @@ function computeScheduledEntries(ad, todayET) {
       const dateKey = dateOnly(entry?.date);
       const timeValue = entry?.time || ad?.post_time;
       const scheduledAt = parseNaiveDateTime(dateKey, timeValue);
-      if (!scheduledAt) continue;
-
-      entries.push({
+      const scheduledEntry = createScheduledEntry(
         scheduledAt,
-        reminderMinutes: parseReminderMinutes(entry?.reminder, defaultReminderMinutes),
-      });
+        parseReminderMinutes(entry?.reminder, defaultReminderMinutes),
+      );
+      if (!scheduledEntry) continue;
+
+      entries.push(scheduledEntry);
     }
   }
 
-  return entries;
+  return entries.sort((left, right) => left.scheduledAt.getTime() - right.scheduledAt.getTime());
 }
 
 function isWithinReminderWindow(scheduledAt, nowET, windowMinutes) {
@@ -183,24 +196,39 @@ function isReminderEligibleStatus(status) {
   return normalized === "scheduled" || normalized === "approved";
 }
 
-async function hasRecentReminder(supabase, adId, recipientType) {
-  const thresholdIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+async function hasReminderForOccurrence(supabase, adId, recipientType, scheduleKey) {
   const { data, error } = await supabase
     .from(table("sent_reminders"))
     .select("id")
     .eq("ad_id", adId)
     .eq("recipient_type", recipientType)
-    .gt("sent_at", thresholdIso)
+    .eq("schedule_key", scheduleKey)
     .limit(1);
   if (error) throw error;
-  return (data || []).length > 0;
+  if ((data || []).length > 0) {
+    return true;
+  }
+
+  // Backward compatibility for reminder rows stored before schedule_key existed.
+  const thresholdIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: legacyData, error: legacyError } = await supabase
+    .from(table("sent_reminders"))
+    .select("id")
+    .eq("ad_id", adId)
+    .eq("recipient_type", recipientType)
+    .is("schedule_key", null)
+    .gt("sent_at", thresholdIso)
+    .limit(1);
+  if (legacyError) throw legacyError;
+  return (legacyData || []).length > 0;
 }
 
-async function storeReminder(supabase, adId, type, recipientType) {
+async function storeReminder(supabase, adId, type, recipientType, scheduleKey) {
   const { error } = await supabase.from(table("sent_reminders")).insert({
     ad_id: adId,
     reminder_type: type,
     recipient_type: recipientType,
+    schedule_key: scheduleKey,
     sent_at: new Date().toISOString(),
   });
   if (error) throw error;
@@ -475,14 +503,19 @@ export async function POST(request) {
       });
 
       if (internalEmails.length > 0) {
-        const alreadySentInternal = await hasRecentReminder(supabase, ad.id, "internal");
+        const alreadySentInternal = await hasReminderForOccurrence(
+          supabase,
+          ad.id,
+          "internal",
+          dueEntry.scheduleKey,
+        );
         if (alreadySentInternal) {
           results.push({
             type: "internal_email",
             ad_id: ad.id,
             ad_name: ad.ad_name,
             status: "already_sent",
-            message: "Internal reminder already sent within last 24 hours",
+            message: "Internal reminder already sent for this scheduled occurrence",
           });
         } else {
           try {
@@ -526,7 +559,7 @@ export async function POST(request) {
                 .catch((err) => console.error("[send-reminders] Telegram send failed:", err));
             }
 
-            await storeReminder(supabase, ad.id, "email", "internal");
+            await storeReminder(supabase, ad.id, "email", "internal", dueEntry.scheduleKey);
             results.push({
               type: "internal_email",
               to: internalEmails,
@@ -565,14 +598,19 @@ export async function POST(request) {
         continue;
       }
 
-      const alreadySentAdvertiser = await hasRecentReminder(supabase, ad.id, "advertiser");
+      const alreadySentAdvertiser = await hasReminderForOccurrence(
+        supabase,
+        ad.id,
+        "advertiser",
+        dueEntry.scheduleKey,
+      );
       if (alreadySentAdvertiser) {
         results.push({
           type: "advertiser_email",
           ad_id: ad.id,
           ad_name: ad.ad_name,
           status: "already_sent",
-          message: "Advertiser reminder already sent within last 24 hours",
+          message: "Advertiser reminder already sent for this scheduled occurrence",
         });
         continue;
       }
@@ -612,7 +650,7 @@ export async function POST(request) {
           html: generateReminderHtml(payload, false),
         });
 
-        await storeReminder(supabase, ad.id, "email", "advertiser");
+        await storeReminder(supabase, ad.id, "email", "advertiser", dueEntry.scheduleKey);
         results.push({
           type: "advertiser_email",
           to: advertiserInfo.email,
