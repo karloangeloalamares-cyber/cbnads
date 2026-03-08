@@ -55,6 +55,8 @@ import {
   X,
   EyeOff,
   Loader2,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import AdsSortableHeader from "@/components/AdsSortableHeader";
@@ -954,6 +956,268 @@ function AdsScheduleCell({ ad }) {
           document.body,
         )
         : null}
+    </div>
+  );
+}
+
+function AdsGridCard({
+  ad,
+  onPreview,
+  onEdit,
+  onMarkPublished,
+  onDelete,
+  onSendToWhatsApp,
+  onSendToTelegram,
+  readOnly = false,
+  canDelete = false,
+  isSelected = false,
+  onToggleSelect,
+}) {
+  const [activeMenu, setActiveMenu] = useState(false);
+  const [menuCoordinates, setMenuCoordinates] = useState({ top: 0, left: 0 });
+  const menuRef = useRef(null);
+  const menuButtonRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        menuRef.current?.contains(event.target) ||
+        menuButtonRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      setActiveMenu(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (!activeMenu) return undefined;
+    const closeMenu = () => setActiveMenu(false);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    return () => {
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+    };
+  }, [activeMenu]);
+
+  const handleMenuClick = (event) => {
+    event.stopPropagation();
+    const button = event.currentTarget;
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 192;
+    const hasPublishedAction = ad.status !== "Published";
+    const menuActionCount = 4 + (hasPublishedAction ? 1 : 0) + (canDelete ? 1 : 0);
+    const menuHeight = menuActionCount * 46 + (canDelete ? 10 : 0);
+    const gap = 6;
+    const viewportPadding = 8;
+    
+    let top = rect.bottom + gap;
+    if (top + menuHeight > window.innerHeight - viewportPadding) {
+      top = rect.top - menuHeight - gap;
+    }
+    top = Math.max(viewportPadding, Math.min(top, window.innerHeight - menuHeight - viewportPadding));
+    
+    let left = rect.right - menuWidth;
+    left = Math.max(viewportPadding, Math.min(left, window.innerWidth - menuWidth - viewportPadding));
+    
+    setMenuCoordinates({ top, left });
+    setActiveMenu((current) => !current);
+  };
+
+  const primaryMedia = getPrimaryAdsShareMedia(ad);
+  const imageUrl = primaryMedia?.url || null;
+
+  return (
+    <div 
+      className={`relative flex flex-col gap-3 rounded-xl border bg-white p-3 shadow-[0_1px_3px_0_rgba(0,0,0,0.05)] transition-all hover:border-gray-300 hover:shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05),0_2px_4px_-1px_rgba(0,0,0,0.03)] ${isSelected ? "ring-2 ring-gray-900 border-transparent" : "border-gray-200"}`}
+      onClick={() => onPreview(ad)}
+      style={{ cursor: "pointer" }}
+    >
+      {onToggleSelect && (
+        <div 
+          className="absolute left-4 top-4 z-10 rounded-full bg-white/90 p-1 shadow-sm transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleSelect(ad.id);
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => {}}
+            className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer pointer-events-none"
+          />
+        </div>
+      )}
+
+      {/* Image Area */}
+      <div className="relative h-36 w-full overflow-hidden rounded-lg bg-gray-50 flex items-center justify-center border border-gray-100/50">
+        {imageUrl ? (
+          <img src={imageUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="text-gray-400 flex flex-col items-center justify-center gap-2">
+            <LayoutGrid size={24} className="opacity-20" />
+            <span className="text-xs font-medium opacity-50">No media</span>
+          </div>
+        )}
+        <div className="absolute bottom-2 right-2">
+          <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm ${ad.status === 'Published' ? 'bg-emerald-50/95 text-emerald-700 border-emerald-200/50' : ad.status === 'Scheduled' ? 'bg-blue-50/95 text-blue-700 border-blue-200/50' : 'bg-white/95 text-gray-700 border-gray-200/50'}`}>
+            {ad.status || "Draft"}
+          </span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex flex-col gap-1 px-1">
+        <h4 className="truncate text-[13px] font-bold text-gray-900" title={ad.ad_name || ""}>
+          {ad.ad_name || "Untitled Ad"}
+        </h4>
+        <div className="text-[11px] text-blue-600 truncate font-medium">
+          {ad.advertiser || "No Advertiser"}
+        </div>
+        <div className="text-[10px] text-gray-400 mt-0.5 font-medium flex items-center gap-1">
+          {ad.placement || "N/A"}
+        </div>
+      </div>
+
+      {/* Footer info splits */}
+      <div className="grid grid-cols-2 gap-2 mt-auto text-[10px] text-gray-500 px-1 pt-1">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-gray-400">Schedule</span>
+          <span className="font-medium text-gray-600 truncate">{ad.post_type || "-"}</span>
+        </div>
+        <div className="flex flex-col gap-0.5 items-end text-right">
+          <span className="text-gray-400">{formatAdsDate(ad.post_date_from || ad.schedule || ad.post_date)}</span>
+          <span className="font-medium text-gray-600">{formatAdsTime(ad.post_time)}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-3 border-t border-gray-100 mt-2 px-1 pb-1">
+        <span
+          className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold ${
+            ad.payment === 'Paid' ? 'text-emerald-700' : 'text-gray-600'
+          }`}
+        >
+          {ad.payment || "Pending"}
+        </span>
+
+        {/* Actions Menu */}
+        <div className="relative">
+          {readOnly ? (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview(ad);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-gray-50 px-2.5 py-1 text-[10px] font-semibold text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors border border-gray-200"
+              type="button"
+            >
+              <Eye size={12} className="text-gray-500" />
+              View
+            </button>
+          ) : (
+            <>
+              <button
+                ref={menuButtonRef}
+                onClick={handleMenuClick}
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-900 text-white hover:bg-gray-800 transition-colors shadow-sm"
+                type="button"
+              >
+                <MoreVertical size={14} strokeWidth={2.5} />
+              </button>
+              {activeMenu && typeof document !== "undefined" ? createPortal(
+                <div
+                  ref={menuRef}
+                  className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)] z-[200] py-1"
+                  style={{
+                    top: `${menuCoordinates.top}px`,
+                    left: `${menuCoordinates.left}px`,
+                  }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onPreview(ad);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Eye size={16} className="text-gray-400" />
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onEdit(ad);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Pencil size={16} className="text-gray-400" />
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onSendToWhatsApp(ad);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <MessageCircle size={16} className="text-green-500" />
+                    Send to WhatsApp
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveMenu(false);
+                      onSendToTelegram(ad);
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                    type="button"
+                  >
+                    <Send size={16} className="text-blue-500" />
+                    Send to Telegram
+                  </button>
+                  {ad.status !== "Published" ? (
+                    <button
+                      onClick={() => {
+                        setActiveMenu(false);
+                        onMarkPublished(ad.id);
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors border-t border-gray-50 mt-1"
+                      type="button"
+                    >
+                      <CheckCircle size={16} className="text-gray-400" />
+                      Mark as Published
+                    </button>
+                  ) : null}
+                  {canDelete ? (
+                    <>
+                      <div className="border-t border-gray-50 my-1" />
+                      <button
+                        onClick={() => {
+                          setActiveMenu(false);
+                          onDelete(ad.id);
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                        type="button"
+                      >
+                        <Trash2 size={16} className="text-red-500" />
+                        Delete
+                      </button>
+                    </>
+                  ) : null}
+                </div>,
+                document.body
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2256,6 +2520,7 @@ export default function AdsPage() {
     return sections.includes(value) ? value : "Dashboard";
   });
   const [view, setView] = useState("list");
+  const [adsViewMode, setAdsViewMode] = useState("grid");
   const [adsFilters, setAdsFilters] = useState({
     status: "All Ads",
     placement: "All Placement",
@@ -2397,6 +2662,7 @@ export default function AdsPage() {
   const [settingsProfileUploading, setSettingsProfileUploading] = useState(false);
   const [settingsProfileMessage, setSettingsProfileMessage] = useState(null);
   const [settingsTeamModalOpen, setSettingsTeamModalOpen] = useState(false);
+  const [settingsTeamViewMode, setSettingsTeamViewMode] = useState("grid");
   const [settingsTeamName, setSettingsTeamName] = useState("");
   const [settingsTeamEmail, setSettingsTeamEmail] = useState("");
   const [settingsTeamRole, setSettingsTeamRole] = useState("staff");
@@ -8933,6 +9199,23 @@ export default function AdsPage() {
                   </div>
                 </div>
                 <div className="ml-auto flex items-center gap-3 shrink-0">
+                  {/* View Mode Toggle */}
+                  <div className="flex bg-gray-100 p-1 rounded-lg">
+                    <button
+                      onClick={() => setAdsViewMode("grid")}
+                      className={`p-1.5 rounded-md transition-colors ${adsViewMode === "grid" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                      title="Grid View"
+                    >
+                      <LayoutGrid size={16} />
+                    </button>
+                    <button
+                      onClick={() => setAdsViewMode("list")}
+                      className={`p-1.5 rounded-md transition-colors ${adsViewMode === "list" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                      title="List View"
+                    >
+                      <List size={16} />
+                    </button>
+                  </div>
                   <div className="relative w-[clamp(170px,18vw,230px)]">
                     <Search
                       size={16}
@@ -9027,8 +9310,9 @@ export default function AdsPage() {
                     </div>
                   )}
 
-                  <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
-                    <table className="w-full">
+                  {adsViewMode === "list" ? (
+                    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
+                      <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
                           {canDeleteAds && (
@@ -9114,6 +9398,26 @@ export default function AdsPage() {
                       </tbody>
                     </table>
                   </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {paginatedAds.map((item) => (
+                        <AdsGridCard
+                          key={item.id}
+                          ad={item}
+                          onPreview={setAdsPreviewAd}
+                          onEdit={openAdEditor}
+                          onMarkPublished={markAdAsPublished}
+                          onDelete={deleteAdRecord}
+                          onSendToWhatsApp={handleSendAdToMyWhatsApp}
+                          onSendToTelegram={handleSendAdToMyTelegram}
+                          readOnly={isAdvertiser}
+                          canDelete={canDeleteAds}
+                          isSelected={selectedAdIds.has(String(item.id))}
+                          onToggleSelect={canDeleteAds ? handleToggleSelectAd : undefined}
+                        />
+                      ))}
+                    </div>
+                  )}
 
                   <div className="mt-4 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -11701,69 +12005,156 @@ export default function AdsPage() {
                         Manage who has access to your ads manager
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSettingsTeamError("");
-                        setSettingsTeamModalOpen(true);
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
-                    >
-                      <Plus size={16} />
-                      Add Member
-                    </button>
-                  </div>
-                  <div className="divide-y divide-gray-200">
-                    {teamMembers.length === 0 ? (
-                      <div className="p-6 text-center text-gray-500">
-                        <p>No team members yet. Add your first member to get started.</p>
-                      </div>
-                    ) : (
-                      teamMembers.map((member) => (
-                        <div
-                          key={member.id}
-                          className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                    <div className="flex items-center gap-3">
+                      {/* View Mode Toggle */}
+                      <div className="flex bg-gray-100 p-1 rounded-lg">
+                        <button
+                          onClick={() => setSettingsTeamViewMode("grid")}
+                          className={`p-1.5 rounded-md transition-colors ${settingsTeamViewMode === "grid" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                          title="Grid View"
                         >
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
-                              {member.image ? (
-                                <img
-                                  src={member.image}
-                                  alt={member.name}
-                                  className="w-full h-full rounded-full object-cover"
-                                />
-                              ) : (
-                                <User size={20} className="text-gray-500" />
-                              )}
+                          <LayoutGrid size={16} />
+                        </button>
+                        <button
+                          onClick={() => setSettingsTeamViewMode("list")}
+                          className={`p-1.5 rounded-md transition-colors ${settingsTeamViewMode === "list" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                          title="List View"
+                        >
+                          <List size={16} />
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSettingsTeamError("");
+                          setSettingsTeamModalOpen(true);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
+                      >
+                        <Plus size={16} />
+                        Add Member
+                      </button>
+                    </div>
+                  </div>
+                  {settingsTeamViewMode === "list" ? (
+                    <div className="divide-y divide-gray-200">
+                      {teamMembers.length === 0 ? (
+                        <div className="p-6 text-center text-gray-500">
+                          <p>No team members yet. Add your first member to get started.</p>
+                        </div>
+                      ) : (
+                        teamMembers.map((member) => (
+                          <div
+                            key={member.id}
+                            className="p-6 flex items-center justify-between hover:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                {member.image ? (
+                                  <img
+                                    src={member.image}
+                                    alt={member.name}
+                                    className="w-full h-full rounded-full object-cover"
+                                  />
+                                ) : (
+                                  <User size={20} className="text-gray-500" />
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-gray-900">
+                                  {member.name || "No name"}
+                                </p>
+                                <p className="text-sm text-gray-500">{member.email}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-medium text-gray-900">
-                                {member.name || "No name"}
-                              </p>
-                              <p className="text-sm text-gray-500">{member.email}</p>
+                            <div className="flex items-center gap-4">
+                              <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
+                                {member.role === "admin" && (
+                                  <Crown size={14} className="text-yellow-600" />
+                                )}
+                                <span className="text-xs font-medium text-gray-700 capitalize">
+                                  {member.role || "member"}
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleSettingsRemoveMember(member)}
+                                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              >
+                                <X size={16} />
+                              </button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full">
-                              {member.role === "admin" && (
-                                <Crown size={14} className="text-yellow-600" />
-                              )}
-                              <span className="text-xs font-medium text-gray-700 capitalize">
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 bg-gray-50/50">
+                      {teamMembers.length === 0 ? (
+                        <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-gray-200 rounded-xl bg-white border-dashed">
+                          No team members yet. Add your first member to get started.
+                        </div>
+                      ) : (
+                        teamMembers.map((member) => (
+                          <div 
+                            key={member.id}
+                            className="relative flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-gray-300 hover:shadow-md"
+                          >
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-full bg-[#eef2ff] border border-blue-100 flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
+                                  {member.image ? (
+                                    <img
+                                      src={member.image}
+                                      alt={member.name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <span className="text-blue-700 font-bold text-lg uppercase">
+                                      {member.name ? member.name.charAt(0) : <User size={20} className="text-blue-600/60" />}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <h4 className="text-sm font-bold text-gray-900 truncate" title={member.name || "No name"}>
+                                    {member.name || "No name"}
+                                  </h4>
+                                  <p className="text-xs text-gray-500 truncate mt-0.5" title={member.email}>
+                                    {member.email}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleSettingsRemoveMember(member)}
+                                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors shrink-0"
+                                title="Remove Member"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                            
+                            <div className="mt-auto border-t border-gray-100 pt-3">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider border shadow-sm ${
+                                  member.role === "admin"
+                                    ? "bg-amber-50 text-yellow-700 border-amber-200/60"
+                                    : member.role === "manager"
+                                    ? "bg-blue-50 text-blue-700 border-blue-200/60"
+                                    : member.role === "advertiser"
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200/60"
+                                    : "bg-gray-50 text-gray-700 border-gray-200/60"
+                                }`}
+                              >
+                                {member.role === "admin" && <Crown size={12} className="opacity-80 drop-shadow-sm" />}
                                 {member.role || "member"}
                               </span>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleSettingsRemoveMember(member)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                            >
-                              <X size={16} />
-                            </button>
                           </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {settingsTeamModalOpen && (

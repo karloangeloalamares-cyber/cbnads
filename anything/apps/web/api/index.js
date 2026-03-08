@@ -18,8 +18,8 @@ import * as route_15 from "../src/app/api/ads/create/route.js";
 import * as route_16 from "../src/app/api/ads/delete/route.js";
 import * as route_17 from "../src/app/api/ads/export/route.js";
 import * as route_18 from "../src/app/api/ads/list/route.js";
-import * as route_19 from "../src/app/api/ads/update/route.js";
-import * as route_20 from "../src/app/api/ads/mark-published/route.js";
+import * as route_19 from "../src/app/api/ads/mark-published/route.js";
+import * as route_20 from "../src/app/api/ads/update/route.js";
 import * as route_21 from "../src/app/api/advertisers/create/route.js";
 import * as route_22 from "../src/app/api/advertisers/list/route.js";
 import * as route_23 from "../src/app/api/advertisers/[id]/route.js";
@@ -98,7 +98,7 @@ const routes = [
   { regex: new RegExp("^/api/admin/send\\-reminders$"), module: route_6 },
   { regex: new RegExp("^/api/reconciliation/cases$"), module: route_36 },
   { regex: new RegExp("^/api/auth/reset\\-password$"), module: route_25 },
-  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_20 },
+  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_19 },
   { regex: new RegExp("^/api/advertisers/create$"), module: route_21 },
   { regex: new RegExp("^/api/upload/signed\\-url$"), module: route_38 },
   { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_42 },
@@ -118,7 +118,7 @@ const routes = [
   { regex: new RegExp("^/api/ads/create$"), module: route_15 },
   { regex: new RegExp("^/api/ads/delete$"), module: route_16 },
   { regex: new RegExp("^/api/ads/export$"), module: route_17 },
-  { regex: new RegExp("^/api/ads/update$"), module: route_19 },
+  { regex: new RegExp("^/api/ads/update$"), module: route_20 },
   { regex: new RegExp("^/api/auth/token$"), module: route_26 },
   { regex: new RegExp("^/api/user/role$"), module: route_40 },
   { regex: new RegExp("^/api/ads/list$"), module: route_18 },

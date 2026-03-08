@@ -10,6 +10,8 @@ import {
   Edit2,
   Trash2,
   X,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { appToast } from "@/lib/toast";
 import { formatUSPhoneNumber, US_PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
@@ -19,6 +21,7 @@ export default function AdvertisersList({ onCreateNew }) {
   const [advertisers, setAdvertisers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState("grid");
   const [openMenuId, setOpenMenuId] = useState(null);
   const [viewModal, setViewModal] = useState(null);
   const [editModal, setEditModal] = useState(null);
@@ -221,13 +224,32 @@ export default function AdvertisersList({ onCreateNew }) {
             Manage all your advertiser accounts
           </p>
         </div>
-        <button
-          onClick={onCreateNew}
-          className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
-        >
-          <Plus size={18} />
-          Add new Advertiser
-        </button>
+        <div className="flex items-center gap-3">
+          {/* View Mode Toggle */}
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === "grid" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+              title="Grid View"
+            >
+              <LayoutGrid size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-1.5 rounded-md transition-colors ${viewMode === "list" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+              title="List View"
+            >
+              <List size={16} />
+            </button>
+          </div>
+          <button
+            onClick={onCreateNew}
+            className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+          >
+            <Plus size={18} />
+            Add new Advertiser
+          </button>
+        </div>
       </div>
 
       {/* Search Bar */}
@@ -247,158 +269,269 @@ export default function AdvertisersList({ onCreateNew }) {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Advertiser Name
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Contact Name
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Email
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Phone Number
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Total Spend
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Next Ad Date
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Status
-              </th>
-              <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td
-                  colSpan="8"
-                  className="px-6 py-12 text-center text-xs text-gray-500"
-                >
-                  Loading advertisers...
-                </td>
+      {/* Table / Grid */}
+      {viewMode === "list" ? (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Advertiser Name
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Contact Name
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Email
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Phone Number
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Total Spend
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Next Ad Date
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Status
+                </th>
+                <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                  Actions
+                </th>
               </tr>
-            ) : filteredAdvertisers.length === 0 ? (
-              <tr>
-                <td
-                  colSpan="8"
-                  className="px-6 py-12 text-center text-xs text-gray-500"
-                >
-                  {searchQuery
-                    ? "No advertisers found matching your search"
-                    : "No advertisers yet. Click 'Add new Advertiser' to get started."}
-                </td>
-              </tr>
-            ) : (
-              filteredAdvertisers.map((advertiser) => (
-                <tr
-                  key={advertiser.id}
-                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
-                >
-                  <td className="px-6 py-3.5">
-                    <div className="text-xs font-medium text-gray-900">
-                      {advertiser.advertiser_name}
-                    </div>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td
+                    colSpan="8"
+                    className="px-6 py-12 text-center text-xs text-gray-500"
+                  >
+                    Loading advertisers...
                   </td>
-                  <td className="px-6 py-3.5">
-                    <div className="text-xs text-gray-900">
-                      {advertiser.contact_name}
-                    </div>
+                </tr>
+              ) : filteredAdvertisers.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan="8"
+                    className="px-6 py-12 text-center text-xs text-gray-500"
+                  >
+                    {searchQuery
+                      ? "No advertisers found matching your search"
+                      : "No advertisers yet. Click 'Add new Advertiser' to get started."}
                   </td>
-                  <td className="px-6 py-3.5">
-                    <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                      <span>
-                        {revealedPii[advertiser.id] ? advertiser.email : maskEmail(advertiser.email)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => toggleReveal(advertiser.id)}
-                        className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
-                        title={revealedPii[advertiser.id] ? "Hide" : "Reveal"}
+                </tr>
+              ) : (
+                filteredAdvertisers.map((advertiser) => (
+                  <tr
+                    key={advertiser.id}
+                    className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="px-6 py-3.5">
+                      <div className="text-xs font-medium text-gray-900">
+                        {advertiser.advertiser_name}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="text-xs text-gray-900">
+                        {advertiser.contact_name}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                        <span>
+                          {revealedPii[advertiser.id] ? advertiser.email : maskEmail(advertiser.email)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleReveal(advertiser.id)}
+                          className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors"
+                          title={revealedPii[advertiser.id] ? "Hide" : "Reveal"}
+                        >
+                          {revealedPii[advertiser.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="text-xs text-gray-600">
+                        {revealedPii[advertiser.id] ? (advertiser.phone_number || "—") : maskPhone(advertiser.phone_number)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="text-xs font-medium text-gray-900">
+                        {formatCurrency(advertiser.total_spend)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <div className="text-xs text-gray-600">
+                        {formatDate(advertiser.next_ad_date)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3.5">
+                      <span
+                        className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${advertiser.status === "active"
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-100 text-gray-600"
+                          }`}
                       >
-                        {revealedPii[advertiser.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                        {advertiser.status === "active" ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3.5 relative">
+                      <button
+                        onClick={(e) => handleMenuClick(advertiser.id, e)}
+                        className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      >
+                        <MoreVertical size={18} className="text-gray-600" />
                       </button>
+  
+                      {/* Dropdown Menu */}
+                      {openMenuId === advertiser.id && (
+                        <div
+                          ref={menuRef}
+                          className={`absolute ${menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"} ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
+                        >
+                          <button
+                            onClick={() => handleView(advertiser.id)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <Eye size={16} />
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleEdit(advertiser)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <Edit2 size={16} />
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(advertiser)}
+                            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 size={16} />
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {loading ? (
+            <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-gray-200 rounded-xl bg-white border-dashed">
+              Loading advertisers...
+            </div>
+          ) : filteredAdvertisers.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-gray-200 rounded-xl bg-white border-dashed">
+              {searchQuery
+                ? "No advertisers found matching your search"
+                : "No advertisers yet. Click 'Add new Advertiser' to get started."}
+            </div>
+          ) : (
+            filteredAdvertisers.map((advertiser) => (
+              <div 
+                key={advertiser.id}
+                className="relative flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-gray-300 hover:shadow-md"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-700 font-bold text-lg uppercase shadow-sm border border-blue-100">
+                      {advertiser.advertiser_name.charAt(0)}
                     </div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <div className="text-xs text-gray-600">
-                      {revealedPii[advertiser.id] ? (advertiser.phone_number || "—") : maskPhone(advertiser.phone_number)}
+                    <div>
+                      <h4 className="text-sm font-bold text-gray-900 truncate max-w-[140px]" title={advertiser.advertiser_name}>
+                        {advertiser.advertiser_name}
+                      </h4>
+                      <div className="text-xs text-gray-500 font-medium truncate max-w-[140px]">
+                        {advertiser.contact_name || "No contact name"}
+                      </div>
                     </div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <div className="text-xs font-medium text-gray-900">
-                      {formatCurrency(advertiser.total_spend)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <div className="text-xs text-gray-600">
-                      {formatDate(advertiser.next_ad_date)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <span
-                      className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${advertiser.status === "active"
-                        ? "bg-green-100 text-green-800"
-                        : "bg-gray-100 text-gray-600"
-                        }`}
-                    >
-                      {advertiser.status === "active" ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3.5 relative">
+                  </div>
+                  
+                  <div className="relative">
                     <button
                       onClick={(e) => handleMenuClick(advertiser.id, e)}
-                      className="p-1 hover:bg-gray-100 rounded transition-colors"
+                      className="p-1 hover:bg-gray-100 rounded-md transition-colors"
                     >
-                      <MoreVertical size={18} className="text-gray-600" />
+                      <MoreVertical size={16} className="text-gray-400 hover:text-gray-700" />
                     </button>
-
                     {/* Dropdown Menu */}
                     {openMenuId === advertiser.id && (
                       <div
                         ref={menuRef}
-                        className={`absolute ${menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"} ${menuPosition.horizontal === "left" ? "right-0" : "left-auto"} w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-[100]`}
+                        className={`absolute ${menuPosition.vertical === "top" ? "bottom-full mb-1" : "top-full mt-1"} right-0 w-36 bg-white border border-gray-200 rounded-lg shadow-[0_4px_20px_-4px_rgba(0,0,0,0.1)] z-[100] py-1`}
                       >
                         <button
                           onClick={() => handleView(advertiser.id)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="w-full text-left px-3 py-2 text-xs font-medium text-gray-700 flex items-center gap-2 hover:bg-gray-50 transition-colors"
                         >
-                          <Eye size={16} />
+                          <Eye size={14} className="text-gray-400" />
                           View
                         </button>
                         <button
                           onClick={() => handleEdit(advertiser)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          className="w-full text-left px-3 py-2 text-xs font-medium text-gray-700 flex items-center gap-2 hover:bg-gray-50 transition-colors"
                         >
-                          <Edit2 size={16} />
+                          <Edit2 size={14} className="text-gray-400" />
                           Edit
                         </button>
                         <button
                           onClick={() => handleDelete(advertiser)}
-                          className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                          className="w-full text-left px-3 py-2 text-xs font-medium text-red-600 flex items-center gap-2 hover:bg-red-50 transition-colors"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={14} className="text-red-500" />
                           Delete
                         </button>
                       </div>
                     )}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 pt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-2 text-xs text-gray-600">
+                    <span className="w-4 flex justify-center text-gray-400">@</span>
+                    <span className="truncate flex-1">
+                      {revealedPii[advertiser.id] ? advertiser.email : maskEmail(advertiser.email)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleReveal(advertiser.id)}
+                      className="p-0.5 text-gray-400 hover:text-gray-700 transition-colors shrink-0"
+                    >
+                      {revealedPii[advertiser.id] ? <EyeOff size={12} /> : <Eye size={12} />}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-600 bg-gray-50 rounded-md p-2 border border-gray-100">
+                    <span className="text-gray-400 font-medium">Total Spend</span>
+                    <span className="font-bold text-gray-900">{formatCurrency(advertiser.total_spend)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between mt-auto pt-2">
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm border ${advertiser.status === "active"
+                      ? "bg-green-50 text-green-700 border-green-200"
+                      : "bg-gray-50 text-gray-600 border-gray-200"
+                      }`}
+                  >
+                    {advertiser.status === "active" ? "Active" : "Inactive"}
+                  </span>
+                  <div className="text-[10px] font-medium text-gray-400">
+                    Next ad: <span className="text-gray-600">{formatDate(advertiser.next_ad_date)}</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* View Modal */}
       {viewModal && (

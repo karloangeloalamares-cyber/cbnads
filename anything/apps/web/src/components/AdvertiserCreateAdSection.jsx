@@ -24,8 +24,6 @@ const blankSubmissionForm = {
   phone_number: "",
   ad_name: "",
   post_type: "One-Time Post",
-  product_id: "",
-  product_name: "",
   post_date_from: "",
   post_date_to: "",
   custom_dates: [],
@@ -34,62 +32,7 @@ const blankSubmissionForm = {
   ad_text: "",
   media: [],
   placement: "",
-  price: "",
   notes: "",
-};
-
-const selectFieldStyle = {
-  backgroundImage:
-    "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%23666' d='M5 7L1 3h8z'/%3E%3C/svg%3E\")",
-  backgroundRepeat: "no-repeat",
-  backgroundPosition: "right 14px center",
-  paddingRight: "40px",
-};
-
-const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
-
-const normalizePlacementValue = (value) => String(value || "").trim().toLowerCase();
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(Number(value) || 0);
-
-const getScheduleOccurrenceCount = (formData) => {
-  const postType = String(formData?.post_type || "").trim();
-
-  if (postType === "Daily Run") {
-    const start = normalizeDateOnly(formData?.post_date_from);
-    const end = normalizeDateOnly(formData?.post_date_to);
-    if (!start || !end) {
-      return 0;
-    }
-
-    const startDate = new Date(`${start}T00:00:00`);
-    const endDate = new Date(`${end}T00:00:00`);
-    if (
-      Number.isNaN(startDate.valueOf()) ||
-      Number.isNaN(endDate.valueOf()) ||
-      endDate < startDate
-    ) {
-      return 0;
-    }
-
-    return Math.floor((endDate.valueOf() - startDate.valueOf()) / 86400000) + 1;
-  }
-
-  if (postType === "Custom Schedule") {
-    return [
-      ...new Set(
-        normalizeCustomDateEntries(formData?.custom_dates).map((entry) =>
-          normalizeDateOnly(entry?.date || entry),
-        ),
-      ),
-    ].filter(Boolean).length;
-  }
-
-  return 1;
 };
 
 const isFormBlank = (formData) =>
@@ -120,7 +63,6 @@ const buildInitialFormData = ({ advertiser, user }) => ({
 export default function AdvertiserCreateAdSection({
   advertiser = null,
   user = null,
-  products: initialProducts = [],
   fetchWithSessionAuth,
   onBack,
   onSubmitted,
@@ -135,13 +77,6 @@ export default function AdvertiserCreateAdSection({
   const [customTime, setCustomTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [products, setProducts] = useState(
-    Array.isArray(initialProducts) ? initialProducts.filter(Boolean) : [],
-  );
-  const [productsLoading, setProductsLoading] = useState(
-    !Array.isArray(initialProducts) || initialProducts.length === 0,
-  );
-  const [productsError, setProductsError] = useState(null);
   const [availabilityError, setAvailabilityError] = useState(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
@@ -152,41 +87,6 @@ export default function AdvertiserCreateAdSection({
   const identityReady =
     String(initialForm.advertiser_name || "").trim() &&
     String(initialForm.email || "").trim();
-  const selectedProduct = useMemo(
-    () =>
-      products.find((item) => String(item?.id || "") === String(formData.product_id || "")) ||
-      null,
-    [formData.product_id, products],
-  );
-  const scheduleOccurrenceCount = useMemo(
-    () => getScheduleOccurrenceCount(formData),
-    [formData],
-  );
-  const placementOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          products
-            .map((item) => String(item?.placement || "").trim())
-            .filter(Boolean),
-        ),
-      ),
-    [products],
-  );
-  const visibleProducts = useMemo(() => {
-    const normalizedPlacement = normalizePlacementValue(formData.placement);
-    if (!normalizedPlacement) {
-      return products;
-    }
-
-    return products.filter(
-      (item) => normalizePlacementValue(item?.placement) === normalizedPlacement,
-    );
-  }, [formData.placement, products]);
-  const estimatedTotal = useMemo(
-    () => (Number(selectedProduct?.price) || 0) * Math.max(scheduleOccurrenceCount, 0),
-    [scheduleOccurrenceCount, selectedProduct],
-  );
   const previewData = useMemo(
     () => ({
       ...formData,
@@ -198,59 +98,6 @@ export default function AdvertiserCreateAdSection({
   useEffect(() => {
     formDataRef.current = formData;
   }, [formData]);
-
-  useEffect(() => {
-    if (Array.isArray(initialProducts) && initialProducts.length > 0) {
-      setProducts(initialProducts.filter(Boolean));
-      setProductsLoading(false);
-      setProductsError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadProducts = async () => {
-      setProductsLoading(true);
-      setProductsError(null);
-
-      try {
-        const response = await submitWithAuth("/api/products/list");
-        const data = await response.json().catch(() => []);
-
-        if (!response.ok) {
-          throw new Error(data?.error || "Failed to load product options.");
-        }
-
-        if (cancelled) {
-          return;
-        }
-
-        setProducts(Array.isArray(data) ? data : []);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        console.error("Failed to load product options:", error);
-        setProducts([]);
-        setProductsError(
-          error instanceof Error
-            ? error.message
-            : "Could not load product options. Please try again.",
-        );
-      } finally {
-        if (!cancelled) {
-          setProductsLoading(false);
-        }
-      }
-    };
-
-    void loadProducts();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialProducts, submitWithAuth]);
 
   useEffect(() => {
     setFormData((current) => {
@@ -317,45 +164,6 @@ export default function AdvertiserCreateAdSection({
       setAvailabilityError(null);
       setFullyBookedDates([]);
     }
-  };
-
-  const handleProductSelect = (product) => {
-    setFormData((current) => {
-      const next = {
-        ...current,
-        product_id: product?.id || "",
-        product_name: product?.product_name || "",
-        placement: product?.placement || current.placement || "",
-        price: product?.price ?? "",
-      };
-      formDataRef.current = next;
-      return next;
-    });
-  };
-
-  const handlePlacementChange = (value) => {
-    setFormData((current) => {
-      const nextPlacement = String(value || "").trim();
-      const currentProduct =
-        products.find((item) => String(item?.id || "") === String(current.product_id || "")) ||
-        null;
-      const matchesCurrentProduct =
-        currentProduct &&
-        normalizePlacementValue(currentProduct?.placement) === normalizePlacementValue(nextPlacement);
-      const next = {
-        ...current,
-        placement: nextPlacement,
-      };
-
-      if (!matchesCurrentProduct) {
-        next.product_id = "";
-        next.product_name = "";
-        next.price = "";
-      }
-
-      formDataRef.current = next;
-      return next;
-    });
   };
 
   const addMedia = (mediaItem) => {
@@ -442,27 +250,6 @@ export default function AdvertiserCreateAdSection({
     ) {
       appToast.error({
         title: "Complete all required fields before submitting.",
-      });
-      return false;
-    }
-
-    if (productsLoading) {
-      appToast.error({
-        title: "Product options are still loading.",
-      });
-      return false;
-    }
-
-    if (products.length === 0) {
-      appToast.error({
-        title: "No billable product options are available.",
-      });
-      return false;
-    }
-
-    if (!current.product_id) {
-      appToast.error({
-        title: "Select a product option before submitting.",
       });
       return false;
     }
@@ -604,13 +391,7 @@ export default function AdvertiserCreateAdSection({
     onBack?.();
   };
 
-  const submitDisabled =
-    loading ||
-    checkingAvailability ||
-    productsLoading ||
-    products.length === 0 ||
-    !identityReady;
-  const scheduledPostLabel = scheduleOccurrenceCount === 1 ? "post" : "posts";
+  const submitDisabled = loading || checkingAvailability || !identityReady;
 
   return (
     <>
@@ -656,75 +437,6 @@ export default function AdvertiserCreateAdSection({
                   helperText="Your advertiser name and login email stay linked to this account. You can update the contact person and phone number for this request."
                 />
 
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Details</h3>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        Placement
-                      </label>
-                      <select
-                        value={formData.placement}
-                        onChange={(event) => handlePlacementChange(event.target.value)}
-                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                        style={selectFieldStyle}
-                      >
-                        <option value="">Select placement</option>
-                        {placementOptions.map((placement) => (
-                          <option key={placement} value={placement}>
-                            {placement}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        Ad Product <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={formData.product_id}
-                        onChange={(event) => {
-                          const nextProduct =
-                            products.find(
-                              (item) => String(item?.id || "") === String(event.target.value || ""),
-                            ) || null;
-                          handleProductSelect(nextProduct);
-                        }}
-                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                        style={selectFieldStyle}
-                      >
-                        <option value="">Select a product package</option>
-                        {visibleProducts.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.product_name} - {item.placement || "N/A"} - {formatCurrency(item.price)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {productsLoading ? (
-                    <p className="text-xs text-gray-500">Loading product options...</p>
-                  ) : null}
-
-                  {!productsLoading && productsError ? (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                      {productsError}
-                    </div>
-                  ) : null}
-
-                  {!productsLoading &&
-                  !productsError &&
-                  formData.placement &&
-                  visibleProducts.length === 0 ? (
-                    <p className="text-xs text-amber-700">
-                      No product packages are available for the selected placement.
-                    </p>
-                  ) : null}
-                </div>
-
                 <AdDetailsSection
                   formData={formData}
                   onChange={handleChange}
@@ -751,25 +463,6 @@ export default function AdvertiserCreateAdSection({
                   pastTimeError={pastTimeError}
                   fullyBookedDates={fullyBookedDates}
                 />
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
-                  <div className="border border-gray-200 rounded-lg bg-gray-50 px-4 pt-4 pb-3 mb-3">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Estimated Total
-                    </label>
-                    <div className="w-full text-sm font-medium text-gray-900">
-                      {selectedProduct ? formatCurrency(estimatedTotal) : "$0.00"}
-                    </div>
-                    <p className="mt-2 text-xs text-gray-500">
-                      {selectedProduct
-                        ? `${selectedProduct.product_name} at ${formatCurrency(
-                            selectedProduct.price,
-                          )} per scheduled ${scheduledPostLabel}`
-                        : "Choose a product package to calculate your total automatically."}
-                    </p>
-                  </div>
-                </div>
 
                 <NotesSection notes={formData.notes} onChange={handleChange} />
 
