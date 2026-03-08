@@ -273,23 +273,6 @@ function buildReminderBodyText(payload) {
   return "Upcoming ad reminder";
 }
 
-async function sendZapier(payload) {
-  if (!process.env.ZAPIER_WEBHOOK_URL) {
-    return;
-  }
-
-  const response = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`Zapier webhook returned status ${response.status}: ${text}`);
-  }
-}
-
 function generateReminderHtml(payload) {
   const bodyText = buildReminderBodyText(payload);
   const mediaBlocks = [];
@@ -507,7 +490,6 @@ export async function POST(request) {
               ...media.fields,
             };
 
-            await sendZapier(payload).catch(console.error);
             await sendEmail({
               to: internalEmails,
               subject: payload.subject,
@@ -609,7 +591,6 @@ export async function POST(request) {
           ...media.fields,
         };
 
-        await sendZapier(payload).catch(console.error);
         await sendEmail({
           to: advertiserInfo.email,
           subject: payload.subject,

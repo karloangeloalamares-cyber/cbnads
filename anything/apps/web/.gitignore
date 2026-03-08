@@ -13,3 +13,4 @@ build/
 
 .vercel
 dev-api-test.log
+.env*.local

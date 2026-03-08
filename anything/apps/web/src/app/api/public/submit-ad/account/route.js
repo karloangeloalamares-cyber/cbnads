@@ -236,12 +236,21 @@ export async function POST(request) {
       pendingAdId,
     });
 
-    await sendAdvertiserVerificationEmail({
-      request,
-      email: normalizedEmail,
-      contactName: fullName,
-      verificationToken,
-    });
+    let verificationEmailSent = true;
+    try {
+      await sendAdvertiserVerificationEmail({
+        request,
+        email: normalizedEmail,
+        contactName: fullName,
+        verificationToken,
+      });
+    } catch (emailError) {
+      verificationEmailSent = false;
+      console.error(
+        "[submit-ad/account] Account created but verification email failed:",
+        emailError,
+      );
+    }
 
     return Response.json({
       success: true,
@@ -249,6 +258,7 @@ export async function POST(request) {
       advertiserId: advertiser.id,
       pendingAdId,
       verificationRequired: true,
+      verificationEmailSent,
     });
   } catch (error) {
     console.error("[submit-ad/account] Failed to create advertiser account:", error);

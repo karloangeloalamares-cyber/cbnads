@@ -22,7 +22,7 @@ Create `.env` from `.env.example` and set:
 Optional but required for reminder/email features:
 
 - `RESEND_API_KEY` (public submit confirmation + admin notifications)
-- `ZAPIER_WEBHOOK_URL` (admin/advertiser reminder automation)
+- `RESEND_FROM_EMAIL` and `RESEND_FROM_NAME` (sender identity for reminder emails)
 - `CRON_SECRET` (protect cron-triggered reminder endpoint)
 
 ## 2) Create namespaced tables

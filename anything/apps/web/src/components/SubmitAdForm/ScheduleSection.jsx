@@ -717,7 +717,11 @@ export function ScheduleSection({
 
           {formData.custom_dates.map((entry, index) => {
             const dateStr = typeof entry === "object" && entry !== null ? entry.date : entry;
-            const timeStr = typeof entry === "object" && entry !== null ? entry.time : "";
+            const fallbackTime = String(formData.post_time || "").trim();
+            const timeStr =
+              typeof entry === "object" && entry !== null
+                ? entry.time || entry.post_time || fallbackTime
+                : fallbackTime;
             const reminderStr = typeof entry === "object" && entry !== null ? (entry.reminder || "15-min") : "15-min";
             const isDateFull = Boolean(dateStr && blockedDates[dateStr]);
 

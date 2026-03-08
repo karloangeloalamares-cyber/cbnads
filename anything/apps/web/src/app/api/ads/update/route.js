@@ -2,11 +2,130 @@ import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.
 import { requireInternalUser } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
 import { APP_TIME_ZONE } from "../../../../lib/timezone.js";
+import { adAmount, buildInvoiceLineItemsForAd } from "../../utils/invoice-helpers.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
   expandDateRange,
 } from "../../utils/ad-availability.js";
+
+const readNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
+  const normalizedCurrentStatus = String(currentStatus || "").trim().toLowerCase();
+  if (normalizedCurrentStatus === "overdue" && amountPaid < invoiceTotal) return "Overdue";
+  if (amountPaid >= invoiceTotal && invoiceTotal > 0) return "Paid";
+  if (amountPaid > 0) return "Partial";
+  return "Pending";
+};
+
+const resolveLinkedInvoiceId = async (supabase, adId, fallbackInvoiceId = null) => {
+  let linkedInvoiceId = String(fallbackInvoiceId || "").trim() || null;
+
+  const { data: linkedItem, error: linkedItemError } = await supabase
+    .from(table("invoice_items"))
+    .select("invoice_id")
+    .eq("ad_id", adId)
+    .limit(1)
+    .maybeSingle();
+  if (linkedItemError) throw linkedItemError;
+  if (linkedItem?.invoice_id) {
+    linkedInvoiceId = linkedItem.invoice_id;
+  }
+
+  return linkedInvoiceId;
+};
+
+const syncInvoiceLineItemsForAd = async ({ supabase, ad, invoiceId }) => {
+  const normalizedInvoiceId = String(invoiceId || "").trim();
+  if (!normalizedInvoiceId || !ad?.id) {
+    return;
+  }
+
+  const { data: invoice, error: invoiceError } = await supabase
+    .from(table("invoices"))
+    .select("id, status, amount_paid, discount, tax, ad_ids, deleted_at")
+    .eq("id", normalizedInvoiceId)
+    .maybeSingle();
+  if (invoiceError) throw invoiceError;
+  if (!invoice || invoice.deleted_at) {
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  const unitAmount = Math.max(0, adAmount(ad));
+  const lineItems = buildInvoiceLineItemsForAd({
+    ad,
+    unitAmount,
+    invoiceId: normalizedInvoiceId,
+    productId: ad.product_id || null,
+    productName: ad.product_name || null,
+    createdAt: nowIso,
+  });
+
+  const { error: deleteItemsError } = await supabase
+    .from(table("invoice_items"))
+    .delete()
+    .eq("invoice_id", normalizedInvoiceId)
+    .eq("ad_id", ad.id);
+  if (deleteItemsError) throw deleteItemsError;
+
+  if (lineItems.length > 0) {
+    const { error: insertItemsError } = await supabase
+      .from(table("invoice_items"))
+      .insert(
+        lineItems.map((item) => ({
+          ...item,
+          invoice_id: normalizedInvoiceId,
+        })),
+      );
+    if (insertItemsError) throw insertItemsError;
+  }
+
+  const { data: invoiceItems, error: invoiceItemsError } = await supabase
+    .from(table("invoice_items"))
+    .select("amount, unit_price, quantity")
+    .eq("invoice_id", normalizedInvoiceId);
+  if (invoiceItemsError) throw invoiceItemsError;
+
+  const subtotal = (invoiceItems || []).reduce((sum, item) => {
+    const explicitAmount = readNumber(item?.amount, Number.NaN);
+    if (Number.isFinite(explicitAmount)) {
+      return sum + explicitAmount;
+    }
+    const quantity = Math.max(1, readNumber(item?.quantity, 1));
+    const unitPrice = readNumber(item?.unit_price, 0);
+    return sum + quantity * unitPrice;
+  }, 0);
+  const invoiceTotal = Math.max(
+    0,
+    subtotal - readNumber(invoice.discount, 0) + readNumber(invoice.tax, 0),
+  );
+  const amountPaid = Math.min(
+    Math.max(readNumber(invoice.amount_paid, 0), 0),
+    invoiceTotal,
+  );
+  const nextStatus = computeInvoiceStatus(invoiceTotal, amountPaid, invoice.status);
+  const mergedAdIds = Array.from(
+    new Set([...(Array.isArray(invoice.ad_ids) ? invoice.ad_ids : []), ad.id].filter(Boolean)),
+  );
+
+  const { error: updateInvoiceError } = await supabase
+    .from(table("invoices"))
+    .update({
+      ad_ids: mergedAdIds,
+      total: invoiceTotal,
+      amount: invoiceTotal,
+      amount_paid: amountPaid,
+      status: nextStatus,
+      updated_at: nowIso,
+    })
+    .eq("id", normalizedInvoiceId);
+  if (updateInvoiceError) throw updateInvoiceError;
+};
 
 const recalcInvoiceStatus = async (supabase, invoiceId) => {
   if (!invoiceId) return;
@@ -96,6 +215,7 @@ export async function PUT(request) {
       schedule,
       payment,
       product_id,
+      price,
       post_date_from,
       post_date_to,
       custom_dates,
@@ -111,7 +231,9 @@ export async function PUT(request) {
 
     const { data: oldAd, error: oldAdError } = await supabase
       .from(table("ads"))
-      .select("advertiser, advertiser_id, status, payment, paid_via_invoice_id, product_id, post_type, schedule, post_date, post_date_from, post_date_to, custom_dates, post_time")
+      .select(
+        "ad_name, advertiser, advertiser_id, status, payment, paid_via_invoice_id, invoice_id, product_id, product_name, price, post_type, schedule, post_date, post_date_from, post_date_to, custom_dates, post_time",
+      )
       .eq("id", id)
       .maybeSingle();
     if (oldAdError) throw oldAdError;
@@ -222,6 +344,77 @@ export async function PUT(request) {
       if (reminderDeleteError) throw reminderDeleteError;
     }
 
+    let linkedInvoiceId = await resolveLinkedInvoiceId(
+      supabase,
+      id,
+      oldAd.paid_via_invoice_id || oldAd.invoice_id || null,
+    );
+    const normalizedOldProductId = String(oldAd.product_id || "").trim();
+    const normalizedNextProductId =
+      product_id !== undefined ? String(product_id || "").trim() : undefined;
+    const productChanged =
+      normalizedNextProductId !== undefined &&
+      normalizedNextProductId !== normalizedOldProductId;
+    const oldPrice = readNumber(oldAd.price, 0);
+    const nextPrice =
+      price !== undefined ? readNumber(Number(price), Number.NaN) : Number.NaN;
+    const priceChanged =
+      price !== undefined && Number.isFinite(nextPrice) && Math.abs(nextPrice - oldPrice) > 0.000001;
+    const postTypeChanged =
+      post_type !== undefined &&
+      normalizePostType(post_type) !== normalizePostType(oldAd.post_type);
+    const scheduleChanged =
+      schedule !== undefined &&
+      dateOnly(schedule || null) !== dateOnly(oldAd.schedule || null);
+    const postDateFromChanged =
+      post_date_from !== undefined &&
+      dateOnly(post_date_from || null) !== dateOnly(oldAd.post_date_from || null);
+    const postDateToChanged =
+      post_date_to !== undefined &&
+      dateOnly(post_date_to || null) !== dateOnly(oldAd.post_date_to || null);
+    const customDatesChanged =
+      custom_dates !== undefined &&
+      JSON.stringify(Array.isArray(custom_dates) ? custom_dates : []) !==
+        JSON.stringify(Array.isArray(oldAd.custom_dates) ? oldAd.custom_dates : []);
+    const adNameChanged =
+      ad_name !== undefined && String(ad_name || "").trim() !== String(oldAd.ad_name || "").trim();
+    const invoicePricingFieldsUpdated =
+      productChanged ||
+      priceChanged ||
+      postTypeChanged ||
+      scheduleChanged ||
+      postDateFromChanged ||
+      postDateToChanged ||
+      customDatesChanged;
+    const invoiceLineFieldsUpdated = invoicePricingFieldsUpdated || adNameChanged;
+
+    if (invoicePricingFieldsUpdated && linkedInvoiceId) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from(table("invoices"))
+        .select("id, status, amount_paid, deleted_at")
+        .eq("id", linkedInvoiceId)
+        .maybeSingle();
+      if (invoiceError) throw invoiceError;
+
+      if (invoice && !invoice.deleted_at) {
+        const normalizedInvoiceStatus = String(invoice.status || "").trim().toLowerCase();
+        const amountPaid = readNumber(invoice.amount_paid, 0);
+        if (
+          amountPaid > 0 ||
+          normalizedInvoiceStatus === "paid" ||
+          normalizedInvoiceStatus === "partial"
+        ) {
+          return Response.json(
+            {
+              error:
+                "This ad is linked to an invoice with recorded payment. Void or reissue the invoice before changing price or schedule.",
+            },
+            { status: 400 },
+          );
+        }
+      }
+    }
+
     const patch = {
       updated_at: new Date().toISOString(),
     };
@@ -240,23 +433,12 @@ export async function PUT(request) {
     if (schedule !== undefined) patch.schedule = schedule || null;
     if (payment !== undefined) patch.payment = payment;
     if (product_id !== undefined) {
-      const productChanged = String(product_id || "") !== String(oldAd.product_id || "");
-      if (productChanged && oldAd.paid_via_invoice_id) {
-        return Response.json(
-          {
-            error:
-              "This ad is already linked to an invoice. Remove or reissue the invoice before changing the product.",
-          },
-          { status: 400 },
-        );
-      }
-
-      patch.product_id = product_id || null;
-      if (product_id) {
+      patch.product_id = normalizedNextProductId || null;
+      if (productChanged && normalizedNextProductId) {
         const { data: productRow, error: productError } = await supabase
           .from(table("products"))
           .select("id, product_name, price")
-          .eq("id", product_id)
+          .eq("id", normalizedNextProductId)
           .maybeSingle();
         if (productError) throw productError;
         if (!productRow) {
@@ -264,10 +446,17 @@ export async function PUT(request) {
         }
         patch.product_name = productRow.product_name || null;
         patch.price = productRow.price || 0;
-      } else {
+      } else if (!normalizedNextProductId) {
         patch.product_name = null;
         patch.price = 0;
       }
+    }
+    if (price !== undefined) {
+      const parsedPrice = Number(price);
+      if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+        return Response.json({ error: "Price must be a non-negative number" }, { status: 400 });
+      }
+      patch.price = parsedPrice;
     }
     if (post_date_from !== undefined) patch.post_date_from = post_date_from || null;
     if (post_date_to !== undefined) patch.post_date_to = post_date_to || null;
@@ -292,16 +481,18 @@ export async function PUT(request) {
       .single();
     if (updateError) throw updateError;
 
-    let linkedInvoiceId = oldAd.paid_via_invoice_id;
-    const { data: linkedItem, error: linkedItemError } = await supabase
-      .from(table("invoice_items"))
-      .select("invoice_id")
-      .eq("ad_id", id)
-      .limit(1)
-      .maybeSingle();
-    if (linkedItemError) throw linkedItemError;
-    if (linkedItem?.invoice_id) {
-      linkedInvoiceId = linkedItem.invoice_id;
+    linkedInvoiceId = await resolveLinkedInvoiceId(
+      supabase,
+      id,
+      linkedInvoiceId || updatedAd.paid_via_invoice_id || updatedAd.invoice_id || null,
+    );
+
+    if (invoiceLineFieldsUpdated && linkedInvoiceId) {
+      await syncInvoiceLineItemsForAd({
+        supabase,
+        ad: updatedAd,
+        invoiceId: linkedInvoiceId,
+      });
     }
 
     if (payment !== undefined) {

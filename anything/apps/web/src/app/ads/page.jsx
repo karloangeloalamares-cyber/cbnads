@@ -15,8 +15,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  ChevronsUpDown,
   Settings,
   ArrowLeft,
   ArrowRight,
@@ -59,8 +57,13 @@ import {
   Loader2,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
+import AdsSortableHeader from "@/components/AdsSortableHeader";
 import { Modal } from "@/components/Modal";
 import AdvertiserCreateAdSection from "@/components/AdvertiserCreateAdSection";
+import CalendarFilters from "@/components/CalendarFilters";
+import CalendarUpcomingSidebar from "@/components/CalendarUpcomingSidebar";
+import CreateAdAdvertiserField from "@/components/CreateAdAdvertiserField";
+import InvoiceSortableHeader from "@/components/InvoiceSortableHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
@@ -709,29 +712,6 @@ const parseAdMedia = (value) => {
   }
   return [];
 };
-
-function AdsSortableHeader({ label, sortKey, sortConfig, onSort }) {
-  const isActive = sortConfig.key === sortKey;
-  return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className="text-left px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100 transition-colors"
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        {isActive ? (
-          sortConfig.direction === "asc" ? (
-            <ChevronUp size={12} className="text-gray-700" />
-          ) : (
-            <ChevronDown size={12} className="text-gray-700" />
-          )
-        ) : (
-          <ChevronsUpDown size={12} className="text-gray-400" />
-        )}
-      </div>
-    </th>
-  );
-}
 
 function AdsScheduleCell({ ad }) {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -1672,6 +1652,56 @@ const toScheduleDateKey = (value) => {
   return "";
 };
 
+const normalizeCustomDateTimeValue = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) {
+    return text;
+  }
+  if (/^\d{2}:\d{2}$/.test(text)) {
+    return `${text}:00`;
+  }
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "";
+  }
+  return parsed.toISOString().slice(11, 19);
+};
+
+const normalizeCustomDateReminderValue = (value, fallback = "15-min") => {
+  const text = String(value || "").trim();
+  return text || fallback;
+};
+
+const normalizeCustomDateEntryForForm = (entry, { fallbackTime = "", fallbackReminder = "15-min" } = {}) => {
+  const date = toScheduleDateKey(entry);
+  if (!date) {
+    return null;
+  }
+
+  if (entry && typeof entry === "object") {
+    return {
+      ...entry,
+      date,
+      time: normalizeCustomDateTimeValue(entry.time || entry.post_time || fallbackTime),
+      reminder: normalizeCustomDateReminderValue(entry.reminder, fallbackReminder),
+    };
+  }
+
+  return {
+    date,
+    time: normalizeCustomDateTimeValue(fallbackTime),
+    reminder: normalizeCustomDateReminderValue("", fallbackReminder),
+  };
+};
+
+const normalizeCustomDatesForForm = (value, options = {}) =>
+  (Array.isArray(value) ? value : [])
+    .map((entry) => normalizeCustomDateEntryForForm(entry, options))
+    .filter(Boolean);
+
 const expandScheduleDateKeys = (from, to) => {
   const startKey = toScheduleDateKey(from);
   const endKey = toScheduleDateKey(to || from);
@@ -2113,147 +2143,6 @@ function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
   );
 }
 
-function CalendarUpcomingSidebar({ ads, onAdClick, isMinimized, setIsMinimized }) {
-  if (isMinimized) {
-    return (
-      <div className="bg-white border-l border-gray-200 flex items-start justify-center pt-4">
-        <button
-          onClick={() => setIsMinimized(false)}
-          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Show upcoming ads"
-          type="button"
-        >
-          <ChevronLeft size={20} className="text-gray-600" />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-80 bg-white border-l border-gray-200 p-4 overflow-y-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Upcoming (Next 7 Days)</h3>
-        <button
-          onClick={() => setIsMinimized(true)}
-          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Minimize sidebar"
-          type="button"
-        >
-          <ChevronRight size={18} className="text-gray-600" />
-        </button>
-      </div>
-
-      {ads.length === 0 ? (
-        <p className="text-sm text-gray-500">No upcoming ads</p>
-      ) : (
-        <div className="space-y-3">
-          {ads.map((item, index) => (
-            <div
-              key={`${item.ad.id || item.ad.ad_name}-${index}`}
-              onClick={() => onAdClick(item.ad)}
-              className={`p-3 rounded-lg border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
-                item.ad.status,
-              )}`}
-            >
-              <div className="text-xs font-medium text-gray-600 mb-1">
-                {item.date.toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </div>
-              <div className="font-medium text-sm truncate">{item.ad.ad_name}</div>
-              <div className="text-xs opacity-75 truncate mt-0.5">{item.ad.advertiser}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CalendarFilters({
-  selectedAdvertiser,
-  setSelectedAdvertiser,
-  selectedPlacement,
-  setSelectedPlacement,
-  selectedPostType,
-  setSelectedPostType,
-  selectedStatus,
-  setSelectedStatus,
-  showUnpublishedOnly,
-  setShowUnpublishedOnly,
-  advertisers,
-  placements,
-  postTypes,
-}) {
-  return (
-    <div className="mt-4 pt-4 border-t border-gray-200">
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-        <select
-          value={selectedAdvertiser}
-          onChange={(event) => setSelectedAdvertiser(event.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="">All Advertisers</option>
-          {advertisers.map((advertiser) => (
-            <option key={advertiser} value={advertiser}>
-              {advertiser}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={selectedPlacement}
-          onChange={(event) => setSelectedPlacement(event.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="">All Placements</option>
-          {placements.map((placement) => (
-            <option key={placement} value={placement}>
-              {placement}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={selectedPostType}
-          onChange={(event) => setSelectedPostType(event.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="">All Post Types</option>
-          {postTypes.map((postType) => (
-            <option key={postType} value={postType}>
-              {postType}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={selectedStatus}
-          onChange={(event) => setSelectedStatus(event.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="">All Statuses</option>
-          <option value="Scheduled">Scheduled</option>
-          <option value="Published">Published</option>
-          <option value="Paid">Paid</option>
-          <option value="Unpaid">Unpaid</option>
-        </select>
-
-        <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm cursor-pointer hover:bg-gray-50">
-          <input
-            type="checkbox"
-            checked={showUnpublishedOnly}
-            onChange={(event) => setShowUnpublishedOnly(event.target.checked)}
-            className="w-4 h-4 text-gray-900 border-gray-300 rounded focus:ring-gray-900"
-          />
-          <span className="text-gray-700">Unpublished only</span>
-        </label>
-      </div>
-    </div>
-  );
-}
-
 function CalendarAdPreviewModal({ ad, onClose, onEdit, canEdit = true }) {
   if (!ad) {
     return null;
@@ -2315,259 +2204,6 @@ function CalendarAdPreviewModal({ ad, onClose, onEdit, canEdit = true }) {
           </div>
         ) : null}
       </div>
-    </div>
-  );
-}
-
-function InvoiceSortableHeader({ label, sortKey, onSort }) {
-  return (
-    <th
-      onClick={() => onSort(sortKey)}
-      className="text-left px-6 py-3 text-[11px] font-semibold text-gray-600 uppercase tracking-wide cursor-pointer hover:bg-gray-100 transition-colors"
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        <ChevronsUpDown size={12} className="text-gray-400" />
-      </div>
-    </th>
-  );
-}
-
-function CreateAdAdvertiserField({
-  advertisers,
-  value,
-  onChange,
-  onCreateNew,
-  disabled = false,
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [menuCoordinates, setMenuCoordinates] = useState({
-    top: 0,
-    left: 0,
-    width: 320,
-  });
-  const fieldRef = useRef(null);
-  const menuRef = useRef(null);
-  const searchInputRef = useRef(null);
-
-  const selectedAdvertiser = useMemo(
-    () =>
-      advertisers.find((item) => String(item?.id || "") === String(value || "")) || null,
-    [advertisers, value],
-  );
-
-  const filteredAdvertisers = useMemo(() => {
-    const query = String(search || "").trim().toLowerCase();
-    const source = [...advertisers].sort((left, right) =>
-      String(left?.advertiser_name || "").localeCompare(String(right?.advertiser_name || "")),
-    );
-
-    if (!query) {
-      return source;
-    }
-
-    return source.filter((item) =>
-      [item?.advertiser_name, item?.contact_name, item?.email].some((field) =>
-        String(field || "").toLowerCase().includes(query),
-      ),
-    );
-  }, [advertisers, search]);
-
-  useEffect(() => {
-    if (!isOpen || typeof window === "undefined") {
-      return undefined;
-    }
-
-    const updateMenuPosition = () => {
-      if (!fieldRef.current) {
-        return;
-      }
-
-      const rect = fieldRef.current.getBoundingClientRect();
-      const viewportPadding = 12;
-      const gap = 8;
-      const estimatedHeight = 320;
-      const width = Math.min(
-        Math.max(rect.width, 280),
-        window.innerWidth - viewportPadding * 2,
-      );
-
-      let left = rect.left;
-      left = Math.max(
-        viewportPadding,
-        Math.min(left, window.innerWidth - width - viewportPadding),
-      );
-
-      let top = rect.bottom + gap;
-      if (top + estimatedHeight > window.innerHeight - viewportPadding) {
-        top = rect.top - estimatedHeight - gap;
-      }
-      top = Math.max(
-        viewportPadding,
-        Math.min(top, window.innerHeight - estimatedHeight - viewportPadding),
-      );
-
-      setMenuCoordinates({ top, left, width });
-    };
-
-    updateMenuPosition();
-    const animationFrameId = window.requestAnimationFrame(() => {
-      updateMenuPosition();
-      searchInputRef.current?.focus();
-    });
-
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-
-    return () => {
-      window.cancelAnimationFrame(animationFrameId);
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen || typeof document === "undefined") {
-      return undefined;
-    }
-
-    const handlePointerDown = (event) => {
-      const target = event.target;
-      if (fieldRef.current?.contains(target) || menuRef.current?.contains(target)) {
-        return;
-      }
-      setIsOpen(false);
-    };
-
-    const handleEscape = (event) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isOpen]);
-
-  const handleSelect = (advertiserId) => {
-    onChange(advertiserId);
-    setIsOpen(false);
-    setSearch("");
-  };
-
-  const handleCreateNew = () => {
-    setIsOpen(false);
-    setSearch("");
-    onCreateNew();
-  };
-
-  return (
-    <div
-      ref={fieldRef}
-      className={`border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 transition-all ${
-        isOpen
-          ? "border-gray-900 ring-2 ring-gray-900 ring-offset-0"
-          : "hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"
-      } ${disabled ? "opacity-60" : ""}`}
-    >
-      <label className="block text-xs font-semibold text-gray-700 mb-1">
-        Advertiser <span className="text-red-500">*</span>
-      </label>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          if (disabled) {
-            return;
-          }
-          setIsOpen((current) => !current);
-        }}
-        className="flex w-full items-center justify-between gap-3 text-left text-sm"
-        aria-expanded={isOpen}
-        aria-haspopup="listbox"
-      >
-        <span className={selectedAdvertiser ? "text-gray-900" : "text-gray-400"}>
-          {selectedAdvertiser?.advertiser_name || "Select advertiser"}
-        </span>
-        <ChevronDown
-          size={16}
-          className={`text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {isOpen && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              ref={menuRef}
-              className="fixed z-[220] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
-              style={{
-                top: `${menuCoordinates.top}px`,
-                left: `${menuCoordinates.left}px`,
-                width: `${menuCoordinates.width}px`,
-              }}
-            >
-              <div className="border-b border-gray-200 p-2">
-                <div className="relative">
-                  <Search
-                    size={16}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search advertisers..."
-                    className="w-full rounded-md border border-gray-200 py-2 pl-9 pr-4 text-sm text-gray-900 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCreateNew}
-                className="flex w-full items-center gap-2 border-b border-gray-200 px-4 py-3 text-left text-sm font-medium text-blue-600 transition-colors hover:bg-gray-50 hover:text-blue-700"
-              >
-                <Plus size={16} />
-                Create New Advertiser
-              </button>
-
-              <div className="max-h-[200px] overflow-y-auto">
-                {filteredAdvertisers.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-gray-500">
-                    No advertisers match your search.
-                  </div>
-                ) : (
-                  filteredAdvertisers.map((item) => {
-                    const isSelected = String(item?.id || "") === String(value || "");
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => handleSelect(item.id)}
-                        className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm transition-colors ${
-                          isSelected
-                            ? "bg-gray-50 text-gray-900"
-                            : "text-gray-900 hover:bg-gray-50"
-                        }`}
-                      >
-                        <span className="truncate">{item.advertiser_name}</span>
-                        {isSelected ? <Check size={16} className="text-gray-500" /> : null}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }
@@ -6711,6 +6347,12 @@ export default function AdsPage() {
       )?.id ||
       "";
 
+    const normalizedPostTime = String(item.post_time || "").slice(0, 8);
+    const normalizedCustomDates = normalizeCustomDatesForForm(item.custom_dates, {
+      fallbackTime: normalizedPostTime,
+      fallbackReminder: "15-min",
+    });
+
     setAd({
       ...blankAd,
       ...item,
@@ -6720,8 +6362,8 @@ export default function AdsPage() {
       post_date: item.schedule || item.post_date || item.post_date_from || "",
       post_date_from: item.post_date_from || item.schedule || item.post_date || "",
       post_date_to: item.post_date_to || "",
-      custom_dates: Array.isArray(item.custom_dates) ? item.custom_dates : [],
-      post_time: String(item.post_time || "").slice(0, 5),
+      custom_dates: normalizedCustomDates,
+      post_time: normalizedPostTime.slice(0, 5),
       ad_text: item.ad_text || item.notes || "",
       media: parseAdMedia(item.media),
       payment:
@@ -6991,15 +6633,11 @@ export default function AdsPage() {
         }
 
         const selectedPostType = normalizeCreateAdPostType(ad.post_type);
-        const customDates = (Array.isArray(ad.custom_dates) ? ad.custom_dates : [])
-          .map((entry) => {
-            if (typeof entry === "object" && entry !== null) {
-              return entry.date;
-            }
-            return entry;
-          })
-          .map((entry) => String(entry || "").slice(0, 10))
-          .filter(Boolean);
+        const customDates = normalizeCustomDatesForForm(ad.custom_dates, {
+          fallbackTime: ad.post_time || "",
+          fallbackReminder: "15-min",
+        });
+        const customDateKeys = customDates.map((entry) => entry.date).filter(Boolean);
         const paymentMode =
           ad.payment_mode ||
           (String(ad.payment || "").toLowerCase() === "paid"
@@ -7027,7 +6665,7 @@ export default function AdsPage() {
         if (selectedPostType === "Daily Run") {
           payload.post_date = payload.post_date_from || payload.post_date || "";
         } else if (selectedPostType === "Custom Schedule") {
-          payload.post_date = customDates[0] || "";
+          payload.post_date = customDateKeys[0] || "";
         } else {
           payload.post_date = payload.post_date || payload.post_date_from || "";
           payload.post_date_from = payload.post_date;
@@ -7060,7 +6698,7 @@ export default function AdsPage() {
           }
         }
 
-        if (mode !== "draft" && selectedPostType === "Custom Schedule" && customDates.length === 0) {
+        if (mode !== "draft" && selectedPostType === "Custom Schedule" && customDateKeys.length === 0) {
           throw new Error("Add at least one custom date");
         }
 
@@ -8608,6 +8246,7 @@ export default function AdsPage() {
                   onAdClick={handleCalendarAdClick}
                   isMinimized={calendarSidebarMinimized}
                   setIsMinimized={setCalendarSidebarMinimized}
+                  getStatusClass={getCalendarStatusColor}
                 />
               </div>
 

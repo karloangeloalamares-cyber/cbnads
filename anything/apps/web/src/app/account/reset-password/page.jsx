@@ -195,6 +195,9 @@ export default function ResetPasswordPage() {
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition"
                         placeholder="Minimum 8 characters"
                     />
+                    <p className="text-sm text-gray-500 mt-2">
+                        Password must be at least 8 characters long, containing a mix of numbers, letters, and special characters.
+                    </p>
                 </div>
 
                 <div>

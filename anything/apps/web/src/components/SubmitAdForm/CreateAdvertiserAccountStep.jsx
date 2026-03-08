@@ -174,6 +174,9 @@ export function CreateAdvertiserAccountStep({
                 placeholder="Create a password"
                 className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
               />
+              <p className="text-xs text-gray-500 mt-2">
+                Password must be at least 8 characters long, containing a mix of numbers, letters, and special characters.
+              </p>
             </div>
 
             <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">

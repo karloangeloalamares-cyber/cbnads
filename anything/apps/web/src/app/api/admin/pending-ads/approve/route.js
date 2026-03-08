@@ -426,7 +426,10 @@ export async function POST(request) {
           invoice_id: approvedInvoice.id,
         }));
         if (invoiceItemsPayload.length > 0) {
-          await supabase.from(table("invoice_items")).insert(invoiceItemsPayload);
+          const { error: invoiceItemsError } = await supabase
+            .from(table("invoice_items"))
+            .insert(invoiceItemsPayload);
+          if (invoiceItemsError) throw invoiceItemsError;
         }
       } catch (invoiceItemError) {
         console.error("[approve] Unable to create invoice item:", invoiceItemError);

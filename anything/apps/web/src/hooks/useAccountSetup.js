@@ -30,6 +30,8 @@ const normalizeGoogleCallbackError = (value) => {
     return message || "Google sign-in failed.";
 };
 
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export function useAccountSetup() {
     const [accountData, setAccountData] = useState(initialAccountData());
     const [accountError, setAccountError] = useState(null);
@@ -78,27 +80,31 @@ export function useAccountSetup() {
         setAccountLoading(true);
 
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000);
-
             let response;
-            try {
-                response = await fetch("/api/public/submit-ad/account", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        pendingAdId,
-                        advertiserName: submittedData.advertiser_name,
-                        contactName: submittedData.contact_name,
-                        phoneNumber: submittedData.phone_number,
-                        email: accountData.email,
-                        password: accountData.password,
-                        confirmPassword: accountData.confirmPassword,
-                    }),
-                    signal: controller.signal,
-                });
-            } finally {
-                clearTimeout(timeoutId);
+            const requestInit = {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    pendingAdId,
+                    advertiserName: submittedData.advertiser_name,
+                    contactName: submittedData.contact_name,
+                    phoneNumber: submittedData.phone_number,
+                    email: accountData.email,
+                    password: accountData.password,
+                    confirmPassword: accountData.confirmPassword,
+                }),
+            };
+
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                    response = await fetch("/api/public/submit-ad/account", requestInit);
+                    break;
+                } catch (networkError) {
+                    if (attempt === 1 || networkError?.name === "AbortError") {
+                        throw networkError;
+                    }
+                    await wait(350);
+                }
             }
 
             const data = await response.json();
@@ -115,14 +121,27 @@ export function useAccountSetup() {
                 throw new Error(data.error || "Failed to create advertiser account.");
             }
 
+            if (data?.verificationEmailSent === false) {
+                appToast.warning({
+                    title: "Account created",
+                    description:
+                        "Your account was created, but verification email delivery was delayed. Use Resend verification email below.",
+                });
+            }
+
             setAccountData((prev) => ({
                 ...initialAccountData(data.email || prev.email),
             }));
             onSuccess?.();
         } catch (err) {
             console.error("Error creating advertiser account:", err);
+            const isNetworkError =
+                err instanceof TypeError &&
+                /failed to fetch/i.test(String(err.message || ""));
             const message =
-                err.name === "AbortError"
+                isNetworkError
+                    ? "Could not reach the server. Please refresh and try again."
+                    : err.name === "AbortError"
                     ? "The request timed out. Please check your connection and try again."
                     : err.message || "Failed to create advertiser account.";
             setAccountError(message);

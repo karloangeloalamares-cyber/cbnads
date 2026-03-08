@@ -1,5 +1,5 @@
 import { getSessionUser, requireAdmin } from "../../utils/auth-check.js";
-import { getDefaultEmailSender } from "../../utils/send-email.js";
+import { getDefaultEmailSender, sendEmail } from "../../utils/send-email.js";
 
 export async function POST(request) {
   try {
@@ -16,51 +16,24 @@ export async function POST(request) {
       );
     }
 
-    if (!process.env.ZAPIER_WEBHOOK_URL) {
-      return Response.json(
-        { error: "Zapier webhook is not configured" },
-        { status: 500 },
-      );
-    }
-
     const user = await getSessionUser();
     const userName = user?.name || "Admin";
     const defaultSender = getDefaultEmailSender();
+    const firstName = userName.split(" ")[0];
 
-    const webhookResponse = await fetch(process.env.ZAPIER_WEBHOOK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        recipientType: "admin",
-        to: email,
-        from: defaultSender,
-        subject: "Test Email - Your Ad Reminder System is Working!",
-        greeting: "Hello",
-        firstName: userName.split(" ")[0],
-        advertiserName: "John Smith",
-        adName: "Summer Sale Promotion (Test)",
-        advertiser: "Acme Corporation (Test)",
-        advertiserEmail: "advertiser@acmecorp.com",
-        advertiserPhone: "+1-555-123-4567",
-        placement: "Instagram Story",
-        formattedTime: "2:00 PM ET",
-        formattedDate: "Tomorrow",
-        timeUntilText: "in 1 day",
-        adText:
-          "This is a test ad. Your actual ad reminders will include the real ad copy here.",
-        imageCount: 0,
-        videoCount: 0,
-        isTest: true,
-      }),
+    await sendEmail({
+      to: email,
+      from: defaultSender,
+      subject: "Test Email - Your Ad Reminder System is Working!",
+      text: `Hello ${firstName}, this is a test email from CBN Ads. If you received this, your Resend setup is working.`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+          <p>Hello ${firstName},</p>
+          <p>This is a test email from <strong>CBN Ads</strong>.</p>
+          <p>If you received this, your Resend setup is working.</p>
+        </div>
+      `,
     });
-
-    if (!webhookResponse.ok) {
-      throw new Error(
-        `Zapier webhook returned status ${webhookResponse.status}`,
-      );
-    }
 
     return Response.json({
       success: true,

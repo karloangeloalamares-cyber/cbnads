@@ -36,6 +36,14 @@ const initialFormData = {
   notes: "",
 };
 
+const createIdempotencyKey = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+};
+
 export function useSubmitAdForm() {
   const [formData, setFormData] = useState(initialFormData);
   const [submittedData, setSubmittedData] = useState(null);
@@ -49,6 +57,8 @@ export function useSubmitAdForm() {
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
   const formDataRef = useRef(formData);
+  const submitInFlightRef = useRef(false);
+  const submitIdempotencyKeyRef = useRef("");
   const availabilityRequestIdRef = useRef(0);
 
   const account = useAccountSetup();
@@ -90,6 +100,7 @@ export function useSubmitAdForm() {
   }, [formData]);
 
   const handleChange = useCallback((field, value) => {
+    submitIdempotencyKeyRef.current = "";
     setFormData((prev) => {
       const normalizedValue =
         field === "phone_number" ? formatUSPhoneNumber(value) : value;
@@ -246,17 +257,26 @@ export function useSubmitAdForm() {
     }
   };
 
-  const validateDateTime = () => {
-    if (formData.post_type === "One-Time Post" && formData.post_date_from && formData.post_time) {
-      if (isPastDateTimeInAppTimeZone(formData.post_date_from, formData.post_time)) {
+  const validateDateTime = (currentFormData) => {
+    if (
+      currentFormData.post_type === "One-Time Post" &&
+      currentFormData.post_date_from &&
+      currentFormData.post_time
+    ) {
+      if (
+        isPastDateTimeInAppTimeZone(
+          currentFormData.post_date_from,
+          currentFormData.post_time,
+        )
+      ) {
         showSubmitError("Cannot select a past date and time");
         setPastTimeError("This date and time is in the past. Please choose a future time.");
         return false;
       }
     }
 
-    if (formData.post_type === "Daily Run") {
-      const startDate = String(formData.post_date_from || "").trim();
+    if (currentFormData.post_type === "Daily Run") {
+      const startDate = String(currentFormData.post_date_from || "").trim();
       const today = getTodayInAppTimeZone();
 
       if (startDate && today && startDate < today) {
@@ -265,8 +285,8 @@ export function useSubmitAdForm() {
         return false;
       }
 
-      if (formData.post_date_to) {
-        const endDate = String(formData.post_date_to || "").trim();
+      if (currentFormData.post_date_to) {
+        const endDate = String(currentFormData.post_date_to || "").trim();
         if (endDate < startDate) {
           showSubmitError("End date must be after start date");
           setPastTimeError(null);
@@ -281,76 +301,85 @@ export function useSubmitAdForm() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (submitInFlightRef.current) {
+      return;
+    }
+
+    submitInFlightRef.current = true;
     setLoading(true);
+    const formElement = event.currentTarget;
+    const domFormData =
+      typeof FormData !== "undefined" && formElement instanceof HTMLFormElement
+        ? new FormData(formElement)
+        : null;
 
-    if (
-      !formData.advertiser_name ||
-      !formData.contact_name ||
-      !formData.email ||
-      !formData.phone_number ||
-      !formData.ad_name
-    ) {
-      showSubmitError("Please fill in all required fields");
-      setLoading(false);
-      return;
-    }
-
-    if (!isCompleteUSPhoneNumber(formData.phone_number)) {
-      showSubmitError("Phone number must be a complete US number.");
-      setLoading(false);
-      return;
-    }
-
-    if (pastTimeError) {
-      showSubmitError(pastTimeError);
-      setLoading(false);
-      return;
-    }
-
-    if (!validateDateTime()) {
-      setLoading(false);
-      return;
-    }
-
-    if (fullyBookedDates.length > 0) {
-      showSubmitError("Please resolve fully booked dates before submitting.");
-      setLoading(false);
-      return;
-    }
+    const currentFormData = {
+      ...formDataRef.current,
+      advertiser_name: String(
+        domFormData?.get("advertiser_name") ?? formDataRef.current.advertiser_name ?? "",
+      ),
+      contact_name: String(
+        domFormData?.get("contact_name") ?? formDataRef.current.contact_name ?? "",
+      ),
+      email: String(domFormData?.get("email") ?? formDataRef.current.email ?? ""),
+      phone_number: formatUSPhoneNumber(
+        String(domFormData?.get("phone_number") ?? formDataRef.current.phone_number ?? ""),
+      ),
+      ad_name: String(domFormData?.get("ad_name") ?? formDataRef.current.ad_name ?? ""),
+      ad_text: String(domFormData?.get("ad_text") ?? formDataRef.current.ad_text ?? ""),
+    };
+    formDataRef.current = currentFormData;
 
     try {
+      if (
+        !String(currentFormData.advertiser_name || "").trim() ||
+        !String(currentFormData.contact_name || "").trim() ||
+        !String(currentFormData.email || "").trim() ||
+        !String(currentFormData.phone_number || "").trim() ||
+        !String(currentFormData.ad_name || "").trim()
+      ) {
+        showSubmitError("Please fill in all required fields");
+        return;
+      }
+
+      if (!isCompleteUSPhoneNumber(currentFormData.phone_number)) {
+        showSubmitError("Phone number must be a complete US number.");
+        return;
+      }
+
+      if (!validateDateTime(currentFormData)) {
+        return;
+      }
+
       const availability = await checkAdAvailability({
-        postType: formData.post_type,
-        postDateFrom: formData.post_date_from,
-        postDateTo: formData.post_date_to,
-        customDates: normalizeCustomDateEntries(formData.custom_dates),
-        postTime: formData.post_time,
+        postType: currentFormData.post_type,
+        postDateFrom: currentFormData.post_date_from,
+        postDateTo: currentFormData.post_date_to,
+        customDates: normalizeCustomDateEntries(currentFormData.custom_dates),
+        postTime: currentFormData.post_time,
       });
 
       if (!availability.available) {
-        setFullyBookedDates(availability.fullyBookedDates);
+        setFullyBookedDates(availability.fullyBookedDates || []);
         showSubmitError(availability.availabilityError || "Selected dates are unavailable.");
-        setLoading(false);
         return;
       }
-    } catch (err) {
-      console.error("Error checking availability:", err);
-      showSubmitError("Could not check availability. Please try again.");
-      setLoading(false);
-      return;
-    }
 
-    try {
       const timeWithSeconds =
-        formData.post_time && formData.post_time.length === 5
-          ? `${formData.post_time}:00`
-          : formData.post_time;
+        currentFormData.post_time && currentFormData.post_time.length === 5
+          ? `${currentFormData.post_time}:00`
+          : currentFormData.post_time;
+      const idempotencyKey = submitIdempotencyKeyRef.current || createIdempotencyKey();
+      submitIdempotencyKeyRef.current = idempotencyKey;
 
       const response = await fetch("/api/public/submit-ad", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify({
-          ...formData,
+          ...currentFormData,
           post_time: timeWithSeconds,
         }),
       });
@@ -361,19 +390,21 @@ export function useSubmitAdForm() {
       }
 
       const data = await response.json();
-      const nextSubmittedData = { ...formData, post_time: timeWithSeconds };
+      const nextSubmittedData = { ...currentFormData, post_time: timeWithSeconds };
       const createdPendingAdId = String(data?.pending_ad?.id || "").trim();
 
       setSubmittedData(nextSubmittedData);
       setPendingAdId(createdPendingAdId);
       emitSubmissionCreatedSignal(createdPendingAdId);
-      account.initAccount(formData.email);
+      account.initAccount(currentFormData.email);
       setPhase("account");
       setFormData(initialFormData);
+      submitIdempotencyKeyRef.current = "";
     } catch (err) {
       console.error("Error submitting ad:", err);
       showSubmitError(err.message || "Failed to submit ad request");
     } finally {
+      submitInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -424,6 +455,7 @@ export function useSubmitAdForm() {
     setAvailabilityError(null);
     setPastTimeError(null);
     setFullyBookedDates([]);
+    submitIdempotencyKeyRef.current = "";
   };
 
   return {

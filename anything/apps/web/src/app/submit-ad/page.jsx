@@ -68,8 +68,7 @@ export default function SubmitAdPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const previewData = phase === "form" ? formData : submittedData || formData;
-  const isSubmitDisabled =
-    loading || checkingAvailability || !!availabilityError || !!pastTimeError;
+  const isSubmitDisabled = loading || !!pastTimeError;
 
   const honeypotRef = useRef(null);
 
