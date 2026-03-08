@@ -34,6 +34,44 @@ const formatCurrency = (value) =>
     currency: "USD",
   }).format(Number(value) || 0);
 
+const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
+
+const normalizeCustomDateTime = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return `${text}:00`;
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  return parsed.toISOString().slice(11, 19);
+};
+
+const normalizeCustomDateEntries = (entries, { fallbackTime = "" } = {}) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        const date = normalizeDateOnly(entry.date);
+        if (!date) return null;
+        const time = normalizeCustomDateTime(entry.time || entry.post_time || fallbackTime);
+        return {
+          ...entry,
+          date,
+          ...(time ? { time } : {}),
+          reminder: String(entry.reminder || "").trim() || "15-min",
+        };
+      }
+
+      const date = normalizeDateOnly(entry);
+      if (!date) return null;
+      const time = normalizeCustomDateTime(fallbackTime);
+      return {
+        date,
+        ...(time ? { time } : {}),
+        reminder: "15-min",
+      };
+    })
+    .filter(Boolean);
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -202,6 +240,10 @@ export async function POST(request) {
     if (!["one_time", "daily_run", "custom_schedule"].includes(normalizedPostType)) {
       return Response.json({ error: "Unsupported post type on pending submission." }, { status: 400 });
     }
+    const normalizedCustomDates =
+      normalizedPostType === "custom_schedule"
+        ? normalizeCustomDateEntries(ad.custom_dates, { fallbackTime: ad.post_time })
+        : [];
     const scheduleDateKeys = extractAdScheduleDateKeys(ad);
     const primaryScheduleDate =
       scheduleDateKeys[0] ||
@@ -253,14 +295,11 @@ export async function POST(request) {
 
     if (
       normalizedPostType === "custom_schedule" &&
-      Array.isArray(ad.custom_dates) &&
-      ad.custom_dates.length > 0
+      normalizedCustomDates.length > 0
     ) {
       const availability = await checkBatchAvailability({
         supabase,
-        dates: ad.custom_dates.map((entry) =>
-          entry && typeof entry === "object" ? entry.date : entry,
-        ),
+        dates: normalizedCustomDates.map((entry) => entry.date),
         excludeId: pending_ad_id,
       });
       const blockedDates = Object.entries(availability.results || {})
@@ -305,7 +344,7 @@ export async function POST(request) {
               ? ad.post_date_from || primaryScheduleDate
               : primaryScheduleDate,
         post_date_to: normalizedPostType === "daily_run" ? ad.post_date_to || null : null,
-        custom_dates: normalizedPostType === "custom_schedule" && Array.isArray(ad.custom_dates) ? ad.custom_dates : [],
+        custom_dates: normalizedCustomDates,
         post_time: ad.post_time || null,
         scheduled_timezone: APP_TIME_ZONE,
         reminder_minutes: ad.reminder_minutes || 15,

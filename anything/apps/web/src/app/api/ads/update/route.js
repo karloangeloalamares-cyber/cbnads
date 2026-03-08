@@ -14,6 +14,42 @@ const readNumber = (value, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const normalizeCustomDateTime = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return `${text}:00`;
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  return parsed.toISOString().slice(11, 19);
+};
+
+const normalizeCustomDateEntries = (entries, { fallbackTime = "" } = {}) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        const date = dateOnly(entry.date);
+        if (!date) return null;
+        const time = normalizeCustomDateTime(entry.time || entry.post_time || fallbackTime);
+        return {
+          ...entry,
+          date,
+          ...(time ? { time } : {}),
+          reminder: String(entry.reminder || "").trim() || "15-min",
+        };
+      }
+
+      const date = dateOnly(entry);
+      if (!date) return null;
+      const time = normalizeCustomDateTime(fallbackTime);
+      return {
+        date,
+        ...(time ? { time } : {}),
+        reminder: "15-min",
+      };
+    })
+    .filter(Boolean);
+
 const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
   const normalizedCurrentStatus = String(currentStatus || "").trim().toLowerCase();
   if (normalizedCurrentStatus === "overdue" && amountPaid < invoiceTotal) return "Overdue";
@@ -259,12 +295,11 @@ export async function PUT(request) {
         post_date_from !== undefined ? post_date_from : oldAd.post_date_from,
       );
       const nextDateTo = dateOnly(post_date_to !== undefined ? post_date_to : oldAd.post_date_to);
-      const nextCustomDates = Array.isArray(custom_dates)
-        ? custom_dates
-        : Array.isArray(oldAd.custom_dates)
-          ? oldAd.custom_dates
-          : [];
       const nextPostTime = post_time !== undefined ? post_time : oldAd.post_time;
+      const nextCustomDates = normalizeCustomDateEntries(
+        custom_dates !== undefined ? custom_dates : oldAd.custom_dates,
+        { fallbackTime: nextPostTime },
+      );
 
       const normalizedNextPostType = normalizePostType(nextPostType);
 
@@ -314,9 +349,7 @@ export async function PUT(request) {
       if (normalizedNextPostType === "custom_schedule" && nextCustomDates.length > 0) {
         const availability = await checkBatchAvailability({
           supabase,
-          dates: nextCustomDates.map((entry) =>
-            entry && typeof entry === "object" ? entry.date : entry,
-          ),
+          dates: nextCustomDates.map((entry) => entry.date),
           excludeId: id,
         });
         const blockedDates = Object.entries(availability.results || {})
@@ -372,10 +405,18 @@ export async function PUT(request) {
     const postDateToChanged =
       post_date_to !== undefined &&
       dateOnly(post_date_to || null) !== dateOnly(oldAd.post_date_to || null);
+    const normalizedOldCustomDates = normalizeCustomDateEntries(oldAd.custom_dates, {
+      fallbackTime: oldAd.post_time,
+    });
+    const normalizedNextCustomDates =
+      custom_dates !== undefined
+        ? normalizeCustomDateEntries(custom_dates, {
+            fallbackTime: post_time !== undefined ? post_time : oldAd.post_time,
+          })
+        : normalizedOldCustomDates;
     const customDatesChanged =
       custom_dates !== undefined &&
-      JSON.stringify(Array.isArray(custom_dates) ? custom_dates : []) !==
-        JSON.stringify(Array.isArray(oldAd.custom_dates) ? oldAd.custom_dates : []);
+      JSON.stringify(normalizedNextCustomDates) !== JSON.stringify(normalizedOldCustomDates);
     const adNameChanged =
       ad_name !== undefined && String(ad_name || "").trim() !== String(oldAd.ad_name || "").trim();
     const invoicePricingFieldsUpdated =
@@ -461,7 +502,7 @@ export async function PUT(request) {
     if (post_date_from !== undefined) patch.post_date_from = post_date_from || null;
     if (post_date_to !== undefined) patch.post_date_to = post_date_to || null;
     if (custom_dates !== undefined) {
-      patch.custom_dates = Array.isArray(custom_dates) ? custom_dates : [];
+      patch.custom_dates = normalizedNextCustomDates;
     }
     if (media !== undefined) patch.media = Array.isArray(media) ? media : [];
     if (ad_text !== undefined) patch.ad_text = ad_text || null;

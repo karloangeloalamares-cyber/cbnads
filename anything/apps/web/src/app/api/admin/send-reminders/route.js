@@ -8,6 +8,7 @@ import {
   resolveActiveTelegramChatIds,
 } from "../../utils/send-telegram.js";
 import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
+import { sendWhatsAppMessage } from "../../utils/send-whatsapp.js";
 
 const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -513,6 +514,20 @@ export async function POST(request) {
                   });
             }
 
+            let whatsappSent = false;
+            const broadcastNumber = process.env.WHATSAPP_BROADCAST_NUMBER;
+            if (broadcastNumber) {
+               try {
+                 whatsappSent = await sendWhatsAppMessage({
+                   to: broadcastNumber,
+                   text: reminderBodyText,
+                   media: primaryMedia
+                 });
+               } catch (waErr) {
+                 console.error("[send-reminders] External WhatsApp error:", waErr);
+               }
+            }
+
             await storeReminder(supabase, ad.id, "email", "internal", dueEntry.scheduleKey);
             results.push({
               type: "internal_email",
@@ -520,6 +535,7 @@ export async function POST(request) {
               ad_name: ad.ad_name,
               status: "sent",
               telegram_sent: telegramResults.some((entry) => entry.ok),
+              whatsapp_sent: whatsappSent,
             });
           } catch (error) {
             results.push({

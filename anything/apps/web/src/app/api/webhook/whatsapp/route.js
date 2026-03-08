@@ -56,7 +56,7 @@ export async function POST(request) {
               if (action === "approve") {
                 newStatus = "approved";
               } else if (action === "decline") {
-                newStatus = "rejected";
+                newStatus = "not_approved";
               }
 
               // Update the Ad's status in Supabase if a valid action was detected
@@ -65,10 +65,11 @@ export async function POST(request) {
                 const now = new Date().toISOString();
 
                 const { error } = await supabaseAdmin
-                  .from(table("ads"))
+                  .from(table("pending_ads"))
                   .update({
                     status: newStatus,
                     updated_at: now,
+                    ...(newStatus === "not_approved" ? { review_notes: "Declined via WhatsApp" } : {})
                   })
                   .eq("id", adId);
 

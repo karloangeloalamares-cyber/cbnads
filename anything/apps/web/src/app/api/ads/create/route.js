@@ -10,6 +10,41 @@ import {
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 
+const normalizeCustomDateTime = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return `${text}:00`;
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  return parsed.toISOString().slice(11, 19);
+};
+
+const normalizeCustomDateEntries = (entries, { fallbackTime = "" } = {}) =>
+  (Array.isArray(entries) ? entries : [])
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        const date = dateOnly(entry.date);
+        if (!date) return null;
+        const time = normalizeCustomDateTime(entry.time || entry.post_time || fallbackTime);
+        return {
+          ...entry,
+          date,
+          ...(time ? { time } : {}),
+          reminder: String(entry.reminder || "").trim() || "15-min",
+        };
+      }
+      const date = dateOnly(entry);
+      if (!date) return null;
+      const time = normalizeCustomDateTime(fallbackTime);
+      return {
+        date,
+        ...(time ? { time } : {}),
+        reminder: "15-min",
+      };
+    })
+    .filter(Boolean);
+
 export async function POST(request) {
   try {
     const auth = await requireInternalUser(request);
@@ -123,7 +158,9 @@ export async function POST(request) {
     const scheduleDate = oneTime ? dateOnly(schedule || post_date_from) : null;
     const dateFrom = oneTime ? scheduleDate : daily ? dateOnly(post_date_from) : null;
     const dateTo = daily ? dateOnly(post_date_to) : null;
-    const customDates = custom && Array.isArray(custom_dates) ? custom_dates : [];
+    const customDates = custom
+      ? normalizeCustomDateEntries(custom_dates, { fallbackTime: post_time })
+      : [];
 
     if (oneTime && scheduleDate) {
       const availability = await checkSingleDateAvailability({
@@ -169,9 +206,7 @@ export async function POST(request) {
     if (custom && customDates.length > 0) {
       const availability = await checkBatchAvailability({
         supabase,
-        dates: customDates.map((entry) =>
-          entry && typeof entry === "object" ? entry.date : entry,
-        ),
+        dates: customDates.map((entry) => entry.date),
       });
       const blockedDates = Object.entries(availability.results || {})
         .filter(([, info]) => info?.is_full)

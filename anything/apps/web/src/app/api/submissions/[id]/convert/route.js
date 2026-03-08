@@ -20,7 +20,17 @@ const isMissingColumnError = (error) => {
 
 const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
 
-const normalizeCustomDateEntries = (entries) =>
+const normalizeCustomDateTime = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{2}:\d{2}:\d{2}$/.test(text)) return text;
+  if (/^\d{2}:\d{2}$/.test(text)) return `${text}:00`;
+  const parsed = new Date(`1970-01-01T${text}`);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  return parsed.toISOString().slice(11, 19);
+};
+
+const normalizeCustomDateEntries = (entries, { fallbackTime = "" } = {}) =>
   (Array.isArray(entries) ? entries : [])
     .map((entry) => {
       if (entry && typeof entry === "object") {
@@ -28,19 +38,23 @@ const normalizeCustomDateEntries = (entries) =>
         if (!date) {
           return null;
         }
+        const time = normalizeCustomDateTime(entry.time || entry.post_time || fallbackTime);
         const normalized = {
           ...entry,
           date,
+          ...(time ? { time } : {}),
+          reminder: String(entry.reminder || "").trim() || "15-min",
         };
-        if (entry.time !== undefined) {
-          normalized.time = String(entry.time || "").trim();
-        }
-        if (entry.reminder !== undefined) {
-          normalized.reminder = String(entry.reminder || "").trim();
-        }
         return normalized;
       }
-      return normalizeDateOnly(entry);
+      const date = normalizeDateOnly(entry);
+      if (!date) return null;
+      const time = normalizeCustomDateTime(fallbackTime);
+      return {
+        date,
+        ...(time ? { time } : {}),
+        reminder: "15-min",
+      };
     })
     .filter(Boolean);
 
@@ -120,6 +134,7 @@ export async function POST(request, { params }) {
 
     const customDates = normalizeCustomDateEntries(
       Array.isArray(schedule.custom_dates) ? schedule.custom_dates : submission.custom_dates,
+      { fallbackTime: schedule.post_time || submission.post_time || "" },
     );
     const postDate =
       schedule.post_date ||

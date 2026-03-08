@@ -1,6 +1,7 @@
 import { db, normalizePostType, table } from "./supabase-db.js";
 import { sendEmail } from "./send-email.js";
 import { notifyInternalChannels } from "./internal-notification-channels.js";
+import { sendWhatsAppInteractive } from "./send-whatsapp.js";
 import {
   checkBatchAvailability,
   checkSingleDateAvailability,
@@ -581,6 +582,21 @@ export async function createPendingAdSubmission({
       emailHtml: adminEmailHTML,
       telegramText: internalTelegramText,
     });
+    
+    // Attempt to notify the admin via interactive WhatsApp buttons (Approve/Decline)
+    try {
+      const adminWhatsApp = process.env.WHATSAPP_BROADCAST_NUMBER;
+      if (adminWhatsApp) {
+         await sendWhatsAppInteractive({
+           to: adminWhatsApp,
+           adId: insertedPendingAd.id,
+           advertiserName: advertiser_name,
+           adName: ad_name
+         });
+      }
+    } catch (waError) {
+      console.error("[pending-ad-submission] Failed to send Admin WhatsApp notification:", waError);
+    }
   } catch (error) {
     console.error("[pending-ad-submission] Failed to send internal notifications:", error);
   }
