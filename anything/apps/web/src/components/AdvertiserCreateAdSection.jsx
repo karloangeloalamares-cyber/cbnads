@@ -56,7 +56,12 @@ const buildInitialFormData = ({ advertiser, user }) => ({
     String(advertiser?.contact_name || user?.name || user?.advertiser_name || "").trim(),
   email: String(advertiser?.email || user?.email || "").trim().toLowerCase(),
   phone_number: formatUSPhoneNumber(
-    advertiser?.phone_number || advertiser?.phone || user?.whatsapp_number || "",
+    advertiser?.phone_number ||
+      advertiser?.phone ||
+      user?.whatsapp_number ||
+      user?.phone_number ||
+      user?.phone ||
+      "",
   ),
 });
 
@@ -110,8 +115,8 @@ export default function AdvertiserCreateAdSection({
         ...current,
         advertiser_name: nextIdentity.advertiser_name,
         email: nextIdentity.email,
-        contact_name: current.contact_name || nextIdentity.contact_name,
-        phone_number: current.phone_number || nextIdentity.phone_number,
+        contact_name: nextIdentity.contact_name,
+        phone_number: nextIdentity.phone_number,
       };
     });
   }, [advertiser, user]);
@@ -433,8 +438,13 @@ export default function AdvertiserCreateAdSection({
                 <AdvertiserInfoSection
                   formData={formData}
                   onChange={handleChange}
-                  readOnlyFields={["advertiser_name", "email"]}
-                  helperText="Your advertiser name and login email stay linked to this account. You can update the contact person and phone number for this request."
+                  readOnlyFields={[
+                    "advertiser_name",
+                    "contact_name",
+                    "email",
+                    "phone_number",
+                  ]}
+                  helperText="These fields are linked to your signup profile and are auto-filled for every request."
                 />
 
                 <AdDetailsSection
