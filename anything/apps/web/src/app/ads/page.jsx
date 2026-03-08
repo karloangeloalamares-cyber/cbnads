@@ -1798,8 +1798,21 @@ const buildInvoiceItemsFromAd = ({ adRecord, unitPrice = 0 } = {}) => {
 };
 
 const toStringArray = (value) => {
+  const toEntryText = (item) => {
+    if (item && typeof item === "object") {
+      if (Object.prototype.hasOwnProperty.call(item, "date")) {
+        return String(item.date || "").trim();
+      }
+      if (Object.prototype.hasOwnProperty.call(item, "id")) {
+        return String(item.id || "").trim();
+      }
+      return "";
+    }
+    return String(item || "").trim();
+  };
+
   if (Array.isArray(value)) {
-    return value.map((item) => String(item));
+    return value.map((item) => toEntryText(item)).filter(Boolean);
   }
 
   if (typeof value === "string") {
@@ -1811,7 +1824,7 @@ const toStringArray = (value) => {
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) {
-        return parsed.map((item) => String(item));
+        return parsed.map((item) => toEntryText(item)).filter(Boolean);
       }
     } catch {
       // Fall through to comma-separated parsing.
@@ -6646,12 +6659,9 @@ export default function AdsPage() {
               ? "Custom Amount"
               : "TBD");
         const normalizedStatus = String(ad.status || "").trim().toLowerCase();
+        const shouldAutoSchedule = mode !== "draft" && (!normalizedStatus || normalizedStatus === "draft");
         const resolvedStatus =
-          mode === "draft"
-            ? "Draft"
-            : isNewAdRecord && (!normalizedStatus || normalizedStatus === "draft")
-              ? "Scheduled"
-              : ad.status || "Draft";
+          mode === "draft" ? "Draft" : shouldAutoSchedule ? "Scheduled" : ad.status || "Draft";
 
         const payload = {
           ...ad,
