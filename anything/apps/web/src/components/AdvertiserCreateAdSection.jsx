@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Eye, X } from "lucide-react";
+import { ArrowLeft, Eye, X } from "lucide-react";
+import { FormHeader } from "@/components/SubmitAdForm/FormHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
@@ -613,227 +614,183 @@ export default function AdvertiserCreateAdSection({
 
   return (
     <>
-      <div className="flex max-w-none mx-auto min-h-screen">
-        <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12 flex justify-end">
-          <div className="w-full max-w-[800px] lg:mr-8 xl:mr-12 relative">
-            <form onSubmit={handleSubmit} className="space-y-12">
-              <div className="sticky top-0 z-30 -mt-6 mb-8 flex flex-col gap-4 border-b border-gray-100/50 bg-white/95 pb-4 pt-6 backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  type="button"
-                  onClick={exitCreateFlow}
-                  disabled={loading}
-                  className="flex items-center gap-2 text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeft size={18} />
-                  Back
-                </button>
+      <div className="min-h-screen bg-white">
+        <div className="flex max-w-none mx-auto">
+          <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12">
+            <div className="max-w-[680px] mx-auto mb-6 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={exitCreateFlow}
+                disabled={loading}
+                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeft size={18} />
+                Back
+              </button>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowPreview(true)}
-                    className="lg:hidden px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <Eye size={16} />
-                      Preview
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={exitCreateFlow}
-                    disabled={loading}
-                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitDisabled}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-black hover:bg-gray-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {loading ? "Submitting..." : "Submit Ad Request"}
-                    {!loading ? <ArrowRight size={16} /> : null}
-                  </button>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreview(true)}
+                className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400"
+              >
+                <Eye size={15} />
+                Preview
+              </button>
+            </div>
 
-              <div className="mb-10">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 flex items-center justify-center flex-shrink-0">
-                    <img
-                      src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
-                      alt="CBN Unfiltered Logo"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                </div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Create a new ad</h1>
-                <p className="text-gray-600 text-sm">
-                  Fill out the form below to create your advertising content.
-                </p>
-              </div>
+            <div className="max-w-[680px] mx-auto">
+              <FormHeader />
 
               {!identityReady ? (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 mb-8">
                   Your advertiser profile is missing a linked company name or email. Contact the
                   CBN team before submitting a new ad request.
                 </div>
               ) : null}
 
-              <AdvertiserInfoSection
-                formData={formData}
-                onChange={handleChange}
-                readOnlyFields={["advertiser_name", "email"]}
-                helperText="Your advertiser name and login email stay linked to this account. You can update the contact person and phone number for this request."
-              />
+              <form onSubmit={handleSubmit} className="space-y-8">
+                <AdvertiserInfoSection
+                  formData={formData}
+                  onChange={handleChange}
+                  readOnlyFields={["advertiser_name", "email"]}
+                  helperText="Your advertiser name and login email stay linked to this account. You can update the contact person and phone number for this request."
+                />
 
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Details</h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Campaign Details</h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Placement
-                    </label>
-                    <select
-                      value={formData.placement}
-                      onChange={(event) => handlePlacementChange(event.target.value)}
-                      className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                      style={selectFieldStyle}
-                    >
-                      <option value="">Select placement</option>
-                      {placementOptions.map((placement) => (
-                        <option key={placement} value={placement}>
-                          {placement}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Placement
+                      </label>
+                      <select
+                        value={formData.placement}
+                        onChange={(event) => handlePlacementChange(event.target.value)}
+                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                        style={selectFieldStyle}
+                      >
+                        <option value="">Select placement</option>
+                        {placementOptions.map((placement) => (
+                          <option key={placement} value={placement}>
+                            {placement}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                      <label className="block text-xs font-semibold text-gray-700 mb-1">
+                        Ad Product <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={formData.product_id}
+                        onChange={(event) => {
+                          const nextProduct =
+                            products.find(
+                              (item) => String(item?.id || "") === String(event.target.value || ""),
+                            ) || null;
+                          handleProductSelect(nextProduct);
+                        }}
+                        className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                        style={selectFieldStyle}
+                      >
+                        <option value="">Select a product package</option>
+                        {visibleProducts.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.product_name} - {item.placement || "N/A"} - {formatCurrency(item.price)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                  {productsLoading ? (
+                    <p className="text-xs text-gray-500">Loading product options...</p>
+                  ) : null}
+
+                  {!productsLoading && productsError ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      {productsError}
+                    </div>
+                  ) : null}
+
+                  {!productsLoading &&
+                  !productsError &&
+                  formData.placement &&
+                  visibleProducts.length === 0 ? (
+                    <p className="text-xs text-amber-700">
+                      No product packages are available for the selected placement.
+                    </p>
+                  ) : null}
+                </div>
+
+                <AdDetailsSection
+                  formData={formData}
+                  onChange={handleChange}
+                  onAddMedia={addMedia}
+                  onRemoveMedia={removeMedia}
+                />
+
+                <PostTypeSection selectedType={formData.post_type} onChange={handleChange} />
+
+                <ScheduleSection
+                  postType={formData.post_type}
+                  formData={formData}
+                  onChange={handleChange}
+                  customDate={customDate}
+                  setCustomDate={setCustomDate}
+                  customTime={customTime}
+                  setCustomTime={setCustomTime}
+                  onAddCustomDate={() => {}}
+                  onRemoveCustomDate={() => {}}
+                  onUpdateCustomDateTime={() => {}}
+                  onCheckAvailability={checkAvailability}
+                  checkingAvailability={checkingAvailability}
+                  availabilityError={availabilityError}
+                  pastTimeError={pastTimeError}
+                  fullyBookedDates={fullyBookedDates}
+                />
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
+                  <div className="border border-gray-200 rounded-lg bg-gray-50 px-4 pt-4 pb-3 mb-3">
                     <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Ad Product <span className="text-red-500">*</span>
+                      Estimated Total
                     </label>
-                    <select
-                      value={formData.product_id}
-                      onChange={(event) => {
-                        const nextProduct =
-                          products.find(
-                            (item) => String(item?.id || "") === String(event.target.value || ""),
-                          ) || null;
-                        handleProductSelect(nextProduct);
-                      }}
-                      className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                      style={selectFieldStyle}
-                    >
-                      <option value="">Select a product package</option>
-                      {visibleProducts.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.product_name} - {item.placement || "N/A"} - {formatCurrency(item.price)}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="w-full text-sm font-medium text-gray-900">
+                      {selectedProduct ? formatCurrency(estimatedTotal) : "$0.00"}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      {selectedProduct
+                        ? `${selectedProduct.product_name} at ${formatCurrency(
+                            selectedProduct.price,
+                          )} per scheduled ${scheduledPostLabel}`
+                        : "Choose a product package to calculate your total automatically."}
+                    </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4 mb-4">
-                  <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Ad Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.ad_name}
-                      onChange={(event) => handleChange("ad_name", event.target.value)}
-                      placeholder="Enter ad name"
-                      className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
-                    />
-                  </div>
+                <NotesSection notes={formData.notes} onChange={handleChange} />
+
+                <div className="pt-6 border-t">
+                  <button
+                    type="submit"
+                    disabled={submitDisabled}
+                    className="w-full bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                  >
+                    {loading ? "Submitting..." : "Submit Ad Request"}
+                  </button>
                 </div>
-
-                {productsLoading ? (
-                  <p className="text-xs text-gray-500">Loading product options...</p>
-                ) : null}
-
-                {!productsLoading && productsError ? (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    {productsError}
-                  </div>
-                ) : null}
-
-                {!productsLoading &&
-                !productsError &&
-                formData.placement &&
-                visibleProducts.length === 0 ? (
-                  <p className="text-xs text-amber-700">
-                    No product packages are available for the selected placement.
-                  </p>
-                ) : null}
-              </div>
-
-              <AdDetailsSection
-                formData={formData}
-                onChange={handleChange}
-                onAddMedia={addMedia}
-                onRemoveMedia={removeMedia}
-              />
-
-              <PostTypeSection selectedType={formData.post_type} onChange={handleChange} />
-
-              <ScheduleSection
-                postType={formData.post_type}
-                formData={formData}
-                onChange={handleChange}
-                customDate={customDate}
-                setCustomDate={setCustomDate}
-                customTime={customTime}
-                setCustomTime={setCustomTime}
-                onAddCustomDate={() => {}}
-                onRemoveCustomDate={() => {}}
-                onUpdateCustomDateTime={() => {}}
-                onCheckAvailability={checkAvailability}
-                checkingAvailability={checkingAvailability}
-                availabilityError={availabilityError}
-                pastTimeError={pastTimeError}
-                fullyBookedDates={fullyBookedDates}
-              />
-
-              <div>
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
-                <div className="border border-gray-200 rounded-lg bg-gray-50 px-4 pt-4 pb-3 mb-3">
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    Estimated Total
-                  </label>
-                  <div className="w-full text-sm font-medium text-gray-900">
-                    {selectedProduct ? formatCurrency(estimatedTotal) : "$0.00"}
-                  </div>
-                  <p className="mt-2 text-xs text-gray-500">
-                    {selectedProduct
-                      ? `${selectedProduct.product_name} at ${formatCurrency(
-                          selectedProduct.price,
-                        )} per scheduled ${scheduledPostLabel}`
-                      : "Choose a product package to calculate your total automatically."}
-                  </p>
-                </div>
-              </div>
-
-              <NotesSection notes={formData.notes} onChange={handleChange} />
-            </form>
-          </div>
-        </div>
-
-        <div className="hidden lg:flex w-[380px] xl:w-[420px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 justify-center">
-          <div className="w-full max-w-[320px]">
-            <AdPreview formData={previewData} />
+              </form>
+            </div>
           </div>
         </div>
       </div>
 
       {showPreview ? (
         <div
-          className="fixed inset-0 z-50 flex lg:hidden"
+          className="fixed inset-0 z-50 flex"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               setShowPreview(false);
@@ -841,21 +798,18 @@ export default function AdvertiserCreateAdSection({
           }}
         >
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div className="relative ml-auto h-full w-full max-w-[480px] bg-[#F5F5F5] shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">Ad Preview</p>
-                <p className="text-xs text-gray-500">Review before submitting</p>
-              </div>
+          <div className="relative ml-auto w-full max-w-[480px] h-full bg-[#F5F5F5] shadow-2xl flex flex-col overflow-y-auto">
+            <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
+              <span className="text-sm font-semibold text-gray-900">Ad Preview</span>
               <button
                 type="button"
                 onClick={() => setShowPreview(false)}
-                className="rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-900 transition-colors"
               >
                 <X size={18} />
               </button>
             </div>
-            <div className="h-[calc(100%-65px)] overflow-y-auto px-5 py-6">
+            <div className="flex-1 overflow-y-auto px-5 py-6">
               <AdPreview formData={previewData} />
             </div>
           </div>

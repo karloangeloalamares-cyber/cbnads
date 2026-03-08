@@ -2290,6 +2290,8 @@ export default function AdsPage() {
   const [calendarSelectedAd, setCalendarSelectedAd] = useState(null);
   const [calendarSidebarMinimized, setCalendarSidebarMinimized] = useState(false);
   const [advertiserSearch, setAdvertiserSearch] = useState("");
+  const [advertisersPageSize, setAdvertisersPageSize] = useState(10);
+  const [advertisersCurrentPage, setAdvertisersCurrentPage] = useState(1);
   const [openAdvertiserMenuId, setOpenAdvertiserMenuId] = useState(null);
   const [advertiserMenuCoordinates, setAdvertiserMenuCoordinates] = useState({
     top: 0,
@@ -2458,7 +2460,9 @@ export default function AdsPage() {
 
   const refreshPendingSubmissions = async () => {
     try {
-      const response = await fetchWithSessionAuth("/api/admin/pending-ads/list");
+      const response = await fetchWithSessionAuth("/api/admin/pending-ads/list", {
+        cache: "no-store",
+      });
       if (response?.ok) {
         const data = await response.json();
         const pendingAds = Array.isArray(data?.pending_ads) ? data.pending_ads : [];
@@ -2488,6 +2492,9 @@ export default function AdsPage() {
 
     try {
       await refreshPendingSubmissions();
+      window.setTimeout(() => {
+        void refreshPendingSubmissions();
+      }, 1500);
     } catch (error) {
       console.error(
         "[AdsPage] Failed to refresh submissions after notification:",
@@ -2502,6 +2509,25 @@ export default function AdsPage() {
     },
   });
   const totalUnreadCount = unreadCount + adsUnreadCount;
+
+  useEffect(() => {
+    if (!ready || activeSection !== "Submissions" || !canViewNotifications) {
+      return undefined;
+    }
+
+    void refreshPendingSubmissions();
+
+    const intervalId = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      void refreshPendingSubmissions();
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeSection, canViewNotifications, ready]);
 
   useEffect(() => {
     createAdStateRef.current = ad;
@@ -4243,6 +4269,37 @@ export default function AdsPage() {
       );
     });
   }, [advertiserSearch, advertisers]);
+
+  const advertiserTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredAdvertisers.length / advertisersPageSize)),
+    [advertisersPageSize, filteredAdvertisers.length],
+  );
+
+  useEffect(() => {
+    setAdvertisersCurrentPage(1);
+  }, [advertiserSearch]);
+
+  useEffect(() => {
+    setAdvertisersCurrentPage((current) =>
+      Math.min(Math.max(current, 1), advertiserTotalPages),
+    );
+  }, [advertiserTotalPages]);
+
+  useEffect(() => {
+    setOpenAdvertiserMenuId(null);
+  }, [advertiserSearch, advertisersCurrentPage, advertisersPageSize]);
+
+  const paginatedAdvertisers = useMemo(() => {
+    const startIndex = (advertisersCurrentPage - 1) * advertisersPageSize;
+    return filteredAdvertisers.slice(startIndex, startIndex + advertisersPageSize);
+  }, [advertisersCurrentPage, advertisersPageSize, filteredAdvertisers]);
+
+  const advertiserPageStartIndex =
+    filteredAdvertisers.length === 0 ? 0 : (advertisersCurrentPage - 1) * advertisersPageSize + 1;
+  const advertiserPageEndIndex = Math.min(
+    advertisersCurrentPage * advertisersPageSize,
+    filteredAdvertisers.length,
+  );
 
   const filteredProducts = useMemo(() => products, [products]);
 
@@ -9734,7 +9791,7 @@ export default function AdsPage() {
                             </td>
                           </tr>
                         ) : (
-                          filteredAdvertisers.map((item) => {
+                          paginatedAdvertisers.map((item) => {
                             const status = String(item.status || "active").toLowerCase();
                             return (
                               <tr
@@ -9850,6 +9907,60 @@ export default function AdsPage() {
                       </tbody>
                     </table>
                   </div>
+
+                  {filteredAdvertisers.length > 0 ? (
+                    <div className="mt-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <span>Rows per page</span>
+                        <select
+                          value={advertisersPageSize}
+                          onChange={(event) => {
+                            setAdvertisersPageSize(Number(event.target.value) || 10);
+                            setAdvertisersCurrentPage(1);
+                          }}
+                          className="h-9 min-w-[72px] rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900"
+                        >
+                          {ADS_PAGE_SIZE_OPTIONS.map((size) => (
+                            <option key={size} value={size}>
+                              {size}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="ml-2 text-xs text-gray-500">
+                          {advertiserPageStartIndex}-{advertiserPageEndIndex} of{" "}
+                          {filteredAdvertisers.length}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAdvertisersCurrentPage((current) => Math.max(1, current - 1))
+                          }
+                          disabled={advertisersCurrentPage <= 1}
+                          className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Previous
+                        </button>
+                        <span className="text-sm text-gray-600 min-w-[90px] text-center">
+                          Page {advertisersCurrentPage} of {advertiserTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAdvertisersCurrentPage((current) =>
+                              Math.min(advertiserTotalPages, current + 1),
+                            )
+                          }
+                          disabled={advertisersCurrentPage >= advertiserTotalPages}
+                          className="h-9 px-3 rounded-lg border border-gray-200 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               )}
 
