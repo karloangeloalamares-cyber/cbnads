@@ -17,6 +17,57 @@ const submissionPriority = (status) => {
   return 4;
 };
 
+const isMissingColumnError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    String(error?.code || "").trim() === "42703" ||
+    String(error?.code || "").trim() === "PGRST205" ||
+    message.includes("does not exist") ||
+    message.includes("could not find the")
+  );
+};
+
+const ADVERTISER_SELECT_VARIANTS = [
+  "id, advertiser_name, contact_name, email, phone_number, phone",
+  "id, advertiser_name, contact_name, email, phone_number",
+  "id, advertiser_name, contact_name, email, phone",
+  "id, advertiser_name, contact_name, email",
+];
+
+const queryAdvertiserWithFallbackColumns = async (
+  supabase,
+  { advertiserId = "", advertiserEmail = "", advertiserName = "" },
+) => {
+  const normalizedId = String(advertiserId || "").trim();
+  const normalizedEmail = String(advertiserEmail || "").trim().toLowerCase();
+  const normalizedName = String(advertiserName || "").trim();
+
+  for (const selectColumns of ADVERTISER_SELECT_VARIANTS) {
+    let query = supabase.from(table("advertisers")).select(selectColumns);
+
+    if (normalizedId) {
+      query = query.eq("id", normalizedId);
+    } else if (normalizedEmail) {
+      query = query.ilike("email", normalizedEmail).limit(1);
+    } else if (normalizedName) {
+      query = query.eq("advertiser_name", normalizedName).limit(1);
+    } else {
+      return null;
+    }
+
+    const { data, error } = await query.maybeSingle();
+    if (!error) {
+      return data || null;
+    }
+
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+  }
+
+  return null;
+};
+
 export async function GET(request) {
   try {
     const auth = await requireAdminOrAdvertiser(request);
@@ -106,40 +157,27 @@ const loadAdvertiserForScope = async (supabase, scope) => {
   const advertiserName = String(scope?.name || "").trim();
 
   if (advertiserId) {
-    const { data, error } = await supabase
-      .from(table("advertisers"))
-      .select("id, advertiser_name, contact_name, email, phone, phone_number")
-      .eq("id", advertiserId)
-      .maybeSingle();
-    if (error) throw error;
+    const data = await queryAdvertiserWithFallbackColumns(supabase, {
+      advertiserId,
+    });
     if (data?.id) {
       return data;
     }
   }
 
   if (advertiserEmail) {
-    const { data, error } = await supabase
-      .from(table("advertisers"))
-      .select("id, advertiser_name, contact_name, email, phone, phone_number")
-      .ilike("email", advertiserEmail)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
+    const data = await queryAdvertiserWithFallbackColumns(supabase, {
+      advertiserEmail,
+    });
     if (data?.id) {
       return data;
     }
   }
 
   if (advertiserName) {
-    const { data, error } = await supabase
-      .from(table("advertisers"))
-      .select("id, advertiser_name, contact_name, email, phone, phone_number")
-      .eq("advertiser_name", advertiserName)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
+    const data = await queryAdvertiserWithFallbackColumns(supabase, {
+      advertiserName,
+    });
     if (data?.id) {
       return data;
     }
@@ -217,6 +255,27 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error creating advertiser submission:", error);
-    return Response.json({ error: "Failed to submit ad" }, { status: 500 });
+    const message = String(error?.message || "").trim();
+    const isInvalidAdvertiserId = /invalid input syntax for type uuid/i.test(message);
+    const isSchemaMismatch = isMissingColumnError(error);
+
+    if (isInvalidAdvertiserId) {
+      return Response.json(
+        { error: "Your advertiser account link is invalid. Please contact support." },
+        { status: 400 },
+      );
+    }
+
+    if (isSchemaMismatch) {
+      return Response.json(
+        {
+          error:
+            "Submission service schema is out of date. Please run the latest database migrations.",
+        },
+        { status: 500 },
+      );
+    }
+
+    return Response.json({ error: message || "Failed to submit ad" }, { status: 500 });
   }
 }
