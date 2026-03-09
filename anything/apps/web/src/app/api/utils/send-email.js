@@ -23,12 +23,56 @@ export function resolveEmailSender(from) {
   return formatSender(from) || getDefaultEmailSender();
 }
 
-export async function sendEmail({ to, from, subject, html, text }) {
+const toEmailList = (value) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [value])
+        .map((entry) => String(entry || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+const senderEmailAddress = (sender) => {
+  const text = String(sender || "").trim();
+  if (!text) return "";
+  const namedMatch = text.match(/<([^>]+)>/);
+  if (namedMatch?.[1]) {
+    return String(namedMatch[1]).trim();
+  }
+  return text;
+};
+
+export async function sendEmail({ to, bcc, from, subject, html, text }) {
   if (!process.env.RESEND_API_KEY) {
     throw new Error("RESEND_API_KEY is not configured");
   }
 
   const sender = resolveEmailSender(from);
+  let toRecipients = toEmailList(to);
+  let bccRecipients = toEmailList(bcc);
+
+  // Safety default: if a caller passes multiple visible recipients in "to",
+  // convert to BCC to prevent recipient disclosure.
+  if (bccRecipients.length === 0 && toRecipients.length > 1) {
+    bccRecipients = [...toRecipients];
+    toRecipients = [];
+  }
+
+  if (toRecipients.length === 0 && bccRecipients.length === 0) {
+    throw new Error("Email recipient is required");
+  }
+
+  // Resend expects a visible "to" recipient. When we broadcast via BCC,
+  // use sender mailbox as the visible addressee to avoid exposing recipients.
+  if (toRecipients.length === 0 && bccRecipients.length > 0) {
+    const fallbackTo = senderEmailAddress(sender) || DEFAULT_FROM_EMAIL;
+    toRecipients.push(fallbackTo);
+  }
+
+  const toRecipientSet = new Set(toRecipients.map((value) => value.toLowerCase()));
+  const filteredBccRecipients = bccRecipients.filter(
+    (value) => !toRecipientSet.has(value.toLowerCase()),
+  );
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
 
@@ -41,7 +85,8 @@ export async function sendEmail({ to, from, subject, html, text }) {
       },
       body: JSON.stringify({
         from: sender,
-        to: Array.isArray(to) ? to : [to],
+        to: toRecipients,
+        ...(filteredBccRecipients.length > 0 ? { bcc: filteredBccRecipients } : {}),
         subject,
         html,
         text,

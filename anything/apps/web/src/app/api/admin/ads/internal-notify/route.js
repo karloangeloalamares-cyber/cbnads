@@ -25,6 +25,7 @@ const EVENT_LABELS = {
   deleted: "Ad Deleted",
   archived: "Ad Archived",
 };
+const ENABLED_NOTIFICATION_EVENTS = new Set(["published"]);
 
 const toValue = (...values) => {
   for (const value of values) {
@@ -74,6 +75,24 @@ export async function POST(request) {
     const event = normalizeEvent(body?.event);
     const eventLabel = EVENT_LABELS[event];
     const adId = String(body?.ad_id || "").trim();
+
+    if (!ENABLED_NOTIFICATION_EVENTS.has(event)) {
+      return Response.json({
+        success: true,
+        skipped: true,
+        event,
+        ad_id: adId || null,
+        message: `Lifecycle notifications are disabled for "${event}" events.`,
+        internal_notifications: {
+          email_sent: false,
+          telegram_sent: false,
+          email_recipients: 0,
+          telegram_recipients: 0,
+          email_error: null,
+          telegram_error: null,
+        },
+      });
+    }
 
     const supabase = db();
     let adRow = null;

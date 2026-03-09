@@ -492,7 +492,7 @@ export async function POST(request) {
             };
 
             await sendEmail({
-              to: internalEmails,
+              bcc: internalEmails,
               subject: payload.subject,
               html: generateReminderHtml(payload),
               text: reminderBodyText,

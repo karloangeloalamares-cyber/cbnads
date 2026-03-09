@@ -88,7 +88,7 @@ export async function notifyInternalChannels({
   if (emailSubject && emailHtml && targets.emails.length > 0) {
     try {
       await sendEmail({
-        to: targets.emails,
+        bcc: targets.emails,
         subject: emailSubject,
         html: emailHtml,
       });
