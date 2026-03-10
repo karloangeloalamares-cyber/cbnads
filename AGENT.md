@@ -1,6 +1,6 @@
 # CBN Ads Agent Handbook
 
-Last updated: March 6, 2026
+Last updated: March 10, 2026
 
 ## Scope
 
@@ -303,3 +303,92 @@ Skill:
 2. Frontend code quality and behavior pass (`frontend-audit`)
 3. Backend/API and schema pass (`backend-audit`)
 4. Focused issue isolation and fix verification (`debugger-workflow`)
+
+## WhatsApp Integration and Handover (March 10, 2026)
+
+### What was validated today
+
+1. Daily ad limit check:
+   - March 7, 2026 is blocked because total count is 6/6.
+   - March 8, 2026 is blocked because total count is 7/6.
+   - Important nuance: day blocking counts both `ads` and `pending_ads`, while calendar listing endpoint shows `ads` only.
+2. WhatsApp reminder investigation for invoice `INV-20260310-BC94`:
+   - Linked ad: `86a2cbc5-59f7-41f2-a34a-f0faf3aca938` (`Testing Whatsapp`).
+   - Scheduled time: March 10, 2026 at `03:30:00` ET (`07:30:00Z`).
+   - `sent_reminders` shows only email reminders at `07:28:17Z` and `07:28:18Z` (`03:28 ET`) for schedule key `2026-03-10T03:30:00`.
+   - No `admin_whatsapp` reminder record exists for this occurrence.
+   - Production logs show WhatsApp send errors:
+     - `[whatsapp] Meta API Error: Not a WhatsApp event`
+   - This strongly indicates outbound WhatsApp calls in production are hitting a non-Meta endpoint (typically webhook URL) instead of the Meta Graph `/messages` endpoint.
+
+### Current WhatsApp architecture
+
+1. Outbound utility:
+   - `anything/apps/web/src/app/api/utils/send-whatsapp.js`
+   - Sends Meta Cloud API requests for text/media/template messages.
+2. Scheduled sender:
+   - `anything/apps/web/src/app/api/admin/send-reminders/route.js`
+   - Sends email reminders, then sends admin WhatsApp at schedule trigger window.
+   - Writes send receipts to `cbnads_web_sent_reminders` with `recipient_type='admin_whatsapp'` when successful.
+3. Manual test sender:
+   - `anything/apps/web/src/app/api/admin/send-test-whatsapp/route.js`
+4. Webhook receiver:
+   - `anything/apps/web/src/app/api/webhook/whatsapp/route.js`
+   - Only for inbound webhook events and delivery callbacks.
+   - If this route receives outbound payload shape, it returns `Not a WhatsApp event`.
+
+### Required WhatsApp environment variables
+
+Set in deployment environment (Vercel) and keep values secret:
+
+1. `WHATSAPP_API_URL`
+   - Must be Meta Graph send endpoint format:
+   - `https://graph.facebook.com/v22.0/<PHONE_NUMBER_ID>/messages`
+2. `WHATSAPP_API_TOKEN`
+   - Permanent or long-lived token with WhatsApp messaging permissions.
+3. `WHATSAPP_VERIFY_TOKEN`
+   - Shared secret used by Meta webhook verification callback.
+4. `WHATSAPP_BROADCAST_NUMBER`
+   - Fallback recipient used by internal tools.
+5. Optional template defaults:
+   - `WHATSAPP_ADMIN_TEMPLATE_NAME`
+   - `WHATSAPP_ADMIN_TEMPLATE_LANGUAGE`
+
+### Data model used by WhatsApp reminders
+
+1. `cbnads_web_admin_notification_preferences`
+   - Stores active admin recipients in `whatsapp_recipients`.
+2. `cbnads_web_sent_reminders`
+   - Stores each sent reminder by `ad_id`, `recipient_type`, `schedule_key`.
+   - Successful WhatsApp schedule sends should insert:
+     - `reminder_type='whatsapp'`
+     - `recipient_type='admin_whatsapp'`
+
+### Owner access transfer checklist (Meta + Vercel)
+
+1. Meta Business Manager:
+   - Add owner accounts as admins to:
+     - Business account
+     - WhatsApp Business Account (WABA)
+     - Phone number asset
+2. Token ownership:
+   - Create/assign owner-managed system user token for WhatsApp Cloud API.
+   - Ensure required permissions/scopes are granted in Meta app.
+3. Rotate production credentials:
+   - Update `WHATSAPP_API_TOKEN` in Vercel production.
+   - Confirm `WHATSAPP_API_URL` points to Meta `/messages`, not webhook.
+4. Webhook ownership:
+   - Confirm callback URL and `WHATSAPP_VERIFY_TOKEN`.
+   - Re-verify webhook subscription in Meta dashboard.
+5. Recipient ownership:
+   - Review `admin_notification_preferences` and update active owner numbers.
+6. Validation after transfer:
+   - Send test from `/api/admin/send-test-whatsapp`.
+   - Trigger `/api/admin/send-reminders?debug=true` and confirm WhatsApp send path.
+   - Confirm new `admin_whatsapp` records appear in `cbnads_web_sent_reminders`.
+
+### Known failure signature (quick diagnosis)
+
+If logs show `Not a WhatsApp event` during outbound sends, check this first:
+
+1. `WHATSAPP_API_URL` incorrectly points to webhook endpoint instead of Meta Graph `/messages`.
