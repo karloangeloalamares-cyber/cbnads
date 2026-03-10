@@ -2,6 +2,32 @@ import { db, table } from "../../utils/supabase-db.js";
 
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || "";
 
+function summarizeStatusUpdate(statusItem = {}) {
+  const errors = Array.isArray(statusItem.errors)
+    ? statusItem.errors.map((entry) => ({
+        code: entry?.code ?? null,
+        title: entry?.title || entry?.message || "",
+        details: entry?.details || "",
+      }))
+    : [];
+
+  return {
+    message_id: statusItem.id || null,
+    recipient_id: statusItem.recipient_id || null,
+    status: statusItem.status || "unknown",
+    timestamp: statusItem.timestamp || null,
+    conversation_id: statusItem?.conversation?.id || null,
+    conversation_type: statusItem?.conversation?.origin?.type || null,
+    pricing_category: statusItem?.pricing?.category || null,
+    pricing_model: statusItem?.pricing?.pricing_model || null,
+    billable:
+      typeof statusItem?.pricing?.billable === "boolean"
+        ? statusItem.pricing.billable
+        : null,
+    errors,
+  };
+}
+
 // GET: Webhook verification step required by Meta
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
@@ -34,8 +60,19 @@ export async function POST(request) {
     for (const entry of body.entry) {
       for (const change of entry.changes) {
         if (change.field === "messages") {
-          const value = change.value;
-          
+          const value = change.value || {};
+
+          if (Array.isArray(value.statuses) && value.statuses.length > 0) {
+            for (const statusItem of value.statuses) {
+              const summary = summarizeStatusUpdate(statusItem);
+              if (summary.status === "failed" || summary.errors.length > 0) {
+                console.error("[whatsapp] Delivery status update (failed):", summary);
+              } else {
+                console.log("[whatsapp] Delivery status update:", summary);
+              }
+            }
+          }
+
           if (value.messages && value.messages.length > 0) {
             const message = value.messages[0];
 

@@ -1169,7 +1169,7 @@ function AdsGridCard({
                     type="button"
                   >
                     <MessageCircle size={16} className="text-green-500" />
-                    Send to WhatsApp
+                    Send to Admin WhatsApp
                   </button>
                   <button
                     onClick={() => {
@@ -1410,7 +1410,7 @@ function AdsTableRow({
                     type="button"
                   >
                     <MessageCircle size={16} className="text-green-500" />
-                    Send to my WhatsApp
+                    Send to Admin WhatsApp
                   </button>
                   <button
                     onClick={() => {
@@ -2680,6 +2680,8 @@ export default function AdsPage() {
   });
   const [settingsNotificationSaving, setSettingsNotificationSaving] = useState(false);
   const [settingsNotificationTesting, setSettingsNotificationTesting] = useState(false);
+  const [settingsNotificationWhatsAppTesting, setSettingsNotificationWhatsAppTesting] =
+    useState(false);
   const [settingsNotificationChecking, setSettingsNotificationChecking] =
     useState(false);
   const [settingsNotificationMessage, setSettingsNotificationMessage] =
@@ -5940,6 +5942,41 @@ export default function AdsPage() {
     }, 500);
   };
 
+  const handleSettingsSendTestWhatsApp = async () => {
+    setSettingsNotificationWhatsAppTesting(true);
+    setSettingsNotificationMessage(null);
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/send-test-whatsapp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || `Failed to send WhatsApp test (${response.status})`);
+      }
+      const recipient = String(payload?.to || "").trim();
+      const messageId = String(payload?.message_id || "").trim();
+      setSettingsNotificationMessage({
+        type: "info",
+        text: recipient
+          ? `WhatsApp accepted for ${recipient}${messageId ? ` (ID: ${messageId})` : ""}.`
+          : `WhatsApp accepted${messageId ? ` (ID: ${messageId})` : ""}.`,
+      });
+    } catch (error) {
+      setSettingsNotificationMessage({
+        type: "error",
+        text:
+          error instanceof Error
+            ? error.message
+            : "Failed to send WhatsApp test message.",
+      });
+    } finally {
+      setSettingsNotificationWhatsAppTesting(false);
+    }
+  };
+
   const handleSettingsAddTelegramChatId = async () => {
     const label = settingsTelegramNewLabel.trim();
     const chatId = settingsTelegramNewChatId.trim();
@@ -7265,31 +7302,46 @@ export default function AdsPage() {
     download(`cbnads-ads-${Date.now()}.csv`, csv, "text/csv;charset=utf-8");
   };
 
-  const handleSendAdToMyWhatsApp = async (adItem) => {
-    const target = String(settingsProfileWhatsapp || user?.whatsapp_number || "").trim();
-    if (!target) {
-      appToast.warning({
-        title: "WhatsApp number missing",
-        description: "Please add your WhatsApp number in Settings > Profile first.",
-      });
-      return;
-    }
-
-    const digits = target.replace(/[^\d]/g, "");
-    if (!digits) {
-      appToast.warning({
-        title: "WhatsApp number format is invalid",
-        description: "Use international format like +1234567890.",
-      });
-      return;
-    }
-
+  const handleSendAdToAdminWhatsApp = async (adItem) => {
     const messageText = buildAdsShareMessage(adItem);
-    const url = `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
-    window.open(url, "_blank", "noopener,noreferrer");
-    appToast.info({
-      title: "Opened WhatsApp with your ad message.",
-    });
+
+    if (!String(messageText || "").trim()) {
+      appToast.warning({
+        title: "Nothing to send",
+        description: "This ad does not have any content yet.",
+      });
+      return;
+    }
+
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/send-test-whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          use_template: false,
+          text: messageText,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to send");
+      }
+      const messageId = String(data?.message_id || "").trim();
+      const warning = String(data?.warning || "").trim();
+      appToast.success({
+        title: "Ad accepted by admin WhatsApp channel.",
+        description: warning
+          ? `${warning}${messageId ? ` Meta ID: ${messageId}` : ""}`
+          : messageId
+            ? `Meta ID: ${messageId}`
+            : "Delivery may still be pending.",
+      });
+    } catch (err) {
+      appToast.error({
+        title: "Failed to send to admin WhatsApp",
+        description: err.message,
+      });
+    }
   };
 
   const handleSendAdToMyTelegram = async (adItem) => {
@@ -9387,7 +9439,7 @@ export default function AdsPage() {
                             onEdit={openAdEditor}
                             onMarkPublished={markAdAsPublished}
                             onDelete={deleteAdRecord}
-                            onSendToWhatsApp={handleSendAdToMyWhatsApp}
+                            onSendToWhatsApp={handleSendAdToAdminWhatsApp}
                             onSendToTelegram={handleSendAdToMyTelegram}
                             readOnly={isAdvertiser}
                             canDelete={canDeleteAds}
@@ -9408,7 +9460,7 @@ export default function AdsPage() {
                           onEdit={openAdEditor}
                           onMarkPublished={markAdAsPublished}
                           onDelete={deleteAdRecord}
-                          onSendToWhatsApp={handleSendAdToMyWhatsApp}
+                          onSendToWhatsApp={handleSendAdToAdminWhatsApp}
                           onSendToTelegram={handleSendAdToMyTelegram}
                           readOnly={isAdvertiser}
                           canDelete={canDeleteAds}
@@ -12665,6 +12717,18 @@ export default function AdsPage() {
                           className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                         >
                           {settingsNotificationTesting ? "Sending..." : "Send Test Email"}
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={handleSettingsSendTestWhatsApp}
+                          disabled={settingsNotificationWhatsAppTesting}
+                          className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          {settingsNotificationWhatsAppTesting
+                            ? "Sending..."
+                            : "Send Test WhatsApp"}
                         </button>
                       )}
                       <button
