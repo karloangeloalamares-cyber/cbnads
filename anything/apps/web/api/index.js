@@ -42,9 +42,9 @@ import * as route_39 from "../src/app/api/upload/signed-url/route.js";
 import * as route_40 from "../src/app/api/user/profile/route.js";
 import * as route_41 from "../src/app/api/user/role/route.js";
 import * as route_42 from "../src/app/api/webhook/whatsapp/route.js";
-import * as route_43 from "../src/app/api/admin/ads/internal-notify/route.js";
-import * as route_44 from "../src/app/api/admin/ads/send-approval-email/route.js";
-import * as route_45 from "../src/app/api/__create/ssr-test/route.js";
+import * as route_43 from "../src/app/api/__create/ssr-test/route.js";
+import * as route_44 from "../src/app/api/admin/ads/internal-notify/route.js";
+import * as route_45 from "../src/app/api/admin/ads/send-approval-email/route.js";
 import * as route_46 from "../src/app/api/admin/advertisers/ensure-account/route.js";
 import * as route_47 from "../src/app/api/admin/members/[id]/route.js";
 import * as route_48 from "../src/app/api/admin/pending-ads/approve/route.js";
@@ -71,10 +71,10 @@ const routes = [
   { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_59 },
   { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_61 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_53 },
-  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_44 },
+  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_45 },
   { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_51 },
   { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_62 },
-  { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_43 },
+  { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_44 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_48 },
   { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_49 },
   { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_52 },
@@ -103,7 +103,7 @@ const routes = [
   { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_20 },
   { regex: new RegExp("^/api/advertisers/create$"), module: route_22 },
   { regex: new RegExp("^/api/upload/signed\\-url$"), module: route_39 },
-  { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_45 },
+  { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_43 },
   { regex: new RegExp("^/api/ads/availability$"), module: route_12 },
   { regex: new RegExp("^/api/advertisers/list$"), module: route_23 },
   { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_36 },

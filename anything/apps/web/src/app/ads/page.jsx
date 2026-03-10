@@ -358,6 +358,57 @@ const formatCurrency = (value) => {
   }).format(amount);
 };
 
+const roundCurrencyValue = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.round(parsed * 100) / 100;
+};
+
+const rebalanceInvoiceItemsToAmount = (items, targetAmount) => {
+  const sourceItems = Array.isArray(items) ? items : [];
+  if (sourceItems.length === 0) {
+    return [];
+  }
+
+  const normalizedTarget = Math.max(roundCurrencyValue(targetAmount), 0);
+  if (normalizedTarget <= 0) {
+    return sourceItems.map((item) => ({
+      ...item,
+      amount: 0,
+      unit_price: 0,
+    }));
+  }
+
+  const currentSubtotal = sourceItems.reduce(
+    (sum, item) => sum + (Number(item?.amount ?? item?.unit_price ?? 0) || 0),
+    0,
+  );
+
+  let distributed = 0;
+  return sourceItems.map((item, index) => {
+    const quantity = Math.max(1, Number(item?.quantity) || 1);
+    let nextAmount = 0;
+
+    if (index === sourceItems.length - 1) {
+      nextAmount = roundCurrencyValue(Math.max(normalizedTarget - distributed, 0));
+    } else if (currentSubtotal > 0) {
+      const baseAmount = Number(item?.amount ?? item?.unit_price ?? 0) || 0;
+      nextAmount = roundCurrencyValue((baseAmount / currentSubtotal) * normalizedTarget);
+    } else {
+      nextAmount = roundCurrencyValue(normalizedTarget / sourceItems.length);
+    }
+
+    distributed = roundCurrencyValue(distributed + nextAmount);
+    return {
+      ...item,
+      amount: nextAmount,
+      unit_price: roundCurrencyValue(nextAmount / quantity),
+    };
+  });
+};
+
 const formatDate = (value) => {
   if (!value) {
     return "-";
@@ -11643,9 +11694,47 @@ export default function AdsPage() {
                           type="number"
                           step="0.01"
                           value={invoice.amount}
-                          onChange={(event) =>
-                            setInvoice({ ...invoice, amount: event.target.value })
-                          }
+                          onChange={(event) => {
+                            const nextAmountText = event.target.value;
+                            const parsedAmount = Number.parseFloat(
+                              String(nextAmountText || "").trim(),
+                            );
+                            const hasNumericAmount = Number.isFinite(parsedAmount);
+
+                            if (hasNumericAmount) {
+                              const invoiceItems =
+                                Array.isArray(invoice.items) && invoice.items.length > 0
+                                  ? invoice.items
+                                  : invoicePreviewLinkedAds.flatMap((linkedAd, adIndex) => {
+                                      const linkedUnitPrice = Number(linkedAd?.price || 0) || 0;
+                                      return buildInvoiceItemsFromAd({
+                                        adRecord: linkedAd,
+                                        unitPrice: linkedUnitPrice,
+                                      }).map((item, itemIndex) => ({
+                                        ...item,
+                                        id:
+                                          item.id ||
+                                          `${String(linkedAd?.id || adIndex)}-${itemIndex}`,
+                                      }));
+                                    });
+
+                              if (invoiceItems.length > 0) {
+                                setInvoice({
+                                  ...invoice,
+                                  amount: nextAmountText,
+                                  total: nextAmountText,
+                                  items: rebalanceInvoiceItemsToAmount(invoiceItems, parsedAmount),
+                                });
+                                return;
+                              }
+                            }
+
+                            setInvoice({
+                              ...invoice,
+                              amount: nextAmountText,
+                              total: nextAmountText,
+                            });
+                          }}
                           placeholder="0.00"
                           className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                         />
