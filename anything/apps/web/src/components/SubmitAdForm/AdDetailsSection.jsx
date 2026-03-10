@@ -11,6 +11,7 @@ export function AdDetailsSection({
   showAlert,
 }) {
   const textareaRef = useRef(null);
+  const MAX_AD_TEXT_LENGTH = 1500;
 
   const handleFormatting = (formatChar) => {
     if (!textareaRef.current) return;
@@ -36,6 +37,46 @@ export function AdDetailsSection({
       if (textareaRef.current) {
         textareaRef.current.focus();
         textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  };
+
+  const handleAdTextPaste = (event) => {
+    const pastedText = String(
+      event.clipboardData?.getData("text/plain") ||
+        event.clipboardData?.getData("text") ||
+        "",
+    );
+
+    if (!pastedText) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const input = event.currentTarget;
+    const currentText = String(formData?.ad_text || "");
+    const selectionStart = Number.isFinite(input.selectionStart) ? input.selectionStart : currentText.length;
+    const selectionEnd = Number.isFinite(input.selectionEnd) ? input.selectionEnd : selectionStart;
+
+    const before = currentText.slice(0, selectionStart);
+    const after = currentText.slice(selectionEnd);
+    const available = Math.max(0, MAX_AD_TEXT_LENGTH - (before.length + after.length));
+
+    if (available <= 0) {
+      return;
+    }
+
+    const nextChunk = pastedText.slice(0, available);
+    const nextValue = `${before}${nextChunk}${after}`;
+    const nextCursorPos = before.length + nextChunk.length;
+
+    onChange("ad_text", nextValue);
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(nextCursorPos, nextCursorPos);
       }
     }, 0);
   };
@@ -110,8 +151,9 @@ export function AdDetailsSection({
           name="ad_text"
           value={formData.ad_text}
           onChange={(event) => onChange("ad_text", event.target.value)}
+          onPaste={handleAdTextPaste}
           rows={4}
-          maxLength={1500}
+          maxLength={MAX_AD_TEXT_LENGTH}
           placeholder="Enter your ad copy... Use *bold*, _italic_, ~strikethrough~, or ```code```"
           className="w-full px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-y"
         />

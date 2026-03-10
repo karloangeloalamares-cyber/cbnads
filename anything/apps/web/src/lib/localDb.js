@@ -144,6 +144,74 @@ const normalizePostType = (value) => normalizePostTypeValue(value);
 const toMoney = (value) => numberOrZero(value).toFixed(2);
 
 const toArray = (value) => (Array.isArray(value) ? value : []);
+const WHATSAPP_E164_LIKE_REGEX = /^\+?\d{8,15}$/;
+const normalizeWhatsAppPhoneE164 = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) {
+    return '';
+  }
+
+  const normalized = `+${digits}`;
+  return WHATSAPP_E164_LIKE_REGEX.test(normalized) ? normalized : '';
+};
+const normalizeWhatsAppRecipients = (value) => {
+  const list = toArray(value);
+  const normalized = [];
+  const seen = new Set();
+
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+
+    const phone = normalizeWhatsAppPhoneE164(
+      entry.phone_e164 || entry.phone || entry.to || entry.recipient,
+    );
+    if (!phone) {
+      continue;
+    }
+
+    const key = phone.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    normalized.push({
+      id: String(entry.id || phone).trim() || phone,
+      label: String(entry.label || phone).trim() || phone,
+      phone_e164: phone,
+      is_active: entry.is_active !== false,
+      created_at: entry.created_at || null,
+      updated_at: entry.updated_at || null,
+    });
+  }
+
+  return normalized;
+};
+const normalizeWhatsAppSettings = (value) => {
+  const source = value && typeof value === 'object' ? value : {};
+  const rawMode = String(source.send_mode || source.default_send_mode || 'text')
+    .trim()
+    .toLowerCase();
+  const sendMode = ['text', 'template', 'auto'].includes(rawMode) ? rawMode : 'text';
+  const templateLanguage = String(source.template_language || 'en_US').trim() || 'en_US';
+  const templateName = String(source.template_name || '').trim();
+
+  return {
+    enabled: source.enabled !== false,
+    include_media: source.include_media !== false,
+    use_template_fallback: source.use_template_fallback === true,
+    send_mode: sendMode,
+    template_name: templateName || null,
+    template_language: templateLanguage,
+  };
+};
 const normalizeCustomDateEntry = (entry) => {
   if (entry && typeof entry === 'object') {
     const date = toDateOnly(entry.date);
@@ -629,6 +697,15 @@ const baseDb = (users = []) => {
       phone_number: '',
       sound_enabled: true,
       reminder_email: '',
+      whatsapp_recipients: [],
+      whatsapp_settings: {
+        enabled: true,
+        include_media: true,
+        use_template_fallback: false,
+        send_mode: 'text',
+        template_name: null,
+        template_language: 'en_US',
+      },
     },
     telegram_chat_ids: [],
     team_members: [],
@@ -1183,6 +1260,10 @@ const toAdminSettingsFallbackRow = (input) => {
 
 const fromNotificationRows = (notificationRow, adminNotificationRow) => {
   const telegramChatIds = toArray(adminNotificationRow?.telegram_chat_ids);
+  const whatsappRecipients = normalizeWhatsAppRecipients(
+    adminNotificationRow?.whatsapp_recipients,
+  );
+  const whatsappSettings = normalizeWhatsAppSettings(adminNotificationRow?.whatsapp_settings);
   const hasActiveTelegramChat = telegramChatIds.some(
     (entry) => entry?.is_active !== false && String(entry?.chat_id || '').trim(),
   );
@@ -1203,6 +1284,8 @@ const fromNotificationRows = (notificationRow, adminNotificationRow) => {
     reminder_email:
       notificationRow?.reminder_email || adminNotificationRow?.email_address || '',
     telegram_chat_ids: telegramChatIds,
+    whatsapp_recipients: whatsappRecipients,
+    whatsapp_settings: whatsappSettings,
     created_at: notificationRow?.created_at || adminNotificationRow?.created_at || nowIso(),
     updated_at: notificationRow?.updated_at || adminNotificationRow?.updated_at || nowIso(),
   };
@@ -1223,6 +1306,8 @@ const toAdminNotificationRow = (input) => ({
   phone_number: normalizeUSPhoneNumber(input?.phone_number || ''),
   sound_enabled: input?.sound_enabled !== false,
   telegram_chat_ids: toArray(input?.telegram_chat_ids),
+  whatsapp_recipients: normalizeWhatsAppRecipients(input?.whatsapp_recipients),
+  whatsapp_settings: normalizeWhatsAppSettings(input?.whatsapp_settings),
   updated_at: nowIso(),
 });
 
@@ -1859,11 +1944,16 @@ export const upsertAdvertiser = async (input) => {
   await updateDb((db) => {
     const now = nowIso();
     const phone = normalizeUSPhoneNumber(input.phone_number || input.phone || '');
+    const normalizedName = String(input.advertiser_name || '').trim();
+    const normalizedNameKey = normalizedName.toLowerCase();
+    const normalizedEmail = String(input.email || '')
+      .trim()
+      .toLowerCase();
     const payload = {
       id: input.id || createId('adv'),
-      advertiser_name: (input.advertiser_name || '').trim(),
+      advertiser_name: normalizedName,
       contact_name: (input.contact_name || '').trim(),
-      email: (input.email || '').trim(),
+      email: normalizedEmail,
       phone,
       phone_number: phone,
       business_name: (input.business_name || '').trim(),
@@ -1875,10 +1965,27 @@ export const upsertAdvertiser = async (input) => {
       updated_at: now,
     };
 
-    const index = db.advertisers.findIndex((item) => item.id === payload.id);
+    let index = db.advertisers.findIndex((item) => item.id === payload.id);
+
+    if (index === -1) {
+      if (normalizedEmail) {
+        index = db.advertisers.findIndex(
+          (item) => String(item?.email || '').trim().toLowerCase() === normalizedEmail,
+        );
+      }
+
+      if (index === -1 && normalizedNameKey) {
+        index = db.advertisers.findIndex(
+          (item) =>
+            String(item?.advertiser_name || '').trim().toLowerCase() === normalizedNameKey,
+        );
+      }
+    }
+
     if (index === -1) {
       db.advertisers.unshift(payload);
     } else {
+      payload.id = db.advertisers[index].id || payload.id;
       payload.created_at = db.advertisers[index].created_at ?? payload.created_at;
       db.advertisers[index] = { ...db.advertisers[index], ...payload };
     }

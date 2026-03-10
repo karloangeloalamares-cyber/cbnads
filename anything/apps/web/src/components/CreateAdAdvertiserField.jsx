@@ -28,9 +28,47 @@ export default function CreateAdAdvertiserField({
     [advertisers, value],
   );
 
+  const uniqueAdvertisers = useMemo(() => {
+    const selectedId = String(value || "").trim();
+    const seen = new Map();
+
+    const getDedupKey = (item) => {
+      const name = String(item?.advertiser_name || "")
+        .trim()
+        .toLowerCase();
+      if (name) {
+        return `name:${name}`;
+      }
+      const email = String(item?.email || "")
+        .trim()
+        .toLowerCase();
+      if (email) {
+        return `email:${email}`;
+      }
+      return `id:${String(item?.id || "").trim()}`;
+    };
+
+    for (const item of Array.isArray(advertisers) ? advertisers : []) {
+      const key = getDedupKey(item);
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, item);
+        continue;
+      }
+
+      const currentId = String(item?.id || "").trim();
+      const existingId = String(existing?.id || "").trim();
+      if (currentId && currentId === selectedId && existingId !== selectedId) {
+        seen.set(key, item);
+      }
+    }
+
+    return Array.from(seen.values());
+  }, [advertisers, value]);
+
   const filteredAdvertisers = useMemo(() => {
     const query = String(search || "").trim().toLowerCase();
-    const source = [...advertisers].sort((left, right) =>
+    const source = [...uniqueAdvertisers].sort((left, right) =>
       String(left?.advertiser_name || "").localeCompare(String(right?.advertiser_name || "")),
     );
 
@@ -43,7 +81,7 @@ export default function CreateAdAdvertiserField({
         String(field || "").toLowerCase().includes(query),
       ),
     );
-  }, [advertisers, search]);
+  }, [search, uniqueAdvertisers]);
 
   useEffect(() => {
     if (!isOpen || typeof window === "undefined") {

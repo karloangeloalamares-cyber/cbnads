@@ -193,6 +193,35 @@ const emitSubmissionNotificationSignal = ({ source = "", id = "" } = {}) => {
 
 const normalizeComparableText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmailAddress = (value) => String(value || "").trim().toLowerCase();
+const WHATSAPP_E164_INPUT_REGEX = /^\+\d{8,15}$/;
+const normalizeWhatsAppE164Input = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+  return `+${digits}`;
+};
+const isValidWhatsAppE164Input = (value) =>
+  WHATSAPP_E164_INPUT_REGEX.test(normalizeWhatsAppE164Input(value));
+const createDefaultWhatsAppSettingsDraft = (value = null) => {
+  const source = value && typeof value === "object" ? value : {};
+  const rawSendMode = String(source.send_mode || "text").trim().toLowerCase();
+  const sendMode = ["text", "template", "auto"].includes(rawSendMode)
+    ? rawSendMode
+    : "text";
+  return {
+    enabled: source.enabled !== false,
+    include_media: source.include_media !== false,
+    use_template_fallback: source.use_template_fallback === true,
+    send_mode: sendMode,
+    template_name: String(source.template_name || "").trim(),
+    template_language: String(source.template_language || "en_US").trim() || "en_US",
+  };
+};
 const mergeUniqueSubmissionReasons = (...groups) => {
   const merged = [];
   const seen = new Set();
@@ -685,51 +714,8 @@ const formatAdsTime = (value) => {
   return `${displayHour}:${minutes} ${ampm}`;
 };
 
-const formatAdsScheduleForShare = (ad) => {
-  const postType = String(ad?.post_type || "").toLowerCase();
-
-  if (postType.includes("daily")) {
-    const fromDate = formatAdsDate(ad?.post_date_from || ad?.schedule || ad?.post_date);
-    const toDate = formatAdsDate(ad?.post_date_to || "");
-    if (fromDate !== "N/A" && toDate !== "N/A") {
-      return `${fromDate} - ${toDate}`;
-    }
-    return fromDate !== "N/A" ? fromDate : "Not scheduled";
-  }
-
-  if (postType.includes("custom")) {
-    const customDates = toStringArray(ad?.custom_dates)
-      .map((item) => String(item).slice(0, 10))
-      .filter(Boolean);
-    if (customDates.length > 0) {
-      return `${customDates.length} custom dates`;
-    }
-    return "Custom schedule";
-  }
-
-  const oneTimeDate = formatAdsDate(ad?.schedule || ad?.post_date);
-  return oneTimeDate !== "N/A" ? oneTimeDate : "Not scheduled";
-};
-
-const buildAdsShareMessage = (ad) => {
-  const lines = [];
-  lines.push(`*${ad?.ad_name || "Ad"}*`);
-  lines.push("");
-  lines.push(`📢 *Advertiser:* ${ad?.advertiser || "N/A"}`);
-  lines.push(`📍 *Placement:* ${ad?.placement || "N/A"}`);
-  lines.push(`📅 *Schedule:* ${formatAdsScheduleForShare(ad)}`);
-  lines.push(`🕐 *Time:* ${formatAdsTime(ad?.post_time)} ET`);
-  lines.push(`💰 *Payment:* ${ad?.payment || "Pending"}`);
-  if (String(ad?.ad_text || "").trim()) {
-    lines.push("");
-    lines.push("*Ad Content:*");
-    lines.push(String(ad.ad_text));
-  }
-  lines.push("");
-  lines.push("---");
-  lines.push("Sent from CBN Ads Manager");
-  return lines.join("\n");
-};
+const buildAdsShareMessage = (ad) =>
+  String(ad?.ad_text || ad?.notes || "").trim();
 
 const buildAdsTelegramCaption = (ad) =>
   String(ad?.ad_text || ad?.notes || "").trim();
@@ -2755,6 +2741,16 @@ export default function AdsPage() {
   const [whatsAppFilterUnread, setWhatsAppFilterUnread] = useState(false);
   const [whatsAppSearchTerm, setWhatsAppSearchTerm] = useState("");
   const [whatsAppSelectedMessageId, setWhatsAppSelectedMessageId] = useState(null);
+  const [whatsAppAdminTab, setWhatsAppAdminTab] = useState("inbox");
+  const [whatsAppNewRecipientLabel, setWhatsAppNewRecipientLabel] = useState("");
+  const [whatsAppNewRecipientPhone, setWhatsAppNewRecipientPhone] = useState("");
+  const [whatsAppRecipientAdding, setWhatsAppRecipientAdding] = useState(false);
+  const [whatsAppRecipientTesting, setWhatsAppRecipientTesting] = useState(null);
+  const [whatsAppSettingsDraft, setWhatsAppSettingsDraft] = useState(
+    createDefaultWhatsAppSettingsDraft(),
+  );
+  const [whatsAppSettingsSaving, setWhatsAppSettingsSaving] = useState(false);
+  const [whatsAppBulkTesting, setWhatsAppBulkTesting] = useState(false);
 
   const userRole = normalizeAppRole(user?.role);
   const isAdmin = userRole === "admin";
@@ -3360,6 +3356,29 @@ export default function AdsPage() {
   const settingsActiveTelegramCount = settingsTelegramChatIds.filter(
     (item) => item.is_active !== false,
   ).length;
+  const whatsAppRecipients = useMemo(() => {
+    const source = Array.isArray(notificationPreferences.whatsapp_recipients)
+      ? notificationPreferences.whatsapp_recipients
+      : [];
+    return [...source].sort((a, b) => {
+      const aActive = a?.is_active !== false ? 1 : 0;
+      const bActive = b?.is_active !== false ? 1 : 0;
+      if (aActive !== bActive) {
+        return bActive - aActive;
+      }
+      return String(a?.label || a?.phone_e164 || "")
+        .toLowerCase()
+        .localeCompare(String(b?.label || b?.phone_e164 || "").toLowerCase());
+    });
+  }, [notificationPreferences.whatsapp_recipients]);
+  const whatsAppActiveRecipientCount = useMemo(
+    () => whatsAppRecipients.filter((entry) => entry?.is_active !== false).length,
+    [whatsAppRecipients],
+  );
+  const whatsAppPersistedSettings = useMemo(
+    () => createDefaultWhatsAppSettingsDraft(notificationPreferences.whatsapp_settings),
+    [notificationPreferences.whatsapp_settings],
+  );
   const whatsAppMessages = useMemo(() => {
     const source = Array.isArray(db.whatsapp_messages) ? db.whatsapp_messages : [];
     return [...source].sort((a, b) => {
@@ -3446,6 +3465,12 @@ export default function AdsPage() {
       String(adminSettings.max_ads_per_day || adminSettings.max_ads_per_slot || 5),
     );
   }, [adminSettings, notificationPreferences, settingsActiveTelegramCount, user?.email]);
+
+  useEffect(() => {
+    setWhatsAppSettingsDraft(
+      createDefaultWhatsAppSettingsDraft(notificationPreferences.whatsapp_settings),
+    );
+  }, [notificationPreferences.whatsapp_settings, user?.id]);
 
   useEffect(() => {
     if (filteredWhatsAppMessages.length === 0) {
@@ -6463,6 +6488,242 @@ export default function AdsPage() {
       });
     }, "Sample WhatsApp messages loaded.");
 
+  const mutateWhatsAppNotificationPreferences = async (mutator) => {
+    await updateDb((currentDb) => {
+      const currentPreferences =
+        currentDb.notification_preferences &&
+          typeof currentDb.notification_preferences === "object"
+          ? currentDb.notification_preferences
+          : {};
+      const nextPreferences = {
+        ...currentPreferences,
+        whatsapp_recipients: Array.isArray(currentPreferences.whatsapp_recipients)
+          ? currentPreferences.whatsapp_recipients
+          : [],
+        whatsapp_settings: createDefaultWhatsAppSettingsDraft(
+          currentPreferences.whatsapp_settings,
+        ),
+      };
+      mutator(nextPreferences);
+      currentDb.notification_preferences = nextPreferences;
+      return currentDb;
+    });
+    setDb(readDb());
+  };
+
+  const handleWhatsAppAddRecipient = async () => {
+    const label = String(whatsAppNewRecipientLabel || "").trim();
+    const phone = normalizeWhatsAppE164Input(whatsAppNewRecipientPhone);
+
+    if (!label) {
+      appToast.error({
+        title: "Recipient label is required.",
+      });
+      return;
+    }
+
+    if (!isValidWhatsAppE164Input(phone)) {
+      appToast.error({
+        title: "Enter a valid E.164 phone number (example: +15551234567).",
+      });
+      return;
+    }
+
+    setWhatsAppRecipientAdding(true);
+    try {
+      await mutateWhatsAppNotificationPreferences((preferences) => {
+        const list = Array.isArray(preferences.whatsapp_recipients)
+          ? preferences.whatsapp_recipients
+          : [];
+        if (
+          list.some(
+            (item) =>
+              normalizeWhatsAppE164Input(item?.phone_e164 || "") ===
+              normalizeWhatsAppE164Input(phone),
+          )
+        ) {
+          throw new Error("That WhatsApp number already exists.");
+        }
+
+        const now = new Date().toISOString();
+        preferences.whatsapp_recipients = [
+          ...list,
+          {
+            id: createId(),
+            label,
+            phone_e164: phone,
+            is_active: true,
+            created_at: now,
+            updated_at: now,
+          },
+        ];
+      });
+      setWhatsAppNewRecipientLabel("");
+      setWhatsAppNewRecipientPhone("");
+      appToast.success({
+        title: "WhatsApp recipient added.",
+      });
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to add WhatsApp recipient.",
+      });
+    } finally {
+      setWhatsAppRecipientAdding(false);
+    }
+  };
+
+  const handleWhatsAppToggleRecipient = async (recipientId, isActive) => {
+    try {
+      await mutateWhatsAppNotificationPreferences((preferences) => {
+        const list = Array.isArray(preferences.whatsapp_recipients)
+          ? preferences.whatsapp_recipients
+          : [];
+        const now = new Date().toISOString();
+        preferences.whatsapp_recipients = list.map((item) =>
+          item.id === recipientId
+            ? {
+              ...item,
+              is_active: isActive,
+              updated_at: now,
+            }
+            : item,
+        );
+      });
+      appToast.success({
+        title: isActive ? "Recipient enabled." : "Recipient disabled.",
+      });
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to update recipient.",
+      });
+    }
+  };
+
+  const handleWhatsAppDeleteRecipient = async (recipientId) => {
+    try {
+      await mutateWhatsAppNotificationPreferences((preferences) => {
+        const list = Array.isArray(preferences.whatsapp_recipients)
+          ? preferences.whatsapp_recipients
+          : [];
+        preferences.whatsapp_recipients = list.filter((item) => item.id !== recipientId);
+      });
+      appToast.success({
+        title: "WhatsApp recipient removed.",
+      });
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to remove recipient.",
+      });
+    }
+  };
+
+  const handleWhatsAppSaveSettings = async () => {
+    setWhatsAppSettingsSaving(true);
+    try {
+      const normalizedSettings = createDefaultWhatsAppSettingsDraft(whatsAppSettingsDraft);
+      await mutateWhatsAppNotificationPreferences((preferences) => {
+        preferences.whatsapp_settings = normalizedSettings;
+      });
+      appToast.success({
+        title: "WhatsApp settings saved.",
+      });
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to save WhatsApp settings.",
+      });
+    } finally {
+      setWhatsAppSettingsSaving(false);
+    }
+  };
+
+  const handleWhatsAppTestRecipient = async (recipient) => {
+    const to = normalizeWhatsAppE164Input(recipient?.phone_e164 || "");
+    if (!isValidWhatsAppE164Input(to)) {
+      appToast.error({
+        title: "Recipient phone number is invalid.",
+      });
+      return;
+    }
+
+    setWhatsAppRecipientTesting(String(recipient?.id || to));
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/send-test-whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to,
+          use_template: true,
+          template_only: true,
+          template_name: whatsAppSettingsDraft.template_name || undefined,
+          template_language: whatsAppSettingsDraft.template_language || undefined,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to send WhatsApp test message.");
+      }
+
+      const metaId = String(payload?.message_id || "").trim();
+      appToast.success({
+        title: "WhatsApp test accepted.",
+        description: `${to}${metaId ? ` (Meta ID: ${metaId})` : ""}`,
+      });
+    } catch (error) {
+      appToast.error({
+        title: "Failed to send WhatsApp test",
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setWhatsAppRecipientTesting(null);
+    }
+  };
+
+  const handleWhatsAppTestAllActiveRecipients = async () => {
+    if (whatsAppActiveRecipientCount === 0) {
+      appToast.warning({
+        title: "No active recipients",
+        description: "Enable at least one WhatsApp recipient first.",
+      });
+      return;
+    }
+
+    setWhatsAppBulkTesting(true);
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/send-test-whatsapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          use_saved_recipients: true,
+          use_template: true,
+          template_only: true,
+          template_name: whatsAppSettingsDraft.template_name || undefined,
+          template_language: whatsAppSettingsDraft.template_language || undefined,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to send WhatsApp tests.");
+      }
+
+      const successCount = Number(payload?.successful_count || 0);
+      const failedCount = Number(payload?.failed_count || 0);
+      appToast.success({
+        title: "WhatsApp test dispatch completed.",
+        description:
+          failedCount > 0
+            ? `${successCount} sent, ${failedCount} failed.`
+            : `${successCount} recipient(s) accepted by Meta.`,
+      });
+    } catch (error) {
+      appToast.error({
+        title: "Failed to send WhatsApp tests",
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setWhatsAppBulkTesting(false);
+    }
+  };
+
 
 
   const handleAdsSort = (key) => {
@@ -7355,11 +7616,12 @@ export default function AdsPage() {
 
   const handleSendAdToAdminWhatsApp = async (adItem) => {
     const messageText = buildAdsShareMessage(adItem);
+    const mediaItem = getPrimaryAdsShareMedia(adItem);
 
-    if (!String(messageText || "").trim()) {
+    if (!String(messageText || "").trim() && !mediaItem) {
       appToast.warning({
         title: "Nothing to send",
-        description: "This ad does not have any content yet.",
+        description: "This ad does not have any media or ad copy yet.",
       });
       return;
     }
@@ -7371,21 +7633,29 @@ export default function AdsPage() {
         body: JSON.stringify({
           use_template: false,
           text: messageText,
+          media: mediaItem
+            ? {
+                type: mediaItem.type,
+                url: mediaItem.url || mediaItem.cdnUrl,
+              }
+            : null,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data?.error || "Failed to send");
       }
+      const recipient = String(data?.to || "").trim();
       const messageId = String(data?.message_id || "").trim();
       const warning = String(data?.warning || "").trim();
+      const sendMode = String(data?.send_mode || "").trim();
+      const deliveryNote =
+        sendMode && sendMode !== "text" ? ` Mode: ${sendMode}.` : " Delivery may still be pending.";
       appToast.success({
         title: "Ad accepted by admin WhatsApp channel.",
         description: warning
-          ? `${warning}${messageId ? ` Meta ID: ${messageId}` : ""}`
-          : messageId
-            ? `Meta ID: ${messageId}`
-            : "Delivery may still be pending.",
+          ? `${recipient ? `To: ${recipient}. ` : ""}${warning}${messageId ? ` Meta ID: ${messageId}` : ""}`
+          : `${recipient ? `To: ${recipient}. ` : ""}${messageId ? `Meta ID: ${messageId}.` : ""}${deliveryNote}`,
       });
     } catch (err) {
       appToast.error({
@@ -8829,17 +9099,23 @@ export default function AdsPage() {
                   <div>
                     <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
                       <MessageSquare className="w-8 h-8 text-green-600" />
-                      WhatsApp Messages
+                      WhatsApp Hub
                     </h1>
                     <p className="text-gray-600 mt-2">
-                      Incoming messages from advertisers and customers
+                      Manage inbox, recipients, and delivery settings in one place.
                     </p>
                   </div>
-                  {whatsAppUnreadCount > 0 && (
-                    <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold">
-                      {whatsAppUnreadCount} unread
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {whatsAppUnreadCount > 0 && (
+                      <div className="bg-green-100 text-green-800 px-4 py-2 rounded-lg font-semibold">
+                        {whatsAppUnreadCount} unread
+                      </div>
+                    )}
+                    <div className="bg-blue-100 text-blue-800 px-4 py-2 rounded-lg font-semibold">
+                      {whatsAppActiveRecipientCount} active recipient
+                      {whatsAppActiveRecipientCount === 1 ? "" : "s"}
                     </div>
-                  )}
+                  </div>
                 </div>
                 <div className="mt-6 bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
                   <span className="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0" />
@@ -8848,34 +9124,57 @@ export default function AdsPage() {
                     <p className="text-xs text-green-700 mt-0.5">The WhatsApp webhook endpoint is configured and receiving messages.</p>
                   </div>
                 </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-gray-200">
-                <div className="flex gap-4 items-center flex-wrap">
-                  <div className="flex-1 min-w-[300px] relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search messages, phone numbers, advertisers..."
-                      value={whatsAppSearchTerm}
-                      onChange={(event) => setWhatsAppSearchTerm(event.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setWhatsAppFilterUnread((current) => !current)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${whatsAppFilterUnread
-                      ? "bg-green-600 text-white"
-                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                <div className="mt-4 flex items-center gap-2">
+                  {[
+                    { id: "inbox", label: "Inbox" },
+                    { id: "recipients", label: "Recipients" },
+                    { id: "settings", label: "Settings" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setWhatsAppAdminTab(tab.id)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                        whatsAppAdminTab === tab.id
+                          ? "bg-gray-900 text-white"
+                          : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
                       }`}
-                  >
-                    Unread Only
-                  </button>
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+              {whatsAppAdminTab === "inbox" && (
+                <>
+                  <div className="bg-white rounded-lg shadow-sm p-4 mb-6 border border-gray-200">
+                    <div className="flex gap-4 items-center flex-wrap">
+                      <div className="flex-1 min-w-[300px] relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search messages, phone numbers, advertisers..."
+                          value={whatsAppSearchTerm}
+                          onChange={(event) => setWhatsAppSearchTerm(event.target.value)}
+                          className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setWhatsAppFilterUnread((current) => !current)}
+                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                          whatsAppFilterUnread
+                            ? "bg-green-600 text-white"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        Unread Only
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
                 <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200">
                     <h2 className="text-lg font-semibold text-gray-900">Message Inbox</h2>
@@ -9042,6 +9341,291 @@ export default function AdsPage() {
                   )}
                 </div>
               </div>
+                </>
+              )}
+
+              {whatsAppAdminTab === "recipients" && (
+                <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Admin Recipients</h2>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Active recipients receive ad shares from the Ads section.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleWhatsAppTestAllActiveRecipients}
+                      disabled={whatsAppBulkTesting}
+                      className="px-3 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {whatsAppBulkTesting ? "Sending..." : "Test Active Recipients"}
+                    </button>
+                  </div>
+
+                  {whatsAppRecipients.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
+                      No WhatsApp recipients yet. Add one below to start routing messages.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {whatsAppRecipients.map((item) => {
+                        const recipientId = String(item.id || item.phone_e164 || "");
+                        const isActive = item.is_active !== false;
+                        const isTesting = whatsAppRecipientTesting === recipientId;
+                        return (
+                          <div
+                            key={recipientId}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                              isActive
+                                ? "bg-white border-gray-200"
+                                : "bg-gray-50 border-gray-200 opacity-60"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleWhatsAppToggleRecipient(recipientId, !isActive)}
+                              className={`flex items-center justify-center w-5 h-5 rounded border-2 transition-colors ${
+                                isActive
+                                  ? "bg-gray-900 border-gray-900"
+                                  : "bg-white border-gray-300"
+                              }`}
+                            >
+                              {isActive ? <Check size={14} className="text-white" /> : null}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">
+                                {item.label || item.phone_e164}
+                              </p>
+                              <p className="text-xs text-gray-500 font-mono">{item.phone_e164}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleWhatsAppTestRecipient(item)}
+                              disabled={isTesting}
+                              className="px-2.5 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                            >
+                              {isTesting ? "Sending..." : "Test"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleWhatsAppDeleteRecipient(recipientId)}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-gray-200">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Add Recipient</p>
+                    <div className="flex items-end gap-2 flex-wrap">
+                      <div className="min-w-[220px] flex-1">
+                        <input
+                          type="text"
+                          placeholder="Label (e.g. Admin Phone)"
+                          value={whatsAppNewRecipientLabel}
+                          onChange={(event) => setWhatsAppNewRecipientLabel(event.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                        />
+                      </div>
+                      <div className="min-w-[220px] flex-1">
+                        <input
+                          type="text"
+                          placeholder="Phone (e.g. +15551234567)"
+                          value={whatsAppNewRecipientPhone}
+                          onChange={(event) => setWhatsAppNewRecipientPhone(event.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleWhatsAppAddRecipient}
+                        disabled={
+                          whatsAppRecipientAdding ||
+                          !whatsAppNewRecipientLabel.trim() ||
+                          !whatsAppNewRecipientPhone.trim()
+                        }
+                        className="px-3 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5"
+                      >
+                        <Plus size={14} />
+                        {whatsAppRecipientAdding ? "Adding..." : "Add"}
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Use international E.164 format with `+` and country code.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {whatsAppAdminTab === "settings" && (
+                <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+                  <div>
+                    <h2 className="text-lg font-semibold text-gray-900">Channel Settings</h2>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Configure how ad notifications are sent through WhatsApp.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    <div className="space-y-4">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={whatsAppSettingsDraft.enabled}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">Enable channel</p>
+                          <p className="text-xs text-gray-500">
+                            Keep WhatsApp routing available in admin actions.
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={whatsAppSettingsDraft.include_media}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              include_media: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">Include media</p>
+                          <p className="text-xs text-gray-500">
+                            Send image/video when ad media is available.
+                          </p>
+                        </div>
+                      </label>
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={whatsAppSettingsDraft.use_template_fallback}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              use_template_fallback: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">Template fallback</p>
+                          <p className="text-xs text-gray-500">
+                            Use approved templates when free-text delivery is limited.
+                          </p>
+                        </div>
+                      </label>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                          Default send mode
+                        </label>
+                        <select
+                          value={whatsAppSettingsDraft.send_mode}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              send_mode: event.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="text">Text first</option>
+                          <option value="template">Template only</option>
+                          <option value="auto">Auto</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                          Template name
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="hello_world"
+                          value={whatsAppSettingsDraft.template_name}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              template_name: event.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-900 mb-2">
+                          Template language
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="en_US"
+                          value={whatsAppSettingsDraft.template_language}
+                          onChange={(event) =>
+                            setWhatsAppSettingsDraft((current) => ({
+                              ...current,
+                              template_language: event.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-gray-700">Saved profile snapshot</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Mode: <span className="font-mono">{whatsAppPersistedSettings.send_mode}</span>
+                          {" | "}
+                          Media:{" "}
+                          <span className="font-mono">
+                            {whatsAppPersistedSettings.include_media ? "on" : "off"}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-200 flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleWhatsAppSaveSettings}
+                      disabled={whatsAppSettingsSaving}
+                      className="px-4 py-2 bg-black text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {whatsAppSettingsSaving ? "Saving..." : "Save Settings"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setWhatsAppSettingsDraft(
+                          createDefaultWhatsAppSettingsDraft(
+                            notificationPreferences.whatsapp_settings,
+                          ),
+                        )
+                      }
+                      disabled={whatsAppSettingsSaving}
+                      className="px-4 py-2 bg-white text-gray-700 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

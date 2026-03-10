@@ -216,22 +216,43 @@ export const ensureAdvertiserRecord = async ({
 }) => {
   const supabase = db();
   const normalizedEmail = normalizeEmail(email);
+  const normalizedAdvertiserName = String(advertiserName || "").trim();
 
-  const { data: existing, error: fetchError } = await supabase
-    .from(table("advertisers"))
-    .select("*")
-    .ilike("email", normalizedEmail)
-    .limit(1)
-    .maybeSingle();
+  let existing = null;
+  if (normalizedEmail) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("*")
+      .ilike("email", normalizedEmail)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (fetchError) {
-    throw fetchError;
+    if (error) {
+      throw error;
+    }
+    existing = data || null;
+  }
+
+  if (!existing && normalizedAdvertiserName) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("*")
+      .ilike("advertiser_name", normalizedAdvertiserName)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    existing = data || null;
   }
 
   const normalizedPhoneNumber = normalizeUSPhoneNumber(phoneNumber || "");
 
   const payload = {
-    advertiser_name: String(advertiserName || "").trim() || normalizedEmail,
+    advertiser_name: normalizedAdvertiserName || normalizedEmail,
     contact_name: String(contactName || "").trim() || null,
     email: normalizedEmail,
     phone: normalizedPhoneNumber || null,

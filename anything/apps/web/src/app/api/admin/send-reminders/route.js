@@ -8,7 +8,7 @@ import {
   resolveActiveTelegramChatIds,
 } from "../../utils/send-telegram.js";
 import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
-import { sendWhatsAppMessage } from "../../utils/send-whatsapp.js";
+import { sendWhatsAppMessageDetailed } from "../../utils/send-whatsapp.js";
 
 const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York",
@@ -20,6 +20,8 @@ const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   second: "2-digit",
   hour12: false,
 });
+
+const WHATSAPP_E164_LIKE_PATTERN = /^\+?\d{8,15}$/;
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
@@ -139,6 +141,11 @@ function computeScheduledEntries(ad, todayET) {
 function isWithinReminderWindow(scheduledAt, nowET, windowMinutes) {
   const diffMinutes = (scheduledAt.getTime() - nowET.getTime()) / (1000 * 60);
   return diffMinutes > -5 && diffMinutes <= windowMinutes;
+}
+
+function isWithinScheduleTriggerWindow(scheduledAt, nowET, graceMinutes = 5) {
+  const diffMinutes = (nowET.getTime() - scheduledAt.getTime()) / (1000 * 60);
+  return diffMinutes >= 0 && diffMinutes < graceMinutes;
 }
 
 function isReminderEligibleStatus(status) {
@@ -264,6 +271,62 @@ function buildPrimaryMedia(media) {
   return null;
 }
 
+function normalizeWhatsAppPhone(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const hasPlus = raw.startsWith("+");
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+
+  const normalized = hasPlus ? `+${digits}` : digits;
+  return WHATSAPP_E164_LIKE_PATTERN.test(normalized) ? normalized : "";
+}
+
+async function resolveAdminWhatsAppRecipients(supabase) {
+  const recipients = [];
+  const seen = new Set();
+
+  const addRecipient = (value) => {
+    const normalized = normalizeWhatsAppPhone(value);
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    recipients.push(normalized);
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from(table("admin_notification_preferences"))
+      .select("*");
+    if (error) throw error;
+
+    for (const row of data || []) {
+      const list = Array.isArray(row?.whatsapp_recipients) ? row.whatsapp_recipients : [];
+      for (const entry of list) {
+        if (!entry || typeof entry !== "object" || entry.is_active === false) {
+          continue;
+        }
+        addRecipient(entry.phone_e164 || entry.phone || entry.to || entry.recipient);
+      }
+    }
+  } catch (error) {
+    console.error("[send-reminders] Failed to resolve admin WhatsApp recipients:", error);
+  }
+
+  addRecipient(process.env.WHATSAPP_BROADCAST_NUMBER);
+  return recipients;
+}
+
 function buildReminderBodyText(payload) {
   const adText = String(payload?.adText || "").trim();
   if (adText) return adText;
@@ -272,6 +335,10 @@ function buildReminderBodyText(payload) {
   if (adName) return adName;
 
   return "Upcoming ad reminder";
+}
+
+function buildWhatsAppBodyText(ad) {
+  return String(ad?.ad_text || "").trim();
 }
 
 function generateReminderHtml(payload) {
@@ -408,11 +475,12 @@ export async function POST(request) {
       ]),
     );
 
-    const [internalEmailsResolved, telegramPrefsResult] = await Promise.all([
+    const [internalEmailsResolved, telegramPrefsResult, adminWhatsAppRecipients] = await Promise.all([
       resolveInternalNotificationEmails(supabase),
       supabase
         .from(table("admin_notification_preferences"))
         .select("telegram_chat_ids"),
+      resolveAdminWhatsAppRecipients(supabase),
     ]);
 
     const internalEmails = normalizeInternalEmails(internalEmailsResolved);
@@ -430,6 +498,9 @@ export async function POST(request) {
       const dueEntry = scheduleEntries.find((entry) =>
         isWithinReminderWindow(entry.scheduledAt, nowET.pseudoDate, entry.reminderMinutes),
       );
+      const scheduleTriggerEntry = scheduleEntries.find((entry) =>
+        isWithinScheduleTriggerWindow(entry.scheduledAt, nowET.pseudoDate, 5),
+      );
 
       if (debugMode) {
         debug.push({
@@ -439,12 +510,13 @@ export async function POST(request) {
           scheduleChecks: scheduleEntries.length,
           dueNow: Boolean(dueEntry),
           dueReminderWindowMinutes: dueEntry?.reminderMinutes || null,
+          dueScheduleNow: Boolean(scheduleTriggerEntry),
+          dueScheduleKey: scheduleTriggerEntry?.scheduleKey || null,
         });
       }
 
-      if (!dueEntry) continue;
+      if (!dueEntry && !scheduleTriggerEntry) continue;
 
-      const scheduleMeta = formatScheduledDateTime(dueEntry.scheduledAt);
       const media = buildMediaFields(ad.media);
       const primaryMedia = buildPrimaryMedia(ad.media);
       const advertiserInfo = resolveAdvertiserInfo(ad, {
@@ -455,181 +527,262 @@ export async function POST(request) {
         adName: ad.ad_name,
         adText: ad.ad_text,
       });
+      const whatsappBodyText = buildWhatsAppBodyText(ad);
 
-      if (internalEmails.length > 0) {
-        const alreadySentInternal = await hasReminderForOccurrence(
-          supabase,
-          ad.id,
-          "internal",
-          dueEntry.scheduleKey,
-        );
-        if (alreadySentInternal) {
+      if (dueEntry) {
+        const scheduleMeta = formatScheduledDateTime(dueEntry.scheduledAt);
+
+        if (internalEmails.length > 0) {
+          const alreadySentInternal = await hasReminderForOccurrence(
+            supabase,
+            ad.id,
+            "internal",
+            dueEntry.scheduleKey,
+          );
+          if (alreadySentInternal) {
+            results.push({
+              type: "internal_email",
+              ad_id: ad.id,
+              ad_name: ad.ad_name,
+              status: "already_sent",
+              message: "Internal reminder already sent for this scheduled occurrence",
+            });
+          } else {
+            try {
+              const payload = {
+                recipientType: "internal",
+                to: internalEmails,
+                from: defaultSender,
+                subject: `Ad Reminder | ${ad.advertiser} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
+                adName: ad.ad_name,
+                advertiser: ad.advertiser,
+                advertiserEmail: advertiserInfo?.email || "",
+                advertiserPhone: advertiserInfo?.phone_number || advertiserInfo?.phone || "",
+                placement: ad.placement,
+                formattedTime: `${scheduleMeta.formattedTime} ET`,
+                formattedDate: scheduleMeta.formattedDate,
+                adText: ad.ad_text || "",
+                imageCount: media.images.length,
+                videoCount: media.videos.length,
+                ...media.fields,
+              };
+
+              await sendEmail({
+                bcc: internalEmails,
+                subject: payload.subject,
+                html: generateReminderHtml(payload),
+                text: reminderBodyText,
+              });
+
+              let telegramResults = [];
+              if (activeTelegramChatIds.length > 0) {
+                telegramResults = primaryMedia
+                  ? await sendTelegramMediaToMany({
+                      chatIds: activeTelegramChatIds,
+                      media: primaryMedia,
+                      caption: reminderBodyText,
+                      parseMode: null,
+                    })
+                  : await sendTelegramToMany({
+                      chatIds: activeTelegramChatIds,
+                      text: reminderBodyText,
+                      parseMode: null,
+                    });
+              }
+
+              await storeReminder(supabase, ad.id, "email", "internal", dueEntry.scheduleKey);
+              results.push({
+                type: "internal_email",
+                to: internalEmails,
+                ad_name: ad.ad_name,
+                status: "sent",
+                telegram_sent: telegramResults.some((entry) => entry.ok),
+              });
+            } catch (error) {
+              results.push({
+                type: "internal_email",
+                to: internalEmails,
+                ad_name: ad.ad_name,
+                status: "failed",
+                error: error.message,
+              });
+            }
+          }
+        } else {
           results.push({
             type: "internal_email",
             ad_id: ad.id,
             ad_name: ad.ad_name,
-            status: "already_sent",
-            message: "Internal reminder already sent for this scheduled occurrence",
+            status: "skipped",
+            message: "No internal recipient emails found",
+          });
+        }
+
+        if (!advertiserInfo?.email) {
+          results.push({
+            type: "advertiser_email",
+            ad_id: ad.id,
+            ad_name: ad.ad_name,
+            status: "skipped",
+            message: "No advertiser email found",
           });
         } else {
-          try {
-            const payload = {
-              recipientType: "internal",
-              to: internalEmails,
-              from: defaultSender,
-              subject: `Ad Reminder | ${ad.advertiser} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
-              adName: ad.ad_name,
-              advertiser: ad.advertiser,
-              advertiserEmail: advertiserInfo?.email || "",
-              advertiserPhone: advertiserInfo?.phone_number || advertiserInfo?.phone || "",
-              placement: ad.placement,
-              formattedTime: `${scheduleMeta.formattedTime} ET`,
-              formattedDate: scheduleMeta.formattedDate,
-              adText: ad.ad_text || "",
-              imageCount: media.images.length,
-              videoCount: media.videos.length,
-              ...media.fields,
-            };
-
-            await sendEmail({
-              bcc: internalEmails,
-              subject: payload.subject,
-              html: generateReminderHtml(payload),
-              text: reminderBodyText,
+          const alreadySentAdvertiser = await hasReminderForOccurrence(
+            supabase,
+            ad.id,
+            "advertiser",
+            dueEntry.scheduleKey,
+          );
+          if (alreadySentAdvertiser) {
+            results.push({
+              type: "advertiser_email",
+              ad_id: ad.id,
+              ad_name: ad.ad_name,
+              status: "already_sent",
+              message: "Advertiser reminder already sent for this scheduled occurrence",
             });
+          } else {
+            const advertiserName = advertiserInfo.contact_name || advertiserInfo.advertiser_name;
 
-            let telegramResults = [];
-            if (activeTelegramChatIds.length > 0) {
-              telegramResults = primaryMedia
-                ? await sendTelegramMediaToMany({
-                    chatIds: activeTelegramChatIds,
-                    media: primaryMedia,
-                    caption: reminderBodyText,
-                    parseMode: null,
-                  })
-                : await sendTelegramToMany({
-                    chatIds: activeTelegramChatIds,
-                    text: reminderBodyText,
-                    parseMode: null,
-                  });
+            try {
+              const payload = {
+                recipientType: "advertiser",
+                to: advertiserInfo.email,
+                advertiserEmail: advertiserInfo.email,
+                advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
+                from: defaultSender,
+                subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
+                advertiserName,
+                adName: ad.ad_name,
+                advertiser: ad.advertiser,
+                placement: ad.placement,
+                formattedTime: `${scheduleMeta.formattedTime} ET`,
+                formattedDate: scheduleMeta.formattedDate,
+                adText: ad.ad_text || "",
+                imageCount: media.images.length,
+                videoCount: media.videos.length,
+                ...media.fields,
+              };
+
+              await sendEmail({
+                to: advertiserInfo.email,
+                subject: payload.subject,
+                html: generateReminderHtml(payload),
+                text: reminderBodyText,
+              });
+
+              await storeReminder(supabase, ad.id, "email", "advertiser", dueEntry.scheduleKey);
+              results.push({
+                type: "advertiser_email",
+                to: advertiserInfo.email,
+                ad_name: ad.ad_name,
+                advertiser: advertiserName,
+                status: "sent",
+              });
+            } catch (error) {
+              results.push({
+                type: "advertiser_email",
+                to: advertiserInfo.email,
+                ad_name: ad.ad_name,
+                status: "failed",
+                error: error.message,
+              });
+            }
+          }
+        }
+      }
+
+      if (scheduleTriggerEntry) {
+        if (adminWhatsAppRecipients.length === 0) {
+          results.push({
+            type: "admin_whatsapp",
+            ad_id: ad.id,
+            ad_name: ad.ad_name,
+            status: "skipped",
+            message: "No admin WhatsApp recipients configured",
+          });
+        } else {
+          const alreadySentWhatsApp = await hasReminderForOccurrence(
+            supabase,
+            ad.id,
+            "admin_whatsapp",
+            scheduleTriggerEntry.scheduleKey,
+          );
+          if (alreadySentWhatsApp) {
+            results.push({
+              type: "admin_whatsapp",
+              ad_id: ad.id,
+              ad_name: ad.ad_name,
+              status: "already_sent",
+              message: "Scheduled WhatsApp content already sent for this occurrence",
+            });
+          } else if (!whatsappBodyText && !primaryMedia) {
+            results.push({
+              type: "admin_whatsapp",
+              ad_id: ad.id,
+              ad_name: ad.ad_name,
+              status: "skipped",
+              message: "No ad text or media to send",
+            });
+          } else {
+            const recipientResults = [];
+            for (const recipient of adminWhatsAppRecipients) {
+              try {
+                const sendResult = await sendWhatsAppMessageDetailed({
+                  to: recipient,
+                  text: whatsappBodyText,
+                  media: primaryMedia,
+                });
+                recipientResults.push({
+                  to: recipient,
+                  ok: sendResult.ok === true,
+                  phase: sendResult.phase || null,
+                  message_id: sendResult.messageId || null,
+                  upstream_status: Number(sendResult.status || 0) || null,
+                  error:
+                    sendResult.ok === true
+                      ? null
+                      : sendResult.error || "Failed to send scheduled WhatsApp message.",
+                });
+              } catch (error) {
+                recipientResults.push({
+                  to: recipient,
+                  ok: false,
+                  phase: null,
+                  message_id: null,
+                  upstream_status: null,
+                  error: String(
+                    error?.message || error || "Failed to send scheduled WhatsApp message.",
+                  ),
+                });
+              }
             }
 
-            let whatsappSent = false;
-            const broadcastNumber = process.env.WHATSAPP_BROADCAST_NUMBER;
-            if (broadcastNumber) {
-               try {
-                 whatsappSent = await sendWhatsAppMessage({
-                   to: broadcastNumber,
-                   text: reminderBodyText,
-                   media: primaryMedia
-                 });
-               } catch (waErr) {
-                 console.error("[send-reminders] External WhatsApp error:", waErr);
-               }
+            const successfulCount = recipientResults.filter((entry) => entry.ok).length;
+            const failedCount = recipientResults.length - successfulCount;
+
+            if (successfulCount > 0) {
+              await storeReminder(
+                supabase,
+                ad.id,
+                "whatsapp",
+                "admin_whatsapp",
+                scheduleTriggerEntry.scheduleKey,
+              );
             }
 
-            await storeReminder(supabase, ad.id, "email", "internal", dueEntry.scheduleKey);
             results.push({
-              type: "internal_email",
-              to: internalEmails,
+              type: "admin_whatsapp",
+              ad_id: ad.id,
               ad_name: ad.ad_name,
-              status: "sent",
-              telegram_sent: telegramResults.some((entry) => entry.ok),
-              whatsapp_sent: whatsappSent,
-            });
-          } catch (error) {
-            results.push({
-              type: "internal_email",
-              to: internalEmails,
-              ad_name: ad.ad_name,
-              status: "failed",
-              error: error.message,
+              schedule_key: scheduleTriggerEntry.scheduleKey,
+              status: failedCount === 0 ? "sent" : successfulCount > 0 ? "partial" : "failed",
+              successful_count: successfulCount,
+              failed_count: failedCount,
+              recipients: recipientResults,
             });
           }
         }
-      } else {
-        results.push({
-          type: "internal_email",
-          ad_id: ad.id,
-          ad_name: ad.ad_name,
-          status: "skipped",
-          message: "No internal recipient emails found",
-        });
-      }
-
-      if (!advertiserInfo?.email) {
-        results.push({
-          type: "advertiser_email",
-          ad_id: ad.id,
-          ad_name: ad.ad_name,
-          status: "skipped",
-          message: "No advertiser email found",
-        });
-        continue;
-      }
-
-      const alreadySentAdvertiser = await hasReminderForOccurrence(
-        supabase,
-        ad.id,
-        "advertiser",
-        dueEntry.scheduleKey,
-      );
-      if (alreadySentAdvertiser) {
-        results.push({
-          type: "advertiser_email",
-          ad_id: ad.id,
-          ad_name: ad.ad_name,
-          status: "already_sent",
-          message: "Advertiser reminder already sent for this scheduled occurrence",
-        });
-        continue;
-      }
-
-      const advertiserName = advertiserInfo.contact_name || advertiserInfo.advertiser_name;
-
-      try {
-        const payload = {
-          recipientType: "advertiser",
-          to: advertiserInfo.email,
-          advertiserEmail: advertiserInfo.email,
-          advertiserPhone: advertiserInfo.phone_number || advertiserInfo.phone || "",
-          from: defaultSender,
-          subject: `Upcoming Ad Reminder | ${ad.ad_name} | ${scheduleMeta.dayOfWeek}, ${scheduleMeta.formattedTime} ET`,
-          advertiserName,
-          adName: ad.ad_name,
-          advertiser: ad.advertiser,
-          placement: ad.placement,
-          formattedTime: `${scheduleMeta.formattedTime} ET`,
-          formattedDate: scheduleMeta.formattedDate,
-          adText: ad.ad_text || "",
-          imageCount: media.images.length,
-          videoCount: media.videos.length,
-          ...media.fields,
-        };
-
-        await sendEmail({
-          to: advertiserInfo.email,
-          subject: payload.subject,
-          html: generateReminderHtml(payload),
-          text: reminderBodyText,
-        });
-
-        await storeReminder(supabase, ad.id, "email", "advertiser", dueEntry.scheduleKey);
-        results.push({
-          type: "advertiser_email",
-          to: advertiserInfo.email,
-          ad_name: ad.ad_name,
-          advertiser: advertiserName,
-          status: "sent",
-        });
-      } catch (error) {
-        results.push({
-          type: "advertiser_email",
-          to: advertiserInfo.email,
-          ad_name: ad.ad_name,
-          status: "failed",
-          error: error.message,
-        });
       }
     }
 
@@ -646,6 +799,7 @@ export async function POST(request) {
         easternTimeTime: nowET.time,
         todayET,
         internalRecipientCount: internalEmails.length,
+        adminWhatsAppRecipientCount: adminWhatsAppRecipients.length,
         eligibleAdCount: upcomingAds.length,
         advertiserCount: (advertisers || []).length,
         checks: debug,
