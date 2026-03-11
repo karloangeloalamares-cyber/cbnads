@@ -129,7 +129,7 @@ export async function POST(request) {
   try {
     const admin = await requireAdmin(request);
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();
@@ -657,9 +657,6 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error approving ad:", error);
-    return Response.json(
-      { error: error?.message || "Failed to approve ad" },
-      { status: 500 },
-    );
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

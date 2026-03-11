@@ -1,17 +1,13 @@
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 import { createPendingAdSubmission } from "../../utils/pending-ad-submission.js";
+import {
+  clientIpFromHeaders,
+  consumePublicRateLimit,
+} from "../../utils/public-rate-limit.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
 const IDEMPOTENCY_WINDOW_MS = 5 * 60 * 1000;
-
-const getRateLimitStore = () => {
-  const globalKey = "__cbnadsSubmitAdRateLimit";
-  if (!globalThis[globalKey]) {
-    globalThis[globalKey] = new Map();
-  }
-  return globalThis[globalKey];
-};
 
 const getIdempotencyStore = () => {
   const globalKey = "__cbnadsSubmitAdIdempotency";
@@ -21,35 +17,6 @@ const getIdempotencyStore = () => {
   return globalThis[globalKey];
 };
 
-const clientIpFromHeaders = (headers) => {
-  const forwarded = String(headers.get("x-forwarded-for") || "").trim();
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-  return String(headers.get("x-real-ip") || "").trim();
-};
-
-const isRateLimited = (key) => {
-  const now = Date.now();
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  const store = getRateLimitStore();
-
-  for (const [entryKey, timestamps] of store.entries()) {
-    const filtered = timestamps.filter((value) => value >= cutoff);
-    if (filtered.length === 0) {
-      store.delete(entryKey);
-      continue;
-    }
-    store.set(entryKey, filtered);
-  }
-
-  const attempts = store.get(key) || [];
-  if (attempts.length >= RATE_LIMIT_MAX_ATTEMPTS) {
-    return true;
-  }
-  store.set(key, [...attempts, now]);
-  return false;
-};
 
 const readIdempotencyKey = (headers, requesterIp) => {
   const rawKey = String(headers.get("x-idempotency-key") || "")
@@ -131,7 +98,12 @@ export async function POST(request) {
     const rateLimitKey = `${requesterIp}:${getTodayInAppTimeZone()}`;
     const idempotencyKey = readIdempotencyKey(request.headers, requesterIp);
     const responsePayload = await runWithIdempotency(idempotencyKey, async () => {
-      if (isRateLimited(rateLimitKey)) {
+      const rateLimitState = await consumePublicRateLimit({
+        key: rateLimitKey,
+        maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+        windowMs: RATE_LIMIT_WINDOW_MS,
+      });
+      if (rateLimitState.limited) {
         return {
           status: 429,
           body: { error: "Too many submissions. Please try again later." },

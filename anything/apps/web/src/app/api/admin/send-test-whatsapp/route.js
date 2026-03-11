@@ -440,7 +440,7 @@ export async function POST(request) {
   } catch (err) {
     console.error("POST /api/admin/send-test-whatsapp error", err);
     return Response.json(
-      { error: err?.message || "Failed to send WhatsApp test message" },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

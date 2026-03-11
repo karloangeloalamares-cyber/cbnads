@@ -53,9 +53,6 @@ export async function POST(request) {
       { message, code, hint, details },
       error?.stack || "",
     );
-    return Response.json(
-      { error: message || "Failed to check availability", code },
-      { status: 500 },
-    );
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

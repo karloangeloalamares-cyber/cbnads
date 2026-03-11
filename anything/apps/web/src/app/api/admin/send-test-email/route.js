@@ -5,7 +5,7 @@ export async function POST(request) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const { email } = await request.json();

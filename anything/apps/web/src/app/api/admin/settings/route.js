@@ -40,7 +40,7 @@ export async function GET() {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();
@@ -59,7 +59,7 @@ export async function PUT(request) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const body = await request.json();

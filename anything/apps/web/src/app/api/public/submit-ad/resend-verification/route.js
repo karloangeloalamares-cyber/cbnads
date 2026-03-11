@@ -62,7 +62,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("[submit-ad/resend-verification] Failed:", error);
     return Response.json(
-      { error: error?.message || "Failed to resend verification email." },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

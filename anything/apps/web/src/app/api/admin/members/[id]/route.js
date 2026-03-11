@@ -6,7 +6,7 @@ export async function DELETE(request, { params }) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const memberId = params?.id;
@@ -58,4 +58,3 @@ export async function DELETE(request, { params }) {
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
-

@@ -172,7 +172,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("[admin/ads/internal-notify] Failed:", error);
     return Response.json(
-      { error: error?.message || "Failed to send ad lifecycle notification." },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

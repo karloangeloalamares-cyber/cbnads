@@ -4,7 +4,7 @@ export async function GET(request) {
   try {
     const authState = await requireAuth(request);
     if (!authState.authorized) {
-      return Response.json({ error: authState.error }, { status: 401 });
+      return Response.json({ error: authState.error }, { status: authState.status || 401 });
     }
 
     const user = await getSessionUser(request);

@@ -29,7 +29,7 @@ const getHTMLOrError = (React, renderToString, component) => {
 export async function GET(request) {
 	const admin = await requireAdmin();
 	if (!admin.authorized) {
-		return Response.json({ error: admin.error }, { status: 401 });
+		return Response.json({ error: admin.error }, { status: admin.status || 401 });
 	}
 
 	if (process.env.NODE_ENV === 'production') {

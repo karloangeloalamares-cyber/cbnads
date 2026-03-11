@@ -82,7 +82,7 @@ export async function POST(request) {
             if (createError) {
                 console.error("[upload] Failed to create bucket:", createError);
                 return Response.json(
-                    { error: "Storage not configured: " + createError.message },
+                    { error: "Internal Server Error" },
                     { status: 500 },
                 );
             }
@@ -99,7 +99,7 @@ export async function POST(request) {
         if (uploadError) {
             console.error("[upload] Supabase storage error:", uploadError);
             return Response.json(
-                { error: uploadError.message || "Upload failed." },
+                { error: "Internal Server Error" },
                 { status: 500 },
             );
         }
@@ -116,7 +116,7 @@ export async function POST(request) {
     } catch (error) {
         console.error("[upload] Failed:", error);
         return Response.json(
-            { error: error?.message || "Upload failed." },
+            { error: "Internal Server Error" },
             { status: 500 },
         );
     }

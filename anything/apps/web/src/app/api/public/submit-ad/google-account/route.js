@@ -1,4 +1,4 @@
-import { db } from "../../../utils/supabase-db.js";
+import { db, table } from "../../../utils/supabase-db.js";
 import {
     ensureAdvertiserRecord,
     findAuthUserByEmail,
@@ -102,6 +102,32 @@ export async function POST(request) {
             googleUser.user_metadata?.name ||
             normalizedEmail;
 
+        if (pendingAdId) {
+            const { data: pendingAd, error: pendingAdError } = await supabase
+                .from(table("pending_ads"))
+                .select("id, email")
+                .eq("id", pendingAdId)
+                .maybeSingle();
+
+            if (pendingAdError) {
+                throw pendingAdError;
+            }
+
+            if (!pendingAd?.id) {
+                return Response.json(
+                    { error: "Pending ad submission not found." },
+                    { status: 404 },
+                );
+            }
+
+            if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
+                return Response.json(
+                    { error: "Pending ad does not belong to this email." },
+                    { status: 403 },
+                );
+            }
+        }
+
         // Check if this email is already taken by a non-advertiser account
         const existingUser = await withRetry(() => findAuthUserByEmail(supabase, normalizedEmail));
         if (existingUser && existingUser.id !== googleUser.id) {
@@ -193,7 +219,7 @@ export async function POST(request) {
             error,
         );
         return Response.json(
-            { error: error?.message || "Failed to link Google account." },
+            { error: "Internal Server Error" },
             { status: 500 },
         );
     }

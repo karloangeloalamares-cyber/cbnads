@@ -1,6 +1,7 @@
 import { getSupabaseAdmin, adminBucketName } from "../../../../lib/supabaseAdmin.js";
 import crypto from "node:crypto";
 import path from "node:path";
+import { requireAuth } from "../../utils/auth-check.js";
 
 const BUCKET = adminBucketName("uploads");
 
@@ -45,6 +46,11 @@ const buildStoragePath = (fileName, mimeType) => {
 
 export async function POST(request) {
   try {
+    const auth = await requireAuth(request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
+    }
+
     const body = await request.json();
     const fileName = String(body?.fileName || "").trim() || "upload";
     const mimeType = String(body?.mimeType || "application/octet-stream").trim();
@@ -73,7 +79,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("[upload/signed-url] Failed:", error);
     return Response.json(
-      { error: error?.message || "Failed to create signed upload URL." },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

@@ -28,7 +28,7 @@ export async function GET(request, { params }) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();
@@ -82,7 +82,7 @@ export async function PUT(request, { params }) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();
@@ -210,7 +210,7 @@ export async function DELETE(request, { params }) {
   try {
     const admin = await requireAdmin();
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();

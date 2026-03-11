@@ -6,7 +6,7 @@ export async function PUT(request) {
   try {
     const authState = await requireAuth(request);
     if (!authState.authorized) {
-      return Response.json({ error: authState.error }, { status: 401 });
+      return Response.json({ error: authState.error }, { status: authState.status || 401 });
     }
 
     const body = await request.json();

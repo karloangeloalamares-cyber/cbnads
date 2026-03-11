@@ -117,14 +117,14 @@ const resolveUserRole = async ({
   profileRole,
   email,
 }) => {
-  const directRole = normalizeText(explicitRole);
-  if (directRole) {
-    return directRole;
-  }
-
   const profileResolvedRole = normalizeText(profileRole);
   if (profileResolvedRole) {
     return profileResolvedRole;
+  }
+
+  const directRole = normalizeText(explicitRole);
+  if (directRole) {
+    return directRole;
   }
 
   try {
@@ -258,6 +258,7 @@ export async function requireAdmin(request = null) {
     return {
       authorized: false,
       error: "Unauthorized - Please sign in",
+      status: 401,
     };
   }
 
@@ -265,12 +266,14 @@ export async function requireAdmin(request = null) {
     return {
       authorized: false,
       error: "Unauthorized - Admin access required",
+      status: 403,
     };
   }
 
   return {
     authorized: true,
     user,
+    status: 200,
   };
 }
 
@@ -333,12 +336,14 @@ export async function requireAuth(request = null) {
     return {
       authorized: false,
       error: "Unauthorized - Please sign in",
+      status: 401,
     };
   }
 
   return {
     authorized: true,
     user,
+    status: 200,
   };
 }
 

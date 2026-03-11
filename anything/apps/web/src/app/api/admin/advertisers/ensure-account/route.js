@@ -32,7 +32,7 @@ export async function POST(request) {
   try {
     const admin = await requireAdmin(request);
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     assertAdvertiserEmailConfig();
@@ -169,7 +169,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("[admin/advertisers/ensure-account] Failed:", error);
     return Response.json(
-      { error: error?.message || "Failed to ensure advertiser account." },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

@@ -2,6 +2,7 @@ import { dateOnly, db, normalizePostType, table, toNumber } from "../../utils/su
 import { requireInternalUser } from "../../utils/auth-check.js";
 import { getDefaultEmailSender, sendEmail } from "../../utils/send-email.js";
 import { resolveInternalNotificationEmails } from "../../utils/internal-notification-emails.js";
+import crypto from "node:crypto";
 import {
   sendTelegramMediaToMany,
   sendTelegramToMany,
@@ -33,6 +34,21 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+function timingSafeSecretMatch(providedSecret, configuredSecret) {
+  const expected = String(configuredSecret || "");
+  if (!expected) {
+    return false;
+  }
+
+  const provided = String(providedSecret || "");
+  const providedBuffer = Buffer.from(provided, "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
 
 function parseNaiveDateTime(dateStr, timeStr) {
   if (!dateStr || !timeStr) return null;
@@ -431,10 +447,12 @@ export async function POST(request) {
         .replace(/^Bearer\s+/i, "")
         .trim();
       const cronHeaderSecret = String(request.headers.get("x-cron-secret") || "").trim();
+      const bearerMatches = timingSafeSecretMatch(bearerToken, configuredSecret);
+      const cronHeaderMatches = timingSafeSecretMatch(cronHeaderSecret, configuredSecret);
 
       if (
         !configuredSecret ||
-        (bearerToken !== configuredSecret && cronHeaderSecret !== configuredSecret)
+        (!bearerMatches && !cronHeaderMatches)
       ) {
         return Response.json({ error: auth.error }, { status: auth.status || 401 });
       }

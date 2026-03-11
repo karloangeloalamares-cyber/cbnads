@@ -276,6 +276,6 @@ export async function POST(request) {
       );
     }
 
-    return Response.json({ error: message || "Failed to submit ad" }, { status: 500 });
+    return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

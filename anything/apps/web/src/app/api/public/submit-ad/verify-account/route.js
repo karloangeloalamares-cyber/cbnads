@@ -80,8 +80,9 @@ export async function POST(request) {
     const message = error?.message || "Failed to verify advertiser account.";
     const status =
       /invalid verification token|expired|verification token/i.test(message) ? 400 : 500;
+    const safeError = status === 500 ? "Internal Server Error" : message;
     return Response.json(
-      { error: message },
+      { error: safeError },
       { status },
     );
   }

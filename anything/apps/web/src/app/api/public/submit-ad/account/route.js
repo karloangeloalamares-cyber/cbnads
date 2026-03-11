@@ -1,4 +1,4 @@
-import { db } from "../../../utils/supabase-db.js";
+import { db, table } from "../../../utils/supabase-db.js";
 import {
   assertAdvertiserEmailConfig,
   createAdvertiserVerificationToken,
@@ -9,6 +9,10 @@ import {
   updatePendingAdAccountEmail,
   upsertAdvertiserProfile,
 } from "../../../utils/advertiser-auth.js";
+import {
+  clientIpFromHeaders,
+  consumePublicRateLimit,
+} from "../../../utils/public-rate-limit.js";
 import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
@@ -25,44 +29,6 @@ const existingAdvertiserAccountPayload = (email) => ({
   email,
   ctaLabel: "Log in to dashboard",
 });
-
-const getRateLimitStore = () => {
-  const globalKey = "__cbnadsAdvertiserSignupRateLimit";
-  if (!globalThis[globalKey]) {
-    globalThis[globalKey] = new Map();
-  }
-  return globalThis[globalKey];
-};
-
-const clientIpFromHeaders = (headers) => {
-  const forwarded = String(headers.get("x-forwarded-for") || "").trim();
-  if (forwarded) {
-    return forwarded.split(",")[0].trim();
-  }
-  return String(headers.get("x-real-ip") || "").trim();
-};
-
-const isRateLimited = (key) => {
-  const now = Date.now();
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  const store = getRateLimitStore();
-
-  for (const [entryKey, timestamps] of store.entries()) {
-    const filtered = timestamps.filter((value) => value >= cutoff);
-    if (filtered.length === 0) {
-      store.delete(entryKey);
-      continue;
-    }
-    store.set(entryKey, filtered);
-  }
-
-  const attempts = store.get(key) || [];
-  if (attempts.length >= RATE_LIMIT_MAX_ATTEMPTS) {
-    return true;
-  }
-  store.set(key, [...attempts, now]);
-  return false;
-};
 
 const buildMetadata = ({
   existingMetadata,
@@ -96,7 +62,12 @@ export async function POST(request) {
     const confirmPassword = String(body.confirmPassword || "");
 
     const rateLimitKey = `${requesterIp}:${normalizedEmail}:${getTodayInAppTimeZone()}`;
-    if (isRateLimited(rateLimitKey)) {
+    const rateLimitState = await consumePublicRateLimit({
+      key: rateLimitKey,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+    });
+    if (rateLimitState.limited) {
       return Response.json(
         { error: "Too many account setup attempts. Please try again later." },
         { status: 429 },
@@ -125,6 +96,30 @@ export async function POST(request) {
       return Response.json({ error: "Passwords do not match." }, { status: 400 });
     }
 
+    const supabase = db();
+    if (pendingAdId) {
+      const { data: pendingAd, error: pendingAdError } = await supabase
+        .from(table("pending_ads"))
+        .select("id, email")
+        .eq("id", pendingAdId)
+        .maybeSingle();
+
+      if (pendingAdError) {
+        throw pendingAdError;
+      }
+
+      if (!pendingAd?.id) {
+        return Response.json({ error: "Pending ad submission not found." }, { status: 404 });
+      }
+
+      if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
+        return Response.json(
+          { error: "Pending ad does not belong to this email." },
+          { status: 403 },
+        );
+      }
+    }
+
     const advertiser = await ensureAdvertiserRecord({
       advertiserName,
       contactName,
@@ -140,7 +135,6 @@ export async function POST(request) {
       });
     }
 
-    const supabase = db();
     const existingUser = await findAuthUserByEmail(supabase, normalizedEmail);
     const fullName = contactName || advertiserName || normalizedEmail;
     let authUser = existingUser;
@@ -263,7 +257,7 @@ export async function POST(request) {
   } catch (error) {
     console.error("[submit-ad/account] Failed to create advertiser account:", error);
     return Response.json(
-      { error: error?.message || "Failed to create advertiser account." },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }

@@ -1,6 +1,47 @@
 import { db, table } from "../../utils/supabase-db.js";
+import crypto from "node:crypto";
 
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || "";
+const WHATSAPP_APP_SECRET = process.env.WHATSAPP_APP_SECRET || "";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseSignature(signatureHeader) {
+  const normalized = String(signatureHeader || "").trim();
+  if (!normalized.toLowerCase().startsWith("sha256=")) {
+    return "";
+  }
+  return normalized.slice(7).trim().toLowerCase();
+}
+
+function hasValidSignature(request, rawBody) {
+  if (!WHATSAPP_APP_SECRET) {
+    console.error("[whatsapp] Missing WHATSAPP_APP_SECRET.");
+    return false;
+  }
+
+  const providedHex = parseSignature(request.headers.get("x-hub-signature-256"));
+  if (!/^[a-f0-9]{64}$/.test(providedHex)) {
+    return false;
+  }
+
+  const expectedHex = crypto
+    .createHmac("sha256", WHATSAPP_APP_SECRET)
+    .update(rawBody, "utf8")
+    .digest("hex");
+
+  const provided = Buffer.from(providedHex, "hex");
+  const expected = Buffer.from(expectedHex, "hex");
+  if (provided.length !== expected.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(provided, expected);
+}
+
+function isUuid(value) {
+  return UUID_PATTERN.test(String(value || "").trim());
+}
 
 function summarizeStatusUpdate(statusItem = {}) {
   const errors = Array.isArray(statusItem.errors)
@@ -49,7 +90,17 @@ export async function GET(request) {
 // POST: Handle incoming WhatsApp message payloads (Ad approvals/declines)
 export async function POST(request) {
   try {
-    const body = await request.json();
+    const rawBody = await request.text();
+    if (!hasValidSignature(request, rawBody)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    let body;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
 
     // Verify this is an event from the WhatsApp Business API
     if (body.object !== "whatsapp_business_account") {
@@ -79,7 +130,7 @@ export async function POST(request) {
             // We only care about interactive button replies
             if (message.type === "interactive" && message.interactive.type === "button_reply") {
               const buttonReply = message.interactive.button_reply;
-              const payloadId = buttonReply.id; // Expected format: e.g., "approve_123" or "decline_123"
+              const payloadId = String(buttonReply?.id || "").trim();
 
               // Extract action and Ad ID from the button ID string
               const [action, adId] = payloadId.split("_");
@@ -87,6 +138,10 @@ export async function POST(request) {
               if (!adId) {
                 console.error("No Ad ID found in button payload:", payloadId);
                 continue; // Skip this message
+              }
+              if (!isUuid(adId)) {
+                console.error("Invalid Ad ID format in button payload:", payloadId);
+                continue;
               }
 
               let newStatus = null;

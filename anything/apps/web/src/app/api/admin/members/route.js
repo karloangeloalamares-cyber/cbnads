@@ -215,7 +215,7 @@ export async function GET(request) {
   try {
     const admin = await requireAdmin(request);
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const supabase = db();
@@ -261,7 +261,7 @@ export async function POST(request) {
   try {
     const admin = await requireAdmin(request);
     if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: 401 });
+      return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
     const body = await request.json();
@@ -495,7 +495,7 @@ export async function POST(request) {
   } catch (err) {
     console.error("POST /api/admin/members error", err);
     return Response.json(
-      { error: err?.message || "Internal Server Error" },
+      { error: "Internal Server Error" },
       { status: 500 },
     );
   }
