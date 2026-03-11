@@ -152,6 +152,7 @@ const DEFAULT_SUBMISSION_REJECTION_REASONS = [
   "Incorrect Schedule Details",
   "Poor Image Quality",
 ];
+const REVENUE_TREND_MIN_MONTH = { year: 2026, monthIndex: 0 }; // Jan 2026
 
 const parseNotificationSignal = (value) => {
   if (!value) {
@@ -593,6 +594,44 @@ const getAdsStatusColor = (status) => {
   }
 };
 
+const getAdsPublishedProgress = (adRecord) => {
+  const occurrenceDateKeys = [...new Set(getAdOccurrenceDateKeys(adRecord))];
+  if (occurrenceDateKeys.length <= 1) {
+    return null;
+  }
+
+  const publishedDateSet = new Set(
+    toStringArray(adRecord?.published_dates)
+      .map((value) => toScheduleDateKey(value))
+      .filter(Boolean),
+  );
+
+  let completed = occurrenceDateKeys.filter((dateKey) => publishedDateSet.has(dateKey)).length;
+  const isPublishedStatus = String(adRecord?.status || "").trim().toLowerCase() === "published";
+
+  // Legacy publish flows only set status to Published. Treat that as first completion for multi-date ads.
+  if (completed === 0 && isPublishedStatus) {
+    completed = 1;
+  }
+
+  if (completed <= 0) {
+    return null;
+  }
+
+  return {
+    completed: Math.min(completed, occurrenceDateKeys.length),
+    total: occurrenceDateKeys.length,
+  };
+};
+
+const getAdsStatusLabel = (adRecord) => {
+  const progress = getAdsPublishedProgress(adRecord);
+  if (progress) {
+    return `${progress.completed} of ${progress.total} published`;
+  }
+  return adRecord?.status || "Draft";
+};
+
 const ADS_NON_ACTION_STATUSES = new Set([
   "published",
   "posted",
@@ -751,6 +790,21 @@ const parseAdMedia = (value) => {
   }
   return [];
 };
+
+function DashboardStatTooltipIcon({ icon: Icon, tooltip }) {
+  return (
+    <span className="inline-flex items-center justify-center">
+      <span
+        tabIndex={0}
+        title={tooltip}
+        aria-label={tooltip}
+        className="inline-flex h-5 w-5 items-center justify-center rounded text-gray-400 transition-colors hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300/70"
+      >
+        <Icon className="h-4 w-4" />
+      </span>
+    </span>
+  );
+}
 
 function AdsScheduleCell({ ad }) {
   const [showTooltip, setShowTooltip] = useState(false);
@@ -1066,6 +1120,7 @@ function AdsGridCard({
 
   const primaryMedia = getPrimaryAdsShareMedia(ad);
   const imageUrl = primaryMedia?.url || null;
+  const statusLabel = getAdsStatusLabel(ad);
 
   return (
     <div 
@@ -1095,7 +1150,7 @@ function AdsGridCard({
         )}
         <div className="absolute bottom-2 right-2">
           <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-semibold shadow-sm backdrop-blur-sm ${ad.status === 'Published' ? 'bg-emerald-50/95 text-emerald-700 border-emerald-200/50' : ad.status === 'Scheduled' ? 'bg-blue-50/95 text-blue-700 border-blue-200/50' : 'bg-white/95 text-gray-700 border-gray-200/50'}`}>
-            {ad.status || "Draft"}
+            {statusLabel}
           </span>
         </div>
       </div>
@@ -1329,6 +1384,8 @@ function AdsTableRow({
     setActiveMenu((current) => !current);
   };
 
+  const statusLabel = getAdsStatusLabel(ad);
+
   return (
     <tr className={`hover:bg-gray-50 transition-colors group${isSelected ? " bg-blue-50" : ""}`}>
       {onToggleSelect && (
@@ -1358,7 +1415,7 @@ function AdsTableRow({
             ad.status,
           )}`}
         >
-          {ad.status || "Draft"}
+          {statusLabel}
         </span>
       </td>
       <td className="px-6 py-4 cursor-pointer" onClick={() => onPreview(ad)}>
@@ -1509,6 +1566,7 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
   );
   const today = getTodayDateInAppTimeZone();
   const media = parseAdMedia(ad.media);
+  const statusLabel = getAdsStatusLabel(ad);
 
   return (
     <>
@@ -1554,7 +1612,7 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
                     ad.status,
                   )}`}
                 >
-                  {ad.status || "Draft"}
+                  {statusLabel}
                 </span>
               </div>
               <div>
@@ -2541,6 +2599,7 @@ export default function AdsPage() {
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
   const [pendingSubmissionApproveIds, setPendingSubmissionApproveIds] = useState([]);
   const [selectedAdIds, setSelectedAdIds] = useState(new Set());
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState(new Set());
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(new Set());
   const [activeSection, setActiveSection] = useState(() => {
     if (typeof window === "undefined") {
@@ -2764,6 +2823,7 @@ export default function AdsPage() {
   const canViewReconciliation = can(userRole, "reconciliation:view");
   const canConvertSubmissions = can(userRole, "submissions:convert");
   const canRejectSubmissions = can(userRole, "submissions:reject");
+  const canBatchDeleteSubmissions = isAdmin || isManager;
   const canViewNotifications = can(userRole, "notifications:view");
 
   const refreshPendingSubmissions = async () => {
@@ -4490,9 +4550,26 @@ export default function AdsPage() {
   const revenueTrend = useMemo(() => {
     const points = [];
     const now = getTodayDateInAppTimeZone();
+    const endMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const minMonth = new Date(
+      REVENUE_TREND_MIN_MONTH.year,
+      REVENUE_TREND_MIN_MONTH.monthIndex,
+      1,
+    );
 
-    for (let offset = 5; offset >= 0; offset -= 1) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    if (endMonth < minMonth) {
+      return points;
+    }
+
+    const rollingStartMonth = new Date(endMonth.getFullYear(), endMonth.getMonth() - 5, 1);
+    const startMonth = rollingStartMonth < minMonth ? minMonth : rollingStartMonth;
+    const monthCount =
+      (endMonth.getFullYear() - startMonth.getFullYear()) * 12 +
+      (endMonth.getMonth() - startMonth.getMonth()) +
+      1;
+
+    for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
+      const monthDate = new Date(endMonth.getFullYear(), endMonth.getMonth() - offset, 1);
       const monthKey = `${monthDate.getFullYear()}-${String(
         monthDate.getMonth() + 1,
       ).padStart(2, "0")}`;
@@ -4589,6 +4666,25 @@ export default function AdsPage() {
       ),
     [pending],
   );
+
+  useEffect(() => {
+    if (!canBatchDeleteSubmissions) {
+      setSelectedSubmissionIds(new Set());
+      return;
+    }
+
+    const visibleIds = new Set(
+      filteredPendingSubmissions.map((item) => String(item.id || "").trim()).filter(Boolean),
+    );
+
+    setSelectedSubmissionIds((current) => {
+      if (current.size === 0) {
+        return current;
+      }
+      const next = new Set([...current].filter((id) => visibleIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [canBatchDeleteSubmissions, filteredPendingSubmissions]);
 
   const filteredAdvertisers = useMemo(() => {
     return advertisers.filter((item) => {
@@ -4963,6 +5059,115 @@ export default function AdsPage() {
       });
       return false;
     }
+  };
+
+  const handleToggleSelectSubmission = (pendingAdId) => {
+    const normalizedPendingAdId = String(pendingAdId || "").trim();
+    if (!normalizedPendingAdId || !canBatchDeleteSubmissions) {
+      return;
+    }
+    setSelectedSubmissionIds((prev) => {
+      const next = new Set(prev);
+      next.has(normalizedPendingAdId)
+        ? next.delete(normalizedPendingAdId)
+        : next.add(normalizedPendingAdId);
+      return next;
+    });
+  };
+
+  const handleSelectAllSubmissions = () => {
+    if (!canBatchDeleteSubmissions) {
+      return;
+    }
+
+    const allIds = filteredPendingSubmissions
+      .map((item) => String(item.id || "").trim())
+      .filter(Boolean);
+    const allSelected = allIds.length > 0 && allIds.every((id) => selectedSubmissionIds.has(id));
+    setSelectedSubmissionIds(allSelected ? new Set() : new Set(allIds));
+  };
+
+  const executeBatchDeleteSubmissions = async (submissionIds) => {
+    if (!canBatchDeleteSubmissions) {
+      appToast.error({ title: "You do not have permission to delete submissions." });
+      return;
+    }
+
+    const ids = Array.from(
+      new Set(
+        (Array.isArray(submissionIds) ? submissionIds : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean),
+      ),
+    );
+    if (ids.length === 0) {
+      return;
+    }
+
+    const toastId = "batch-delete-submissions";
+    appToast.info({
+      id: toastId,
+      title: "Deleting submissions...",
+      duration: Infinity,
+    });
+
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (const pendingAdId of ids) {
+        try {
+          await deletePendingAd(pendingAdId);
+          deletedCount += 1;
+        } catch (error) {
+          failedCount += 1;
+          console.error("[AdsPage] Batch delete submission failed", {
+            pendingAdId,
+            error,
+          });
+        }
+      }
+
+      setDb(readDb());
+      setSelectedSubmissionIds(new Set());
+
+      if (failedCount === 0) {
+        appToast.success({
+          title: `Deleted ${deletedCount} submission${deletedCount === 1 ? "" : "s"}.`,
+        });
+      } else if (deletedCount > 0) {
+        appToast.warning({
+          title: "Batch delete partially completed.",
+          description: `${deletedCount} deleted, ${failedCount} failed.`,
+        });
+      } else {
+        appToast.error({
+          title: "Failed to delete submissions.",
+        });
+      }
+    } finally {
+      appToast.dismiss(toastId);
+    }
+  };
+
+  const handleBatchDeleteSubmissions = () => {
+    if (!canBatchDeleteSubmissions || selectedSubmissionIds.size === 0) {
+      return;
+    }
+
+    const ids = [...selectedSubmissionIds];
+    appToast.warning({
+      id: "confirm-batch-delete-submissions",
+      title: `Delete ${ids.length} submission${ids.length > 1 ? "s" : ""}?`,
+      description: "This cannot be undone.",
+      duration: 8000,
+      action: {
+        label: "Delete",
+        onClick: () => {
+          void executeBatchDeleteSubmissions(ids);
+        },
+      },
+    });
   };
 
   const handleModalApprovePendingAd = async () => {
@@ -8436,7 +8641,10 @@ export default function AdsPage() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Active Ads
                     </p>
-                    <Calendar className="w-4 h-4 text-gray-400" />
+                    <DashboardStatTooltipIcon
+                      icon={Calendar}
+                      tooltip="Total ads currently in your pipeline."
+                    />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {dashboardStats.totalAds}
@@ -8448,7 +8656,10 @@ export default function AdsPage() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Pending Submissions
                     </p>
-                    <Clock3 className="w-4 h-4 text-gray-400" />
+                    <DashboardStatTooltipIcon
+                      icon={Clock3}
+                      tooltip="New ad submissions waiting for review and approval."
+                    />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {dashboardStats.pendingSubmissions}
@@ -8460,7 +8671,10 @@ export default function AdsPage() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       Outstanding
                     </p>
-                    <AlertCircle className="w-4 h-4 text-gray-400" />
+                    <DashboardStatTooltipIcon
+                      icon={AlertCircle}
+                      tooltip="Total unpaid invoice balance across approved ads."
+                    />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {formatCurrency(dashboardStats.outstandingRevenue)}
@@ -8472,7 +8686,10 @@ export default function AdsPage() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                       This Month
                     </p>
-                    <TrendingUp className="w-4 h-4 text-gray-400" />
+                    <DashboardStatTooltipIcon
+                      icon={TrendingUp}
+                      tooltip="Revenue collected from ads marked paid this month."
+                    />
                   </div>
                   <p className="text-2xl font-bold text-gray-900">
                     {formatCurrency(dashboardStats.monthRevenue)}
@@ -8989,10 +9206,52 @@ export default function AdsPage() {
                 ) : filteredPendingSubmissions.length === 0 ? (
                   <div className="text-center py-12 text-gray-500">No submissions</div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
+                  <>
+                    {canBatchDeleteSubmissions && selectedSubmissionIds.size > 0 && (
+                      <div className="mx-4 mt-4 mb-2 flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
+                        <span className="text-sm text-gray-700 font-medium">
+                          {selectedSubmissionIds.size} submission
+                          {selectedSubmissionIds.size > 1 ? "s" : ""} selected
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSubmissionIds(new Set())}
+                          className="text-xs text-gray-500 hover:text-gray-900 transition-colors"
+                        >
+                          Clear
+                        </button>
+                        <div className="ml-auto">
+                          <button
+                            type="button"
+                            onClick={handleBatchDeleteSubmissions}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                            Delete {selectedSubmissionIds.size} submission
+                            {selectedSubmissionIds.size > 1 ? "s" : ""}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            {canBatchDeleteSubmissions && (
+                              <th className="px-6 py-3 text-left w-10">
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    filteredPendingSubmissions.length > 0 &&
+                                    filteredPendingSubmissions.every((item) =>
+                                      selectedSubmissionIds.has(String(item.id || "").trim()),
+                                    )
+                                  }
+                                  onChange={handleSelectAllSubmissions}
+                                  className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                                />
+                              </th>
+                            )}
                           <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase">
                             Status
                           </th>
@@ -9014,12 +9273,22 @@ export default function AdsPage() {
                           <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700 uppercase sticky right-0 bg-gray-50 shadow-[-8px_0_8px_-4px_rgba(0,0,0,0.04)]">
                             Actions
                           </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {filteredPendingSubmissions.map((item) => {
-                          return (
-                            <tr key={item.id} className="hover:bg-gray-50">
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200">
+                          {filteredPendingSubmissions.map((item) => {
+                            return (
+                              <tr key={item.id} className="hover:bg-gray-50">
+                                {canBatchDeleteSubmissions && (
+                                  <td className="px-6 py-3.5">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedSubmissionIds.has(String(item.id || "").trim())}
+                                      onChange={() => handleToggleSelectSubmission(item.id)}
+                                      className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                                    />
+                                  </td>
+                                )}
                             <td className="px-6 py-3.5">
                               <span
                                 className={`px-3 py-1 rounded-full text-xs font-medium ${getSubmissionStatusBadgeClass(
@@ -9075,11 +9344,12 @@ export default function AdsPage() {
                               </div>
                             </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
