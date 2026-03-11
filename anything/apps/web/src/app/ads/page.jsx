@@ -1074,20 +1074,13 @@ function AdsGridCard({
       style={{ cursor: "pointer" }}
     >
       {onToggleSelect && (
-        <div 
-          className="absolute left-4 top-4 z-10 rounded-full bg-white/90 p-1 shadow-sm transition-opacity"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelect(ad.id);
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={() => {}}
-            className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer pointer-events-none"
-          />
-        </div>
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect(ad.id)}
+          className="absolute left-4 top-4 z-10 h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+        />
       )}
 
       {/* Image Area */}
