@@ -1,4 +1,10 @@
 const TELEGRAM_API_BASE = "https://api.telegram.org";
+const SUPPORTED_TELEGRAM_MEDIA_TYPES = new Set([
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
 
 const createTelegramError = (status, data) => {
   const error = new Error(data?.description || "Failed to send Telegram message");
@@ -27,19 +33,36 @@ const stripHtmlTags = (value) =>
 const shouldRetryWithoutHtml = (error) =>
   /can't parse entities/i.test(String(error?.message || ""));
 
+const normalizeTelegramMediaType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return SUPPORTED_TELEGRAM_MEDIA_TYPES.has(normalized) ? normalized : "";
+};
+
 const buildTelegramPayload = ({ chatId, text, media, parseMode }) => {
   const payload = {
     chat_id: String(chatId).trim(),
   };
   const normalizedParseMode = normalizeParseMode(parseMode);
+  const mediaType = normalizeTelegramMediaType(media?.type);
+  const mediaUrl = String(media?.url || "").trim();
 
-  if (media?.type === "image") {
-    payload.photo = String(media.url || "").trim();
+  if (mediaType === "image" && mediaUrl) {
+    payload.photo = mediaUrl;
     if (text) {
       payload.caption = String(text);
     }
-  } else if (media?.type === "video") {
-    payload.video = String(media.url || "").trim();
+  } else if (mediaType === "video" && mediaUrl) {
+    payload.video = mediaUrl;
+    if (text) {
+      payload.caption = String(text);
+    }
+  } else if (mediaType === "audio" && mediaUrl) {
+    payload.audio = mediaUrl;
+    if (text) {
+      payload.caption = String(text);
+    }
+  } else if (mediaType === "document" && mediaUrl) {
+    payload.document = mediaUrl;
     if (text) {
       payload.caption = String(text);
     }
@@ -55,11 +78,18 @@ const buildTelegramPayload = ({ chatId, text, media, parseMode }) => {
 };
 
 const resolveTelegramMethod = (media) => {
-  if (media?.type === "image") {
+  const mediaType = normalizeTelegramMediaType(media?.type);
+  if (mediaType === "image") {
     return "sendPhoto";
   }
-  if (media?.type === "video") {
+  if (mediaType === "video") {
     return "sendVideo";
+  }
+  if (mediaType === "audio") {
+    return "sendAudio";
+  }
+  if (mediaType === "document") {
+    return "sendDocument";
   }
   return "sendMessage";
 };

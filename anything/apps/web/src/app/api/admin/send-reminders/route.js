@@ -23,6 +23,12 @@ const ET_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 const WHATSAPP_E164_LIKE_PATTERN = /^\+?\d{8,15}$/;
+const SUPPORTED_REMINDER_MEDIA_TYPES = new Set([
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
@@ -262,9 +268,64 @@ async function storeReminder(supabase, adId, type, recipientType, scheduleKey) {
 
 function buildMediaFields(media) {
   const items = Array.isArray(media) ? media : [];
-  const images = items.filter((item) => item?.type === "image");
-  const videos = items.filter((item) => item?.type === "video");
+  const images = [];
+  const videos = [];
+  const audios = [];
+  const documents = [];
   const fields = {};
+
+  const resolveMediaType = (item) => {
+    const declaredType = String(item?.type || "").trim().toLowerCase();
+    if (SUPPORTED_REMINDER_MEDIA_TYPES.has(declaredType)) {
+      return declaredType;
+    }
+
+    const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
+    if (mimeType.startsWith("image/")) return "image";
+    if (mimeType.startsWith("video/")) return "video";
+    if (mimeType.startsWith("audio/")) return "audio";
+    if (mimeType === "application/pdf") return "document";
+
+    const source = String(item?.name || item?.url || item?.cdnUrl || "").toLowerCase();
+    const extensionIndex = source.lastIndexOf(".");
+    const extension = extensionIndex >= 0 ? source.slice(extensionIndex) : "";
+    if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif"].includes(extension)) {
+      return "image";
+    }
+    if ([".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"].includes(extension)) {
+      return "video";
+    }
+    if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac"].includes(extension)) {
+      return "audio";
+    }
+    if (extension === ".pdf") {
+      return "document";
+    }
+
+    return "";
+  };
+
+  for (const item of items) {
+    const url = String(item?.url || item?.cdnUrl || "").trim();
+    if (!url) continue;
+
+    const type = resolveMediaType(item);
+    if (type === "image") {
+      images.push({ ...item, url, type });
+      continue;
+    }
+    if (type === "video") {
+      videos.push({ ...item, url, type });
+      continue;
+    }
+    if (type === "audio") {
+      audios.push({ ...item, url, type });
+      continue;
+    }
+    if (type === "document") {
+      documents.push({ ...item, url, type });
+    }
+  }
 
   images.forEach((item, index) => {
     fields[`image${index + 1}Url`] = item.url || item.cdnUrl || "";
@@ -272,16 +333,45 @@ function buildMediaFields(media) {
   videos.forEach((item, index) => {
     fields[`video${index + 1}Url`] = item.url || item.cdnUrl || "";
   });
+  audios.forEach((item, index) => {
+    fields[`audio${index + 1}Url`] = item.url || item.cdnUrl || "";
+  });
+  documents.forEach((item, index) => {
+    fields[`document${index + 1}Url`] = item.url || item.cdnUrl || "";
+  });
 
-  return { images, videos, fields };
+  return { images, videos, audios, documents, fields };
 }
 
 function buildPrimaryMedia(media) {
   for (const item of Array.isArray(media) ? media : []) {
     const type = String(item?.type || "").trim().toLowerCase();
     const url = String(item?.url || item?.cdnUrl || "").trim();
-    if ((type === "image" || type === "video") && url) {
+    if (SUPPORTED_REMINDER_MEDIA_TYPES.has(type) && url) {
       return { type, url };
+    }
+
+    const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
+    if (!url) continue;
+    if (mimeType.startsWith("image/")) return { type: "image", url };
+    if (mimeType.startsWith("video/")) return { type: "video", url };
+    if (mimeType.startsWith("audio/")) return { type: "audio", url };
+    if (mimeType === "application/pdf") return { type: "document", url };
+
+    const source = String(item?.name || url).toLowerCase();
+    const extensionIndex = source.lastIndexOf(".");
+    const extension = extensionIndex >= 0 ? source.slice(extensionIndex) : "";
+    if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif"].includes(extension)) {
+      return { type: "image", url };
+    }
+    if ([".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"].includes(extension)) {
+      return { type: "video", url };
+    }
+    if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac"].includes(extension)) {
+      return { type: "audio", url };
+    }
+    if (extension === ".pdf") {
+      return { type: "document", url };
     }
   }
   return null;
@@ -375,6 +465,24 @@ function generateReminderHtml(payload) {
     if (url) {
       mediaBlocks.push(
         `<div style="margin: 0 0 16px;"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color: #2563eb; word-break: break-all;">Open video ${i}</a></div>`,
+      );
+    }
+  }
+
+  for (let i = 1; i <= payload.audioCount; i++) {
+    const url = payload[`audio${i}Url`];
+    if (url) {
+      mediaBlocks.push(
+        `<div style="margin: 0 0 16px;"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color: #2563eb; word-break: break-all;">Open audio ${i}</a></div>`,
+      );
+    }
+  }
+
+  for (let i = 1; i <= payload.documentCount; i++) {
+    const url = payload[`document${i}Url`];
+    if (url) {
+      mediaBlocks.push(
+        `<div style="margin: 0 0 16px;"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer" style="color: #2563eb; word-break: break-all;">Open document ${i}</a></div>`,
       );
     }
   }
@@ -582,6 +690,8 @@ export async function POST(request) {
                 adText: ad.ad_text || "",
                 imageCount: media.images.length,
                 videoCount: media.videos.length,
+                audioCount: media.audios.length,
+                documentCount: media.documents.length,
                 ...media.fields,
               };
 
@@ -679,6 +789,8 @@ export async function POST(request) {
                 adText: ad.ad_text || "",
                 imageCount: media.images.length,
                 videoCount: media.videos.length,
+                audioCount: media.audios.length,
+                documentCount: media.documents.length,
                 ...media.fields,
               };
 

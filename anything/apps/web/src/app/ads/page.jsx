@@ -759,11 +759,52 @@ const buildAdsShareMessage = (ad) =>
 const buildAdsTelegramCaption = (ad) =>
   String(ad?.ad_text || ad?.notes || "").trim();
 
+const getAdMediaExtension = (value = "") => {
+  const dotIndex = String(value || "").lastIndexOf(".");
+  if (dotIndex < 0) return "";
+  return String(value || "").slice(dotIndex).toLowerCase();
+};
+
+const resolveAdMediaType = (item) => {
+  const declaredType = String(item?.type || "").trim().toLowerCase();
+  if (["image", "video", "audio", "document"].includes(declaredType)) {
+    return declaredType;
+  }
+
+  const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType === "application/pdf") return "document";
+
+  const extension = getAdMediaExtension(item?.name || item?.url || item?.cdnUrl || "");
+  if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif"].includes(extension)) {
+    return "image";
+  }
+  if ([".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"].includes(extension)) {
+    return "video";
+  }
+  if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac"].includes(extension)) {
+    return "audio";
+  }
+  if (extension === ".pdf") {
+    return "document";
+  }
+  return "file";
+};
+
 const getPrimaryAdsShareMedia = (ad) =>
   parseAdMedia(ad?.media).find((item) => {
-    const type = String(item?.type || "").trim().toLowerCase();
+    const type = resolveAdMediaType(item);
     const url = String(item?.url || item?.cdnUrl || "").trim();
-    return url && (type === "image" || type === "video");
+    return url && (type === "image" || type === "video" || type === "audio" || type === "document");
+  }) || null;
+
+const getPrimaryAdsVisualMedia = (ad) =>
+  parseAdMedia(ad?.media).find((item) => {
+    const type = resolveAdMediaType(item);
+    const url = String(item?.url || item?.cdnUrl || "").trim();
+    return url && type === "image";
   }) || null;
 
 const truncateAdsWords = (text, maxWords = 3) => {
@@ -1118,8 +1159,8 @@ function AdsGridCard({
     setActiveMenu((current) => !current);
   };
 
-  const primaryMedia = getPrimaryAdsShareMedia(ad);
-  const imageUrl = primaryMedia?.url || null;
+  const imageMedia = getPrimaryAdsVisualMedia(ad);
+  const imageUrl = imageMedia?.url || null;
   const statusLabel = getAdsStatusLabel(ad);
 
   return (
@@ -1696,24 +1737,44 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
                   Media
                 </label>
                 <div className="grid grid-cols-2 gap-3">
-                  {media.map((item, index) => (
-                    <div
-                      key={`${item.url || item.name || "media"}-${index}`}
-                      className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50"
-                    >
-                      {item.type === "image" ? (
-                        <img
-                          src={item.url}
-                          alt={item.name || `Media ${index + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                          <Play size={48} className="text-white" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {media.map((item, index) => {
+                    const itemType = resolveAdMediaType(item);
+                    const itemUrl = item?.url || item?.cdnUrl || "";
+                    const itemName = item?.name || `Media ${index + 1}`;
+
+                    return (
+                      <div
+                        key={`${itemUrl || itemName || "media"}-${index}`}
+                        className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50"
+                      >
+                        {itemType === "image" ? (
+                          <img
+                            src={itemUrl}
+                            alt={itemName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : itemType === "video" ? (
+                          <div className="w-full h-full flex items-center justify-center bg-gray-900">
+                            <Play size={48} className="text-white" />
+                          </div>
+                        ) : itemType === "audio" ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gray-100 text-gray-700 p-3 text-center">
+                            <Volume2 size={28} />
+                            <span className="text-[11px] font-medium line-clamp-2 break-words">
+                              {itemName}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gray-100 text-gray-700 p-3 text-center">
+                            <FileText size={28} />
+                            <span className="text-[11px] font-medium line-clamp-2 break-words">
+                              {itemName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : null}
@@ -9770,7 +9831,7 @@ export default function AdsPage() {
                         <div>
                           <p className="text-sm font-medium text-gray-900">Include media</p>
                           <p className="text-xs text-gray-500">
-                            Send image/video when ad media is available.
+                            Send media attachments (image, video, audio, document) when available.
                           </p>
                         </div>
                       </label>

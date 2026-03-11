@@ -6,18 +6,32 @@ import {
   sendTelegramToMany,
 } from "../../../utils/send-telegram.js";
 
+const SUPPORTED_TELEGRAM_MEDIA_TYPES = new Set([
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
+
 const normalizeTelegramMedia = (value) => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
+  if (!value) {
+    return { media: null, error: null };
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { media: null, error: "Media must be an object with type and url." };
   }
 
   const type = String(value?.type || "").trim().toLowerCase();
   const url = String(value?.url || value?.cdnUrl || "").trim();
-  if (!url || (type !== "image" && type !== "video")) {
-    return null;
+  if (!url) {
+    return { media: null, error: "Media URL is required when media is provided." };
+  }
+  if (!SUPPORTED_TELEGRAM_MEDIA_TYPES.has(type)) {
+    return { media: null, error: "Media type must be one of: image, video, audio, document." };
   }
 
-  return { type, url };
+  return { media: { type, url }, error: null };
 };
 
 export async function POST(request) {
@@ -30,7 +44,11 @@ export async function POST(request) {
     const body = await request.json();
     const { chat_id, chat_ids, text, parse_mode } = body;
     const normalizedText = typeof text === "string" ? text : String(text || "");
-    const media = normalizeTelegramMedia(body?.media);
+    const normalizedMedia = normalizeTelegramMedia(body?.media);
+    if (normalizedMedia.error) {
+      return Response.json({ error: normalizedMedia.error }, { status: 400 });
+    }
+    const media = normalizedMedia.media;
 
     if (!normalizedText.trim() && !media) {
       return Response.json({ error: "text or media is required" }, { status: 400 });

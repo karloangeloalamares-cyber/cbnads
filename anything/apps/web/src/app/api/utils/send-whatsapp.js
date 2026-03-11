@@ -8,6 +8,12 @@ const WHATSAPP_API_TOKEN = process.env.WHATSAPP_API_TOKEN;
 const MAX_WHATSAPP_TEXT_BODY_LENGTH = 4096;
 const MAX_WHATSAPP_MEDIA_CAPTION_LENGTH = 1024;
 const MAX_WHATSAPP_TEMPLATE_PARAM_LENGTH = 1024;
+const SUPPORTED_WHATSAPP_MEDIA_TYPES = new Set([
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
 
 function clampWhatsAppText(value, maxLength) {
   const normalized = String(value ?? "");
@@ -68,6 +74,11 @@ async function postWhatsAppPayload(payload, errorPrefix) {
       body: null,
     };
   }
+}
+
+function normalizeWhatsAppMediaType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return SUPPORTED_WHATSAPP_MEDIA_TYPES.has(normalized) ? normalized : "";
 }
 
 /**
@@ -205,13 +216,13 @@ export async function sendWhatsAppTemplateDetailed({
 }
 
 /**
- * Sends a standard WhatsApp message (text + optional image/video) to a broadcast list.
+ * Sends a standard WhatsApp message (text + optional media) to a broadcast list.
  * Note: If sending outside of the 24-hour customer service window, you MUST use an approved template.
  * For freeform messages, the user must have messaged you within the last 24 hours.
  * 
  * @param {string} to - The recipient's phone number with country code
  * @param {string} text - The body of the message
- * @param {Object} [media] - Optional media object { type: 'image' | 'video', url: string }
+ * @param {Object} [media] - Optional media object { type: 'image' | 'video' | 'audio' | 'document', url: string }
  */
 export async function sendWhatsAppMessageDetailed({ to, text, media }) {
   if (!WHATSAPP_API_URL || !WHATSAPP_API_TOKEN) {
@@ -227,24 +238,30 @@ export async function sendWhatsAppMessageDetailed({ to, text, media }) {
 
   const textBody = clampWhatsAppText(text, MAX_WHATSAPP_TEXT_BODY_LENGTH);
   const mediaCaption = clampWhatsAppText(text, MAX_WHATSAPP_MEDIA_CAPTION_LENGTH);
+  const mediaUrl = String(media?.url || "").trim();
+  const mediaType = normalizeWhatsAppMediaType(media?.type);
 
   // Send the media block first if it exists
-  if (media && media.url) {
+  if (mediaUrl && mediaType) {
     const mediaPayload = {
       messaging_product: "whatsapp",
       recipient_type: "individual",
-      to: to,
-      type: media.type === "video" ? "video" : "image",
-      [media.type === "video" ? "video" : "image"]: {
-        link: media.url,
-        caption: mediaCaption // Keep caption within Meta's media caption length limit.
-      }
+      to,
+      type: mediaType,
+      [mediaType]: {
+        link: mediaUrl,
+      },
     };
+
+    if (mediaType === "image" || mediaType === "video" || mediaType === "document") {
+      mediaPayload[mediaType].caption = mediaCaption;
+    }
 
     const mediaResult = await postWhatsAppPayload(mediaPayload, "Failed to send media");
     return {
       ...mediaResult,
       phase: "media",
+      mediaType,
     };
   }
 
@@ -264,6 +281,7 @@ export async function sendWhatsAppMessageDetailed({ to, text, media }) {
   return {
     ...textResult,
     phase: "text",
+    mediaType: null,
   };
 }
 

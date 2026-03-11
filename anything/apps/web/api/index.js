@@ -10,20 +10,20 @@ import * as route_7 from "../src/app/api/admin/send-test-email/route.js";
 import * as route_8 from "../src/app/api/admin/send-test-whatsapp/route.js";
 import * as route_9 from "../src/app/api/admin/settings/route.js";
 import * as route_10 from "../src/app/api/admin/sync-advertiser-spending/route.js";
-import * as route_11 from "../src/app/api/ads/availability/route.js";
-import * as route_12 from "../src/app/api/ads/archive/route.js";
-import * as route_13 from "../src/app/api/ads/availability-batch/route.js";
-import * as route_14 from "../src/app/api/ads/bulk-action/route.js";
-import * as route_15 from "../src/app/api/ads/calendar/route.js";
-import * as route_16 from "../src/app/api/ads/create/route.js";
-import * as route_17 from "../src/app/api/ads/delete/route.js";
-import * as route_18 from "../src/app/api/ads/export/route.js";
-import * as route_19 from "../src/app/api/ads/list/route.js";
-import * as route_20 from "../src/app/api/ads/mark-published/route.js";
-import * as route_21 from "../src/app/api/ads/update/route.js";
-import * as route_22 from "../src/app/api/advertisers/create/route.js";
-import * as route_23 from "../src/app/api/advertisers/list/route.js";
-import * as route_24 from "../src/app/api/advertisers/[id]/route.js";
+import * as route_11 from "../src/app/api/advertisers/create/route.js";
+import * as route_12 from "../src/app/api/advertisers/list/route.js";
+import * as route_13 from "../src/app/api/advertisers/[id]/route.js";
+import * as route_14 from "../src/app/api/ads/archive/route.js";
+import * as route_15 from "../src/app/api/ads/availability/route.js";
+import * as route_16 from "../src/app/api/ads/availability-batch/route.js";
+import * as route_17 from "../src/app/api/ads/calendar/route.js";
+import * as route_18 from "../src/app/api/ads/bulk-action/route.js";
+import * as route_19 from "../src/app/api/ads/create/route.js";
+import * as route_20 from "../src/app/api/ads/delete/route.js";
+import * as route_21 from "../src/app/api/ads/export/route.js";
+import * as route_22 from "../src/app/api/ads/list/route.js";
+import * as route_23 from "../src/app/api/ads/mark-published/route.js";
+import * as route_24 from "../src/app/api/ads/update/route.js";
 import * as route_25 from "../src/app/api/auth/expo-web-success/route.js";
 import * as route_26 from "../src/app/api/auth/reset-password/route.js";
 import * as route_27 from "../src/app/api/auth/token/route.js";
@@ -93,38 +93,38 @@ const routes = [
   { regex: new RegExp("^/api/admin/send\\-test\\-whatsapp$"), module: route_8 },
   { regex: new RegExp("^/api/invoices/create\\-from\\-ads$"), module: route_30 },
   { regex: new RegExp("^/api/admin/fix\\-all\\-spending$"), module: route_3 },
-  { regex: new RegExp("^/api/ads/availability\\-batch$"), module: route_13 },
+  { regex: new RegExp("^/api/ads/availability\\-batch$"), module: route_16 },
   { regex: new RegExp("^/api/admin/send\\-test\\-email$"), module: route_7 },
   { regex: new RegExp("^/api/auth/expo\\-web\\-success$"), module: route_25 },
   { regex: new RegExp("^/api/invoices/batch\\-create$"), module: route_28 },
   { regex: new RegExp("^/api/admin/send\\-reminders$"), module: route_6 },
   { regex: new RegExp("^/api/reconciliation/cases$"), module: route_37 },
   { regex: new RegExp("^/api/auth/reset\\-password$"), module: route_26 },
-  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_20 },
-  { regex: new RegExp("^/api/advertisers/create$"), module: route_22 },
+  { regex: new RegExp("^/api/advertisers/create$"), module: route_11 },
+  { regex: new RegExp("^/api/ads/mark\\-published$"), module: route_23 },
   { regex: new RegExp("^/api/upload/signed\\-url$"), module: route_39 },
   { regex: new RegExp("^/api/__create/ssr\\-test$"), module: route_43 },
-  { regex: new RegExp("^/api/ads/availability$"), module: route_11 },
-  { regex: new RegExp("^/api/advertisers/list$"), module: route_23 },
+  { regex: new RegExp("^/api/advertisers/list$"), module: route_12 },
+  { regex: new RegExp("^/api/ads/availability$"), module: route_15 },
   { regex: new RegExp("^/api/public/submit\\-ad$"), module: route_36 },
   { regex: new RegExp("^/api/webhook/whatsapp$"), module: route_42 },
-  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_14 },
+  { regex: new RegExp("^/api/ads/bulk\\-action$"), module: route_18 },
   { regex: new RegExp("^/api/invoices/create$"), module: route_29 },
   { regex: new RegExp("^/api/products/create$"), module: route_33 },
   { regex: new RegExp("^/api/admin/settings$"), module: route_9 },
   { regex: new RegExp("^/api/admin/members$"), module: route_4 },
   { regex: new RegExp("^/api/products/list$"), module: route_34 },
-  { regex: new RegExp("^/api/ads/calendar$"), module: route_15 },
+  { regex: new RegExp("^/api/ads/calendar$"), module: route_17 },
   { regex: new RegExp("^/api/user/profile$"), module: route_40 },
-  { regex: new RegExp("^/api/ads/archive$"), module: route_12 },
-  { regex: new RegExp("^/api/ads/create$"), module: route_16 },
-  { regex: new RegExp("^/api/ads/delete$"), module: route_17 },
-  { regex: new RegExp("^/api/ads/export$"), module: route_18 },
-  { regex: new RegExp("^/api/ads/update$"), module: route_21 },
+  { regex: new RegExp("^/api/ads/archive$"), module: route_14 },
+  { regex: new RegExp("^/api/ads/create$"), module: route_19 },
+  { regex: new RegExp("^/api/ads/delete$"), module: route_20 },
+  { regex: new RegExp("^/api/ads/export$"), module: route_21 },
+  { regex: new RegExp("^/api/ads/update$"), module: route_24 },
   { regex: new RegExp("^/api/auth/token$"), module: route_27 },
   { regex: new RegExp("^/api/user/role$"), module: route_41 },
-  { regex: new RegExp("^/api/ads/list$"), module: route_19 },
-  { regex: new RegExp("^/api/advertisers/(?<id>[^/]+)$"), module: route_24 },
+  { regex: new RegExp("^/api/ads/list$"), module: route_22 },
+  { regex: new RegExp("^/api/advertisers/(?<id>[^/]+)$"), module: route_13 },
   { regex: new RegExp("^/api/submissions/(?<id>[^/]+)$"), module: route_38 },
   { regex: new RegExp("^/api/products/(?<id>[^/]+)$"), module: route_35 },
   { regex: new RegExp("^/api/submissions$"), module: route_1 },

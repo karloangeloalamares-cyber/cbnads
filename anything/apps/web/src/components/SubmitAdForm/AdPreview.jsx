@@ -1,7 +1,48 @@
-﻿import { parseWhatsAppFormatting } from "@/utils/whatsappFormatter";
+﻿import { FileText, Play, Volume2 } from "lucide-react";
+import { parseWhatsAppFormatting } from "@/utils/whatsappFormatter";
+
+const getFileExtension = (value = "") => {
+  const dotIndex = String(value || "").lastIndexOf(".");
+  if (dotIndex < 0) return "";
+  return String(value || "").slice(dotIndex).toLowerCase();
+};
+
+const resolvePreviewMediaType = (item) => {
+  const declaredType = String(item?.type || "").trim().toLowerCase();
+  if (["image", "video", "audio", "document"].includes(declaredType)) {
+    return declaredType;
+  }
+
+  const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType === "application/pdf") return "document";
+
+  const extension = getFileExtension(item?.name || item?.url || item?.cdnUrl || "");
+  if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif"].includes(extension)) {
+    return "image";
+  }
+  if ([".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"].includes(extension)) {
+    return "video";
+  }
+  if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac"].includes(extension)) {
+    return "audio";
+  }
+  if (extension === ".pdf") {
+    return "document";
+  }
+
+  return "file";
+};
 
 export function AdPreview({ formData }) {
   const data = formData || {};
+  const mediaItems = Array.isArray(data.media) ? data.media : [];
+  const primaryMedia = mediaItems[0] || null;
+  const primaryMediaType = resolvePreviewMediaType(primaryMedia);
+  const primaryMediaUrl = primaryMedia?.url || primaryMedia?.cdnUrl || "";
+  const primaryMediaName = primaryMedia?.name || "Attachment";
 
   return (
     <div className="sticky top-8 flex items-center justify-center min-h-screen">
@@ -68,16 +109,33 @@ export function AdPreview({ formData }) {
                     </div>
                   </div>
 
-                  {data.media && data.media.length > 0 && (
+                  {primaryMedia ? (
                     <div className="w-full">
-                      <img
-                        src={data.media[0].url}
-                        alt="Ad media"
-                        className="w-full h-auto"
-                        style={{ maxHeight: "180px", objectFit: "cover" }}
-                      />
+                      {primaryMediaType === "image" ? (
+                        <img
+                          src={primaryMediaUrl}
+                          alt={primaryMediaName}
+                          className="w-full h-auto"
+                          style={{ maxHeight: "180px", objectFit: "cover" }}
+                        />
+                      ) : primaryMediaType === "video" ? (
+                        <div className="h-[180px] bg-gray-900 text-white flex flex-col items-center justify-center gap-2">
+                          <Play size={30} className="opacity-90" />
+                          <span className="text-xs font-medium">Video attachment</span>
+                        </div>
+                      ) : primaryMediaType === "audio" ? (
+                        <div className="h-[140px] bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                          <Volume2 size={28} />
+                          <span className="text-xs font-medium line-clamp-2">{primaryMediaName}</span>
+                        </div>
+                      ) : (
+                        <div className="h-[140px] bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                          <FileText size={28} />
+                          <span className="text-xs font-medium line-clamp-2">{primaryMediaName}</span>
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ) : null}
 
                   <div className="p-3">
                     <div className="text-[11px] text-gray-800 whitespace-pre-wrap break-words leading-relaxed">

@@ -1,14 +1,113 @@
 import { useState } from "react";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { FileText, Play, Plus, Trash2, Volume2 } from "lucide-react";
 import useUpload from "@/utils/useUpload";
 import { appToast } from "@/lib/toast";
+
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".bmp",
+  ".heic",
+  ".heif",
+]);
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".mov",
+  ".webm",
+  ".m4v",
+  ".avi",
+  ".mkv",
+]);
+const AUDIO_EXTENSIONS = new Set([
+  ".mp3",
+  ".wav",
+  ".m4a",
+  ".aac",
+  ".ogg",
+  ".oga",
+  ".flac",
+]);
+const DOCUMENT_EXTENSIONS = new Set([".pdf"]);
+
+const MEDIA_SIZE_LIMITS = {
+  image: 20 * 1024 * 1024,
+  video: 250 * 1024 * 1024,
+  audio: 100 * 1024 * 1024,
+  document: 50 * 1024 * 1024,
+};
+
+const MEDIA_SIZE_LABELS = {
+  image: "20 MB",
+  video: "250 MB",
+  audio: "100 MB",
+  document: "50 MB",
+};
+
+const MEDIA_TYPE_LABELS = {
+  image: "Image",
+  video: "Video",
+  audio: "Audio",
+  document: "PDF",
+  file: "File",
+};
+
+const getFileExtension = (name = "") => {
+  const dotIndex = String(name || "").lastIndexOf(".");
+  if (dotIndex < 0) return "";
+  return String(name).slice(dotIndex).toLowerCase();
+};
+
+const classifyMediaFile = (file) => {
+  const mimeType = String(file?.type || "").toLowerCase();
+  const extension = getFileExtension(file?.name);
+
+  if (mimeType.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) {
+    return "image";
+  }
+
+  if (mimeType.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) {
+    return "video";
+  }
+
+  if (mimeType.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) {
+    return "audio";
+  }
+
+  if (mimeType === "application/pdf" || DOCUMENT_EXTENSIONS.has(extension)) {
+    return "document";
+  }
+
+  return "";
+};
+
+const resolveMediaType = (item) => {
+  const declaredType = String(item?.type || "").trim().toLowerCase();
+  if (["image", "video", "audio", "document"].includes(declaredType)) {
+    return declaredType;
+  }
+
+  const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.startsWith("video/")) return "video";
+  if (mimeType.startsWith("audio/")) return "audio";
+  if (mimeType === "application/pdf") return "document";
+
+  const extension = getFileExtension(item?.name || item?.url || item?.cdnUrl || "");
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (VIDEO_EXTENSIONS.has(extension)) return "video";
+  if (AUDIO_EXTENSIONS.has(extension)) return "audio";
+  if (DOCUMENT_EXTENSIONS.has(extension)) return "document";
+
+  return "file";
+};
 
 export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert }) {
   const [playingVideo, setPlayingVideo] = useState(null);
   const [upload, { loading: uploading }] = useUpload();
-
-  const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".mp4", ".mov"];
-  const IMAGE_MAX_SIZE = 20 * 1024 * 1024; // 20 MB
 
   const handleMediaUpload = async (event) => {
     const files = Array.from(event.target.files || []);
@@ -16,24 +115,24 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
 
     for (const file of files) {
       try {
-        const ext = "." + file.name.split(".").pop().toLowerCase();
-        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        const mediaType = classifyMediaFile(file);
+        if (!mediaType) {
           await notifyUploadResult({
             title: "Unsupported File Type",
-            message: `${file.name} is not supported. Please upload PNG, JPG, GIF, MP4, or MOV files only.`,
+            message: `${file.name} is not supported. Upload images, videos, PDF files, or audio files.`,
             variant: "warning",
           });
           continue;
         }
 
-        const isVideo = file.type.startsWith("video/");
-        const maxSize = isVideo ? 250 * 1024 * 1024 : IMAGE_MAX_SIZE;
-        const maxLabel = isVideo ? "250 MB" : "20 MB";
+        const maxSize = MEDIA_SIZE_LIMITS[mediaType] || 20 * 1024 * 1024;
+        const maxLabel = MEDIA_SIZE_LABELS[mediaType] || "20 MB";
+        const mediaLabel = MEDIA_TYPE_LABELS[mediaType] || "File";
 
         if (file.size > maxSize) {
           await notifyUploadResult({
             title: "File Too Large",
-            message: `${file.name} is too large. ${isVideo ? "Videos" : "Images"} must be under ${maxLabel}. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
+            message: `${file.name} is too large. ${mediaLabel} files must be under ${maxLabel}. This file is ${(file.size / 1024 / 1024).toFixed(1)} MB.`,
             variant: "warning",
           });
           continue;
@@ -51,8 +150,12 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
           continue;
         }
 
-        const mediaType = file.type.startsWith("video/") ? "video" : "image";
-        onAddMedia({ url: result.url, type: mediaType, name: file.name });
+        onAddMedia({
+          url: result.url,
+          type: mediaType,
+          name: file.name,
+          mimeType: file.type || "",
+        });
       } catch (error) {
         console.error("Failed to upload media:", error);
         await notifyUploadResult({
@@ -70,43 +173,68 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
     <>
       <div>
         <label className="text-xs font-semibold text-gray-700 mb-3 block">
-          Media (Images & Videos)
+          Media & Attachments
         </label>
 
         {media.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
             {media.map((item, index) => (
               <div key={index} className="relative group">
-                <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
-                  {item.type === "image" ? (
-                    <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="relative w-full h-full">
-                      <video src={item.url} className="w-full h-full object-cover" preload="metadata" />
+                {(() => {
+                  const itemType = resolveMediaType(item);
+                  const itemLabel = MEDIA_TYPE_LABELS[itemType] || MEDIA_TYPE_LABELS.file;
+                  const itemUrl = item?.url || item?.cdnUrl || "";
+                  const itemName = item?.name || `Attachment ${index + 1}`;
+
+                  return (
+                    <>
+                      <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                        {itemType === "image" ? (
+                          <img src={itemUrl} alt={itemName} className="w-full h-full object-cover" />
+                        ) : itemType === "video" ? (
+                          <div className="relative w-full h-full">
+                            <video src={itemUrl} className="w-full h-full object-cover" preload="metadata" />
+                            <button
+                              type="button"
+                              onClick={() => setPlayingVideo(item)}
+                              className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
+                            >
+                              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center">
+                                <Play size={20} className="text-gray-900 ml-0.5" fill="currentColor" />
+                              </div>
+                            </button>
+                          </div>
+                        ) : itemType === "audio" ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-gray-100 to-gray-200 px-3 text-center">
+                            <Volume2 size={32} className="text-gray-700" />
+                            <span className="text-[11px] text-gray-700 line-clamp-2 break-words">
+                              {itemName}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-gray-100 to-gray-200 px-3 text-center">
+                            <FileText size={32} className="text-gray-700" />
+                            <span className="text-[11px] text-gray-700 line-clamp-2 break-words">
+                              {itemName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => setPlayingVideo(item)}
-                        className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
+                        onClick={() => onRemoveMedia(index)}
+                        className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
                       >
-                        <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center">
-                          <Play size={20} className="text-gray-900 ml-0.5" fill="currentColor" />
-                        </div>
+                        <Trash2 size={14} />
                       </button>
-                    </div>
-                  )}
-                </div>
 
-                <button
-                  type="button"
-                  onClick={() => onRemoveMedia(index)}
-                  className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                >
-                  <Trash2 size={14} />
-                </button>
-
-                <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded">
-                  {item.type === "video" ? "Video" : "Image"}
-                </div>
+                      <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded">
+                        {itemLabel}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -117,7 +245,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
             type="file"
             id="media-upload"
             onChange={handleMediaUpload}
-            accept=".png,.jpg,.jpeg,.gif,.mp4,.mov"
+            accept="image/*,video/*,audio/*,.pdf"
             multiple
             className="hidden"
             disabled={uploading}
@@ -129,12 +257,12 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
           >
             <Plus size={18} className="text-gray-400" />
             <span className="text-sm font-medium text-gray-700">
-              {uploading ? "Uploading..." : "Add images or videos"}
+              {uploading ? "Uploading..." : "Add attachments"}
             </span>
           </label>
 
           <p className="text-xs text-gray-400 mt-2">
-            Supports: PNG, JPG, GIF (max 20 MB) and MP4, MOV (max 250 MB).
+            Supports images (20 MB), videos (250 MB), audio files (100 MB), and PDF (50 MB).
           </p>
         </div>
       </div>

@@ -8,6 +8,12 @@ import {
 const E164_LIKE_PATTERN = /^\+?\d{8,15}$/;
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SUPPORTED_WHATSAPP_MEDIA_TYPES = new Set([
+  "image",
+  "video",
+  "audio",
+  "document",
+]);
 
 function normalizePhone(value) {
   const raw = String(value || "").trim();
@@ -72,8 +78,8 @@ const toWhatsAppMedia = (value) => {
     return { error: "Media URL is required when media is provided." };
   }
 
-  if (type !== "image" && type !== "video") {
-    return { error: "Media type must be 'image' or 'video'." };
+  if (!SUPPORTED_WHATSAPP_MEDIA_TYPES.has(type)) {
+    return { error: "Media type must be one of: image, video, audio, document." };
   }
 
   return { type, url };
