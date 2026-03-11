@@ -113,18 +113,12 @@ const loadAdvertiserByName = async (supabase, advertiserName) => {
 
 const resolveUserRole = async ({
   supabase,
-  explicitRole,
   profileRole,
   email,
 }) => {
   const profileResolvedRole = normalizeText(profileRole);
   if (profileResolvedRole) {
     return profileResolvedRole;
-  }
-
-  const directRole = normalizeText(explicitRole);
-  if (directRole) {
-    return directRole;
   }
 
   try {
@@ -167,7 +161,6 @@ const mapSessionUser = async (supabase, sessionUser) => {
   const profile = await loadProfile(supabase, { userId: sessionUser?.id });
   const role = await resolveUserRole({
     supabase,
-    explicitRole: sessionUser?.role,
     profileRole: profile?.role,
     email: sessionUser?.email || profile?.email,
   });
@@ -188,7 +181,6 @@ const mapSupabaseUser = async (supabase, authUser) => {
   const profile = await loadProfile(supabase, { userId: authUser?.id });
   const role = await resolveUserRole({
     supabase,
-    explicitRole: authUser?.user_metadata?.role || authUser?.app_metadata?.role,
     profileRole: profile?.role,
     email: authUser?.email || profile?.email,
   });
