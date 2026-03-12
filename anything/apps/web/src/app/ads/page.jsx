@@ -477,6 +477,14 @@ const normalizeInvoiceStatus = (value) => {
   return status;
 };
 
+const getInvoiceStatusLabel = (value) => {
+  const normalizedStatus = normalizeInvoiceStatus(value);
+  if (normalizedStatus === "Pending") {
+    return "Ready for Payment";
+  }
+  return normalizedStatus;
+};
+
 const getInvoiceStatusPriority = (value) => {
   const status = normalizeInvoiceStatus(value);
   if (status === "Pending") {
@@ -1803,7 +1811,8 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
                     {linkedInvoices.map((invoiceItem) => {
                       const total = Number(invoiceItem.total ?? invoiceItem.amount ?? 0) || 0;
                       const amountPaid = Number(invoiceItem.amount_paid ?? 0) || 0;
-                      const status = String(invoiceItem.status || "Unpaid");
+                      const status = normalizeInvoiceStatus(invoiceItem.status);
+                      const statusLabel = getInvoiceStatusLabel(status);
                       return (
                         <div
                           key={invoiceItem.id}
@@ -1825,7 +1834,7 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
                                         : "bg-gray-100 text-gray-700"
                                     }`}
                                 >
-                                  {status}
+                                  {statusLabel}
                                 </span>
                               </div>
                               <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -3860,7 +3869,9 @@ export default function AdsPage() {
         </div>
         <div style="text-align:right;">
           <div class="muted">#${escapeHtml(details.invoiceNumber)}</div>
-          <div style="margin-top:8px;"><span class="badge">${escapeHtml(details.status.toUpperCase())}</span></div>
+          <div style="margin-top:8px;"><span class="badge">${escapeHtml(
+            getInvoiceStatusLabel(details.status).toUpperCase(),
+          )}</span></div>
         </div>
       </div>
       <div class="section row">
@@ -4794,6 +4805,7 @@ export default function AdsPage() {
   const filteredInvoices = useMemo(() => {
     const baseFiltered = invoices.filter((item) => {
       const normalizedStatus = normalizeInvoiceStatus(item.status);
+      const statusLabel = getInvoiceStatusLabel(normalizedStatus);
       const advertiserName =
         item.advertiser_name ||
         advertisers.find(
@@ -4813,6 +4825,7 @@ export default function AdsPage() {
       return (
         String(item.invoice_number || "").toLowerCase().includes(query) ||
         String(normalizedStatus || "").toLowerCase().includes(query) ||
+        String(statusLabel || "").toLowerCase().includes(query) ||
         String(advertiserName || "").toLowerCase().includes(query)
       );
     });
@@ -12251,7 +12264,7 @@ export default function AdsPage() {
                   >
                     <option value="All">All</option>
                     <option value="Paid">Paid</option>
-                    <option value="Pending">Pending</option>
+                    <option value="Pending">Ready for Payment</option>
                     <option value="Overdue">Overdue</option>
                   </select>
                 </div>
@@ -12382,6 +12395,7 @@ export default function AdsPage() {
                               ?.advertiser_name ||
                             "-";
                           const status = normalizeInvoiceStatus(item.status);
+                          const statusLabel = getInvoiceStatusLabel(status);
                           const itemCount =
                             Array.isArray(item.ad_ids) && item.ad_ids.length > 0
                               ? item.ad_ids.length
@@ -12428,7 +12442,7 @@ export default function AdsPage() {
                                     status,
                                   )}`}
                                 >
-                                  {status}
+                                  {statusLabel}
                                 </span>
                               </td>
                               <td className="px-6 py-4">
@@ -12589,8 +12603,10 @@ export default function AdsPage() {
                                   invoicePreviewDetails?.status || invoicePreviewModal.status,
                                 )}`}
                               >
-                                {String(
-                                  invoicePreviewDetails?.status || invoicePreviewModal.status || "",
+                                {getInvoiceStatusLabel(
+                                  invoicePreviewDetails?.status ||
+                                    invoicePreviewModal.status ||
+                                    "",
                                 ).toUpperCase()}
                               </span>
                             </div>
@@ -12869,7 +12885,7 @@ export default function AdsPage() {
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
                         <option value="Paid">Paid</option>
-                        <option value="Pending">Pending</option>
+                        <option value="Pending">Ready for Payment</option>
                         <option value="Overdue">Overdue</option>
                       </select>
                     </div>
@@ -12924,7 +12940,7 @@ export default function AdsPage() {
                           invoicePreviewStatus,
                         )}`}
                       >
-                        {invoicePreviewStatus.toUpperCase()}
+                        {getInvoiceStatusLabel(invoicePreviewStatus).toUpperCase()}
                       </div>
                     </div>
                   </div>
