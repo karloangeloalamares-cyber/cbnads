@@ -5507,6 +5507,75 @@ export default function AdsPage() {
     }
   };
 
+  const resolveInvoiceReminderAdRecord = (invoiceRecord) => {
+    const normalizedInvoiceId = String(invoiceRecord?.id || "").trim();
+
+    const candidateAdIds = [
+      ...toStringArray(invoiceRecord?.ad_ids),
+      ...(Array.isArray(invoiceRecord?.items)
+        ? invoiceRecord.items
+            .map((item) => String(item?.ad_id || "").trim())
+            .filter(Boolean)
+        : []),
+      ...(normalizedInvoiceId
+        ? ads
+            .filter((item) => {
+              const linkedInvoiceId = String(
+                item?.paid_via_invoice_id || item?.invoice_id || "",
+              ).trim();
+              return linkedInvoiceId && linkedInvoiceId === normalizedInvoiceId;
+            })
+            .map((item) => String(item?.id || "").trim())
+            .filter(Boolean)
+        : []),
+    ];
+
+    const uniqueCandidateAdIds = [...new Set(candidateAdIds.filter(Boolean))];
+    for (const candidateAdId of uniqueCandidateAdIds) {
+      const matchedAd = ads.find(
+        (item) => String(item?.id || "").trim() === candidateAdId,
+      );
+      if (matchedAd) {
+        return matchedAd;
+      }
+    }
+
+    const advertiserId = String(invoiceRecord?.advertiser_id || "").trim();
+    if (advertiserId) {
+      const fallbackAd = ads.find(
+        (item) => String(item?.advertiser_id || "").trim() === advertiserId,
+      );
+      if (fallbackAd) {
+        return fallbackAd;
+      }
+    }
+
+    return null;
+  };
+
+  const sendReadyForPaymentReminder = async ({ invoiceRecord }) => {
+    const normalizedInvoiceId = String(invoiceRecord?.id || "").trim();
+    if (!normalizedInvoiceId) {
+      return { skipped: true, reason: "missing_invoice" };
+    }
+
+    const resolvedAdRecord = resolveInvoiceReminderAdRecord(invoiceRecord);
+    if (!resolvedAdRecord?.id) {
+      return { skipped: true, reason: "missing_ad" };
+    }
+
+    return sendApprovedAdNoticeEmail({
+      adRecord: {
+        ...resolvedAdRecord,
+        paid_via_invoice_id: normalizedInvoiceId,
+        invoice_id: normalizedInvoiceId,
+      },
+      advertiserId:
+        String(invoiceRecord?.advertiser_id || "").trim() ||
+        String(resolvedAdRecord?.advertiser_id || "").trim(),
+    });
+  };
+
   const sendPaidInvoiceNotice = async ({ invoiceId }) => {
     if (!isAdmin || !hasSupabaseConfig) {
       return { skipped: true };
@@ -7178,7 +7247,7 @@ export default function AdsPage() {
   const openInvoiceMenu = (invoiceId, status, event) => {
     const rect = event.currentTarget.getBoundingClientRect();
     const menuWidth = 192;
-    const menuHeight = status === "Paid" ? 150 : 194;
+    const menuHeight = status === "Paid" ? 150 : 238;
     const gap = 6;
     const viewportPadding = 8;
 
@@ -7233,6 +7302,65 @@ export default function AdsPage() {
       ad_ids: toStringArray(item.ad_ids),
     });
     setOpenInvoiceMenuId(null);
+  };
+
+  const resendInvoicePaymentReminder = async (item) => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const normalizedInvoiceId = String(item?.id || "").trim();
+    if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
+      return;
+    }
+
+    const toastId = getInvoiceActionToastId("ready-reminder", normalizedInvoiceId);
+    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
+    setPendingInvoiceActionIds((current) =>
+      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
+    );
+    setOpenInvoiceMenuId(null);
+    appToast.info({
+      id: toastId,
+      title: "Sending payment reminder...",
+      description: "Please wait while we notify the advertiser.",
+      duration: Infinity,
+    });
+
+    try {
+      const reminderResult = await sendReadyForPaymentReminder({
+        invoiceRecord: item,
+      });
+
+      if (reminderResult?.success) {
+        appToast.success({
+          title: "Payment reminder sent.",
+          description: `Sent to ${reminderResult.email || "the advertiser email"}.`,
+        });
+        return;
+      }
+
+      if (reminderResult?.reason === "missing_ad") {
+        appToast.warning({
+          title: "Reminder not sent.",
+          description: "No linked ad was found for this invoice.",
+        });
+        return;
+      }
+
+      appToast.warning({
+        title: "Reminder not sent.",
+        description:
+          reminderResult?.error ||
+          "Could not send ready-for-payment email for this invoice.",
+      });
+    } finally {
+      appToast.dismiss(toastId);
+      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
+      setPendingInvoiceActionIds((current) =>
+        current.filter((id) => id !== normalizedInvoiceId),
+      );
+    }
   };
 
   const markInvoiceAsPaid = async (item) => {
@@ -7394,6 +7522,7 @@ export default function AdsPage() {
       duration: Infinity,
     });
     let paymentNoticeInvoiceId = "";
+    let readyForPaymentReminderInvoice = null;
     try {
       await run(async () => {
         const issueDate = getTodayInAppTimeZone();
@@ -7436,16 +7565,47 @@ export default function AdsPage() {
           issue_date: issueDate,
           status: normalizeInvoiceStatus(invoice.status),
         });
-        const previousInvoiceStatus = normalizeInvoiceStatus(existingInvoice?.status || "");
+        const hasExistingInvoice = Boolean(existingInvoice?.id);
+        const previousInvoiceStatus = hasExistingInvoice
+          ? normalizeInvoiceStatus(existingInvoice?.status || "")
+          : "";
         const nextInvoiceStatus = normalizeInvoiceStatus(
           savedInvoice?.status || invoice.status || "",
         );
         if (nextInvoiceStatus === "Paid" && previousInvoiceStatus !== "Paid") {
           paymentNoticeInvoiceId = String(savedInvoice?.id || invoice.id || "").trim();
         }
+        if (
+          nextInvoiceStatus === "Pending" &&
+          (!hasExistingInvoice || previousInvoiceStatus !== "Pending")
+        ) {
+          readyForPaymentReminderInvoice = savedInvoice;
+        }
         setInvoice(createBlankInvoice());
         setView("list");
       }, "Invoice saved.");
+
+      if (readyForPaymentReminderInvoice) {
+        const readyReminderResult = await sendReadyForPaymentReminder({
+          invoiceRecord: readyForPaymentReminderInvoice,
+        });
+        if (readyReminderResult?.success) {
+          appToast.success({
+            title: "Ready-for-payment email sent.",
+            description: `Sent to ${readyReminderResult.email || "the advertiser email"}.`,
+          });
+        } else if (readyReminderResult?.error) {
+          appToast.warning({
+            title: "Invoice saved, but ready-for-payment email was not sent.",
+            description: readyReminderResult.error,
+          });
+        } else if (readyReminderResult?.reason === "missing_ad") {
+          appToast.warning({
+            title: "Invoice saved, but reminder could not be sent.",
+            description: "No linked ad was found for this invoice.",
+          });
+        }
+      }
 
       if (paymentNoticeInvoiceId) {
         const paymentNotice = await sendPaidInvoiceNotice({
@@ -12512,18 +12672,31 @@ export default function AdsPage() {
                                             Edit Invoice
                                           </button>
                                           {status !== "Paid" ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setOpenInvoiceMenuId(null);
-                                                markInvoiceAsPaid(item);
-                                              }}
-                                              disabled={isInvoiceActionPending(item.id)}
-                                              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                            >
-                                              <CheckCircle size={16} className="text-gray-400" />
-                                              Mark as Paid
-                                            </button>
+                                            <>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  void resendInvoicePaymentReminder(item);
+                                                }}
+                                                disabled={isInvoiceActionPending(item.id)}
+                                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                              >
+                                                <Mail size={16} className="text-gray-400" />
+                                                Resend Payment Reminder
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setOpenInvoiceMenuId(null);
+                                                  markInvoiceAsPaid(item);
+                                                }}
+                                                disabled={isInvoiceActionPending(item.id)}
+                                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                              >
+                                                <CheckCircle size={16} className="text-gray-400" />
+                                                Mark as Paid
+                                              </button>
+                                            </>
                                           ) : null}
                                           <div className="border-t border-gray-100 my-1" />
                                           <button
