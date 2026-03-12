@@ -1,6 +1,8 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import { requirePermission } from "../../../utils/auth-check.js";
 
+const normalizePendingStatus = (value) => String(value || "").trim().toLowerCase();
+
 export async function GET(request) {
   try {
     const auth = await requirePermission("notifications:view", request);
@@ -15,14 +17,20 @@ export async function GET(request) {
     const { data, error } = await supabase
       .from(table("pending_ads"))
       .select("*")
-      .in("status", ["pending", "not_approved"])
       .order("created_at", { ascending: false });
     if (error) throw error;
 
-    const pendingAds = (data || []).sort((a, b) => {
-      const priority = (value) => (value === "pending" ? 1 : value === "not_approved" ? 2 : 3);
-      return priority(a.status) - priority(b.status);
-    });
+    const pendingAds = (data || [])
+      .filter((item) =>
+        ["pending", "not_approved"].includes(normalizePendingStatus(item?.status)),
+      )
+      .sort((a, b) => {
+        const priority = (value) => {
+          const normalized = normalizePendingStatus(value);
+          return normalized === "pending" ? 1 : normalized === "not_approved" ? 2 : 3;
+        };
+        return priority(a.status) - priority(b.status);
+      });
 
     return Response.json({ pending_ads: pendingAds });
   } catch (error) {

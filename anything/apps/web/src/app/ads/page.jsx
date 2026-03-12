@@ -3729,8 +3729,9 @@ export default function AdsPage() {
 
     return {
       totalAds: ads.length,
-      pendingSubmissions: pending.filter((item) => item.status === "pending")
-        .length,
+      pendingSubmissions: pending.filter(
+        (item) => String(item?.status || "").toLowerCase() === "pending",
+      ).length,
       activeAdvertisers: advertisers.length,
       paidRevenue,
       outstandingRevenue,
@@ -9381,7 +9382,8 @@ export default function AdsPage() {
                             </td>
                             <td className="px-6 py-3.5 sticky right-0 bg-white shadow-[-8px_0_8px_-4px_rgba(0,0,0,0.04)]">
                               <div className="flex gap-2">
-                                {isAdvertiser && item.status === "pending" ? (
+                                {isAdvertiser &&
+                                String(item?.status || "").toLowerCase() === "pending" ? (
                                   <button
                                     type="button"
                                     className="inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-900"
