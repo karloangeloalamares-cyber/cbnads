@@ -458,9 +458,9 @@ export async function POST(request) {
       <img src="https://cbnads.com/icons/icon-512.png" alt="Logo" class="logo">
     </div>
     <div class="content">
-      <h2>Your Ad Has Been Approved</h2>
+      <h2>Your Ad Is Ready for Payment</h2>
       <p>Dear ${escapeHtml(contactName)},</p>
-      <p>Great news. Your advertising request for <strong>${adName}</strong> has been approved by our team.</p>
+      <p>Great news. Your advertising request for <strong>${adName}</strong> has been approved and invoiced by our team.</p>
       <p>To activate scheduling, please settle the invoice below:</p>
       <div class="info-block">
         <div class="info-row"><span class="label">Ad Name:</span> ${adName}</div>
@@ -517,8 +517,8 @@ export async function POST(request) {
     </div>
     <div class="content">
       <div class="alert">
-        <h2 style="margin-top: 0; color: #065f46;">Ad Created and Approved</h2>
-        <p style="margin-bottom: 0;">A newly created ad has been approved and the payment notice was sent to the advertiser.</p>
+        <h2 style="margin-top: 0; color: #065f46;">Approved + Invoice Attached (Ready for Payment)</h2>
+        <p style="margin-bottom: 0;">An ad has been approved, invoiced, and the ready-for-payment notice was sent to the advertiser.</p>
       </div>
       <div class="info-block">
         <div class="info-row"><span class="label">Advertiser:</span> ${escapeHtml(advertiserNameText || "N/A")}</div>
@@ -540,14 +540,14 @@ export async function POST(request) {
 
     await sendEmail({
       to: advertiserEmail,
-      subject: `Ad Approved - Invoice ${invoiceNumberText} (${String(
+      subject: `Ready for Payment - Invoice ${invoiceNumberText} (${String(
         ad?.ad_name || "Ad",
       ).trim()})`,
       html: advertiserEmailHTML,
     });
 
     const internalTelegramText = [
-      "<b>Ad Created and Approved</b>",
+      "<b>Approved + Invoice Attached (Ready for Payment)</b>",
       "",
       `<b>Advertiser:</b> ${escapeHtml(advertiserNameText || "N/A")}`,
       `<b>Contact:</b> ${escapeHtml(contactName || "N/A")} (${escapeHtml(advertiserEmail)})`,
@@ -559,7 +559,7 @@ export async function POST(request) {
 
     const internalNotification = await notifyInternalChannels({
       supabase,
-      emailSubject: `Ad Created - ${String(ad?.ad_name || "Ad").trim()} | Invoice ${invoiceNumberText}`,
+      emailSubject: `Ready for Payment - ${String(ad?.ad_name || "Ad").trim()} | ${invoiceNumberText}`,
       emailHtml: internalEmailHTML,
       telegramText: internalTelegramText,
       excludeEmails: [advertiserEmail],

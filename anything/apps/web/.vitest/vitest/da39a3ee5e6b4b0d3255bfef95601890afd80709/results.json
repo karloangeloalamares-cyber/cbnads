@@ -1,1 +1,1 @@
-{"version":"3.2.4","results":[[":src/app/api/utils/pending-ad-submission.test.js",{"duration":111.31710000000021,"failed":false}],[":src/app/api/utils/reminder-minutes.test.js",{"duration":11.2479000000003,"failed":false}]]}
+{"version":"3.2.4","results":[[":src/app/api/utils/pending-ad-submission.test.js",{"duration":152.27970000000005,"failed":false}],[":src/app/api/utils/reminder-minutes.test.js",{"duration":12.51740000000018,"failed":false}]]}

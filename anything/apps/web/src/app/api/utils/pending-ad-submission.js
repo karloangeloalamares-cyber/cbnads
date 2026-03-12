@@ -397,7 +397,7 @@ export async function createPendingAdSubmission({
       </div>
 
       <p><strong>Next Steps:</strong></p>
-      <p>Our team will review your submission shortly. You will receive a confirmation email once your ad has been approved and scheduled.</p>
+      <p>Your submission is now in <strong>Pending</strong> status while our team reviews it. Once approved and invoiced, you will receive a <strong>Ready for Payment</strong> email.</p>
 
       <p>If you have any questions, please don't hesitate to contact us.</p>
 
@@ -441,7 +441,7 @@ export async function createPendingAdSubmission({
 
     <div class="content">
       <div class="alert">
-        <h2 style="margin-top: 0;">New Ad Submission Received</h2>
+        <h2 style="margin-top: 0;">New Ad Submission Received (Pending)</h2>
       </div>
 
       <div class="info-section">
@@ -550,7 +550,7 @@ export async function createPendingAdSubmission({
   try {
     await sendEmail({
       to: normalizedEmail,
-      subject: `Ad Submission Received - ${safeSubjectAdName}`,
+      subject: `Ad Submission Received (Pending) - ${safeSubjectAdName}`,
       html: advertiserEmailHTML,
     });
   } catch (error) {
@@ -558,7 +558,7 @@ export async function createPendingAdSubmission({
   }
 
   const internalTelegramText = [
-    "<b>New Ad Submission Received</b>",
+    "<b>New Ad Submission Received (Pending)</b>",
     "",
     `<b>Advertiser:</b> ${escapeHtml(advertiser_name)}`,
     `<b>Contact:</b> ${escapeHtml(contact_name)} (${escapeHtml(normalizedEmail)})`,

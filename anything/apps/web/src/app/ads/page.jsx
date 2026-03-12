@@ -5018,9 +5018,9 @@ export default function AdsPage() {
       }
 
       appToast.success({
-        title: "Ad Approved",
+        title: "Ad Approved and Invoiced",
         description: approvalInvoiceNumber
-          ? `Invoice ${approvalInvoiceNumber} created.`
+          ? `Invoice ${approvalInvoiceNumber} created. Ready-for-payment notice sent.`
           : "The submission was moved out of pending items.",
       });
       return true;
@@ -5463,7 +5463,7 @@ export default function AdsPage() {
       if (!response.ok) {
         return {
           skipped: false,
-          error: data?.error || "Failed to send approval email.",
+          error: data?.error || "Failed to send ready-for-payment email.",
         };
       }
 
@@ -5472,7 +5472,59 @@ export default function AdsPage() {
       return {
         skipped: false,
         error:
-          error instanceof Error ? error.message : "Failed to send approval email.",
+          error instanceof Error ? error.message : "Failed to send ready-for-payment email.",
+      };
+    }
+  };
+
+  const sendPaidInvoiceNotice = async ({ invoiceId }) => {
+    if (!isAdmin || !hasSupabaseConfig) {
+      return { skipped: true };
+    }
+
+    const normalizedInvoiceId = String(invoiceId || "").trim();
+    if (!normalizedInvoiceId) {
+      return { skipped: true };
+    }
+
+    try {
+      const response = await fetchWithSessionAuth(
+        "/api/admin/invoices/send-payment-received",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invoice_id: normalizedInvoiceId,
+          }),
+        },
+      );
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          skipped: false,
+          error: data?.error || "Failed to send payment received notifications.",
+        };
+      }
+
+      if (data?.advertiser_email_sent === false) {
+        return {
+          ...data,
+          skipped: false,
+          error: data?.advertiser_email_error || "Failed to send advertiser payment email.",
+        };
+      }
+
+      return data || { skipped: false };
+    } catch (error) {
+      return {
+        skipped: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to send payment received notifications.",
       };
     }
   };
@@ -7096,6 +7148,16 @@ export default function AdsPage() {
           );
         }
       }, "Invoice marked as paid.");
+
+      const paymentNotice = await sendPaidInvoiceNotice({
+        invoiceId: normalizedInvoiceId,
+      });
+      if (paymentNotice?.error) {
+        appToast.warning({
+          title: "Invoice marked as paid, but payment notifications were incomplete.",
+          description: paymentNotice.error,
+        });
+      }
     } finally {
       appToast.dismiss(toastId);
       pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
@@ -7210,6 +7272,7 @@ export default function AdsPage() {
       description: "Please wait while the invoice is saved.",
       duration: Infinity,
     });
+    let paymentNoticeInvoiceId = "";
     try {
       await run(async () => {
         const issueDate = getTodayInAppTimeZone();
@@ -7234,7 +7297,7 @@ export default function AdsPage() {
             ) || null;
         }
 
-        await upsertInvoice({
+        const savedInvoice = await upsertInvoice({
           ...(existingInvoice || {}),
           ...invoice,
           ad_ids:
@@ -7252,9 +7315,28 @@ export default function AdsPage() {
           issue_date: issueDate,
           status: normalizeInvoiceStatus(invoice.status),
         });
+        const previousInvoiceStatus = normalizeInvoiceStatus(existingInvoice?.status || "");
+        const nextInvoiceStatus = normalizeInvoiceStatus(
+          savedInvoice?.status || invoice.status || "",
+        );
+        if (nextInvoiceStatus === "Paid" && previousInvoiceStatus !== "Paid") {
+          paymentNoticeInvoiceId = String(savedInvoice?.id || invoice.id || "").trim();
+        }
         setInvoice(createBlankInvoice());
         setView("list");
       }, "Invoice saved.");
+
+      if (paymentNoticeInvoiceId) {
+        const paymentNotice = await sendPaidInvoiceNotice({
+          invoiceId: paymentNoticeInvoiceId,
+        });
+        if (paymentNotice?.error) {
+          appToast.warning({
+            title: "Invoice saved, but payment notifications were incomplete.",
+            description: paymentNotice.error,
+          });
+        }
+      }
     } finally {
       appToast.dismiss(INVOICE_SUBMIT_TOAST_ID);
       setInvoiceSaving(false);
@@ -7692,12 +7774,12 @@ export default function AdsPage() {
           });
           if (approvalEmailResult?.success) {
             appToast.success({
-              title: "Approved ad email sent.",
+              title: "Ready-for-payment email sent.",
               description: `Sent to ${approvalEmailResult.email || "the advertiser email"}.`,
             });
           } else if (approvalEmailResult?.error) {
             appToast.warning({
-              title: "Ad saved, but approval email was not sent.",
+              title: "Ad saved, but ready-for-payment email was not sent.",
               description: approvalEmailResult.error,
             });
           }
