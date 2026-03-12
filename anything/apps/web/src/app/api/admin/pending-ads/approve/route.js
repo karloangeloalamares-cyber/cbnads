@@ -17,6 +17,7 @@ import {
 } from "../../../utils/invoice-helpers.js";
 import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-dashboard-url.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
+import { ensureAdvertiserRecord } from "../../../utils/advertiser-auth.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
   process.env.APPROVAL_ZELLE_NUMBER || "(555) 010-2026",
@@ -187,46 +188,14 @@ export async function POST(request) {
         );
       }
     } else {
-      const nowIso = new Date().toISOString();
-      let createAdvertiserResult = await supabase
-        .from(table("advertisers"))
-        .insert({
-          advertiser_name: ad.advertiser_name,
-          contact_name: ad.contact_name,
-          email: ad.email,
-          phone: ad.phone_number || ad.phone || null,
-          phone_number: ad.phone_number || ad.phone || null,
-          status: "active",
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        .select("id, advertiser_name")
-        .single();
-
-      if (createAdvertiserResult.error) {
-        const message = String(createAdvertiserResult.error.message || "");
-        const missingCompatColumn =
-          message.includes("phone_number") || message.includes("status");
-        if (!missingCompatColumn) throw createAdvertiserResult.error;
-
-        createAdvertiserResult = await supabase
-          .from(table("advertisers"))
-          .insert({
-            advertiser_name: ad.advertiser_name,
-            contact_name: ad.contact_name,
-            email: ad.email,
-            phone: ad.phone_number || ad.phone || null,
-            created_at: nowIso,
-            updated_at: nowIso,
-          })
-          .select("id, advertiser_name")
-          .single();
-        if (createAdvertiserResult.error) throw createAdvertiserResult.error;
-      }
-
-      const newAdvertiser = createAdvertiserResult.data;
-      advertiserId = newAdvertiser.id;
-      advertiserName = newAdvertiser.advertiser_name;
+      const ensuredAdvertiser = await ensureAdvertiserRecord({
+        advertiserName: ad.advertiser_name,
+        contactName: ad.contact_name,
+        email: ad.email,
+        phoneNumber: ad.phone_number || ad.phone || null,
+      });
+      advertiserId = ensuredAdvertiser.id;
+      advertiserName = ensuredAdvertiser.advertiser_name;
     }
 
     const advertiserInactive =

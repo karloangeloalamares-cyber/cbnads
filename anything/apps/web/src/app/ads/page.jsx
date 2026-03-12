@@ -1953,8 +1953,14 @@ const formatAdvertiserDate = (value) => {
   });
 };
 
+const normalizeAdvertiserStatus = (status) =>
+  String(status || "active").trim().toLowerCase();
+
+const isAdvertiserActiveStatus = (status) =>
+  normalizeAdvertiserStatus(status) === "active";
+
 const getAdvertiserStatusClass = (status) =>
-  String(status || "active").toLowerCase() === "active"
+  isAdvertiserActiveStatus(status)
     ? "bg-green-100 text-green-800"
     : "bg-gray-100 text-gray-600";
 
@@ -4753,7 +4759,7 @@ export default function AdsPage() {
   }, [canBatchDeleteSubmissions, filteredPendingSubmissions]);
 
   const filteredAdvertisers = useMemo(() => {
-    return advertisers.filter((item) => {
+    const filtered = advertisers.filter((item) => {
       if (!advertiserSearch) {
         return true;
       }
@@ -4767,6 +4773,29 @@ export default function AdsPage() {
           .includes(query)
       );
     });
+
+    const sortByName = (left, right) =>
+      String(left?.advertiser_name || "").localeCompare(
+        String(right?.advertiser_name || ""),
+        "en",
+        { sensitivity: "base" },
+      );
+
+    const activeAdvertisers = [];
+    const inactiveAdvertisers = [];
+
+    filtered.forEach((item) => {
+      if (isAdvertiserActiveStatus(item?.status)) {
+        activeAdvertisers.push(item);
+        return;
+      }
+      inactiveAdvertisers.push(item);
+    });
+
+    activeAdvertisers.sort(sortByName);
+    inactiveAdvertisers.sort(sortByName);
+
+    return [...activeAdvertisers, ...inactiveAdvertisers];
   }, [advertiserSearch, advertisers]);
 
   const advertiserTotalPages = useMemo(
@@ -11477,7 +11506,8 @@ export default function AdsPage() {
                           </tr>
                         ) : (
                           paginatedAdvertisers.map((item) => {
-                            const status = String(item.status || "active").toLowerCase();
+                            const status = normalizeAdvertiserStatus(item.status);
+                            const isActive = isAdvertiserActiveStatus(item.status);
                             return (
                               <tr
                                 key={item.id}
@@ -11531,7 +11561,7 @@ export default function AdsPage() {
                                       status,
                                     )}`}
                                   >
-                                    {status === "active" ? "Active" : "Inactive"}
+                                    {isActive ? "Active" : "Inactive"}
                                   </span>
                                 </td>
                                 <td className="px-6 py-3.5 relative">

@@ -250,46 +250,91 @@ export const ensureAdvertiserRecord = async ({
   }
 
   const normalizedPhoneNumber = normalizeUSPhoneNumber(phoneNumber || "");
+  const now = new Date().toISOString();
 
-  const payload = {
+  const basePayload = {
     advertiser_name: normalizedAdvertiserName || normalizedEmail,
     contact_name: String(contactName || "").trim() || null,
     email: normalizedEmail,
     phone: normalizedPhoneNumber || null,
+    updated_at: now,
+  };
+
+  const extendedPayload = {
+    ...basePayload,
     phone_number: normalizedPhoneNumber || null,
     status: "active",
-    updated_at: new Date().toISOString(),
   };
 
   if (existing?.id) {
-    const { data, error } = await supabase
+    let updateResult = await supabase
       .from(table("advertisers"))
-      .update(payload)
+      .update(extendedPayload)
       .eq("id", existing.id)
-      .select("*")
-      .single();
+      .select("*");
 
-    if (error) {
-      throw error;
+    if (updateResult.error) {
+      const message = String(updateResult.error.message || "");
+      const missingCompatColumn =
+        message.includes("phone_number") || message.includes("status");
+      if (!missingCompatColumn) {
+        throw updateResult.error;
+      }
+
+      updateResult = await supabase
+        .from(table("advertisers"))
+        .update(basePayload)
+        .eq("id", existing.id)
+        .select("*");
+      if (updateResult.error) {
+        throw updateResult.error;
+      }
     }
 
-    return data;
+    const updatedRow = Array.isArray(updateResult.data)
+      ? updateResult.data[0] || null
+      : null;
+    if (!updatedRow) {
+      throw new Error("Failed to update advertiser record.");
+    }
+    return updatedRow;
   }
 
-  const { data, error } = await supabase
+  let insertResult = await supabase
     .from(table("advertisers"))
     .insert({
-      ...payload,
-      created_at: new Date().toISOString(),
+      ...extendedPayload,
+      created_at: now,
     })
-    .select("*")
-    .single();
+    .select("*");
 
-  if (error) {
-    throw error;
+  if (insertResult.error) {
+    const message = String(insertResult.error.message || "");
+    const missingCompatColumn =
+      message.includes("phone_number") || message.includes("status");
+    if (!missingCompatColumn) {
+      throw insertResult.error;
+    }
+
+    insertResult = await supabase
+      .from(table("advertisers"))
+      .insert({
+        ...basePayload,
+        created_at: now,
+      })
+      .select("*");
+    if (insertResult.error) {
+      throw insertResult.error;
+    }
   }
 
-  return data;
+  const insertedRow = Array.isArray(insertResult.data)
+    ? insertResult.data[0] || null
+    : null;
+  if (!insertedRow) {
+    throw new Error("Failed to insert advertiser record.");
+  }
+  return insertedRow;
 };
 
 export const upsertAdvertiserProfile = async ({
