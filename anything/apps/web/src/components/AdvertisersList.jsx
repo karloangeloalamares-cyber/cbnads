@@ -26,6 +26,7 @@ export default function AdvertisersList({ onCreateNew }) {
   const [viewModal, setViewModal] = useState(null);
   const [editModal, setEditModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [menuPosition, setMenuPosition] = useState({
     vertical: "bottom",
@@ -49,6 +50,9 @@ export default function AdvertisersList({ onCreateNew }) {
   const toggleReveal = (id) => {
     setRevealedPii((prev) => ({ ...prev, [id]: !prev[id] }));
   };
+
+  const isActiveAdvertiser = (status) =>
+    String(status || "active").trim().toLowerCase() === "active";
 
   useEffect(() => {
     fetchAdvertisers();
@@ -155,6 +159,53 @@ export default function AdvertisersList({ onCreateNew }) {
     }
   };
 
+  const confirmDeleteInactive = async () => {
+    const inactiveAdvertisers = advertisers.filter(
+      (item) => !isActiveAdvertiser(item?.status),
+    );
+    if (inactiveAdvertisers.length === 0) {
+      setBulkDeleteModalOpen(false);
+      return;
+    }
+
+    setActionLoading(true);
+    const failed = [];
+
+    try {
+      for (const advertiser of inactiveAdvertisers) {
+        try {
+          const response = await fetch(`/api/advertisers/${advertiser.id}`, {
+            method: "DELETE",
+          });
+          if (!response.ok) {
+            failed.push(advertiser.advertiser_name || advertiser.id);
+          }
+        } catch (error) {
+          console.error("Error deleting inactive advertiser:", error);
+          failed.push(advertiser.advertiser_name || advertiser.id);
+        }
+      }
+
+      await fetchAdvertisers();
+      setBulkDeleteModalOpen(false);
+
+      if (failed.length === 0) {
+        appToast.success({
+          title: "Inactive advertisers deleted",
+          description: `${inactiveAdvertisers.length} inactive account(s) were removed completely.`,
+        });
+        return;
+      }
+
+      appToast.warning({
+        title: "Some inactive advertisers were not deleted",
+        description: `Deleted ${inactiveAdvertisers.length - failed.length} of ${inactiveAdvertisers.length}.`,
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleUpdateAdvertiser = async (e) => {
     e.preventDefault();
     if (!editModal) return;
@@ -187,11 +238,28 @@ export default function AdvertisersList({ onCreateNew }) {
   const filteredAdvertisers = advertisers.filter((advertiser) => {
     const query = searchQuery.toLowerCase();
     return (
-      advertiser.advertiser_name.toLowerCase().includes(query) ||
-      advertiser.contact_name.toLowerCase().includes(query) ||
-      advertiser.email.toLowerCase().includes(query)
+      String(advertiser?.advertiser_name || "").toLowerCase().includes(query) ||
+      String(advertiser?.contact_name || "").toLowerCase().includes(query) ||
+      String(advertiser?.email || "").toLowerCase().includes(query)
     );
   });
+
+  const arrangedAdvertisers = [...filteredAdvertisers].sort((left, right) => {
+    const leftRank = isActiveAdvertiser(left?.status) ? 0 : 1;
+    const rightRank = isActiveAdvertiser(right?.status) ? 0 : 1;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return String(left?.advertiser_name || "").localeCompare(
+      String(right?.advertiser_name || ""),
+      "en",
+      { sensitivity: "base" },
+    );
+  });
+
+  const inactiveAdvertiserCount = advertisers.filter(
+    (advertiser) => !isActiveAdvertiser(advertiser?.status),
+  ).length;
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat("en-US", {
@@ -223,6 +291,9 @@ export default function AdvertisersList({ onCreateNew }) {
           <p className="text-sm text-gray-500">
             Manage all your advertiser accounts
           </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Inactive means paused. Approved ads for paused advertisers are saved as Draft.
+          </p>
         </div>
         <div className="flex items-center gap-3">
           {/* View Mode Toggle */}
@@ -242,6 +313,13 @@ export default function AdvertisersList({ onCreateNew }) {
               <List size={16} />
             </button>
           </div>
+          <button
+            onClick={() => setBulkDeleteModalOpen(true)}
+            disabled={inactiveAdvertiserCount === 0 || actionLoading}
+            className="px-4 py-2.5 border border-red-200 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Delete inactive ({inactiveAdvertiserCount})
+          </button>
           <button
             onClick={onCreateNew}
             className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
@@ -311,7 +389,7 @@ export default function AdvertisersList({ onCreateNew }) {
                     Loading advertisers...
                   </td>
                 </tr>
-              ) : filteredAdvertisers.length === 0 ? (
+              ) : arrangedAdvertisers.length === 0 ? (
                 <tr>
                   <td
                     colSpan="8"
@@ -323,7 +401,7 @@ export default function AdvertisersList({ onCreateNew }) {
                   </td>
                 </tr>
               ) : (
-                filteredAdvertisers.map((advertiser) => (
+                arrangedAdvertisers.map((advertiser) => (
                   <tr
                     key={advertiser.id}
                     className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
@@ -370,12 +448,12 @@ export default function AdvertisersList({ onCreateNew }) {
                     </td>
                     <td className="px-6 py-3.5">
                       <span
-                        className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${advertiser.status === "active"
+                        className={`inline-flex px-2.5 py-1 rounded-full text-[10px] font-medium ${isActiveAdvertiser(advertiser.status)
                           ? "bg-green-100 text-green-800"
                           : "bg-gray-100 text-gray-600"
                           }`}
                       >
-                        {advertiser.status === "active" ? "Active" : "Inactive"}
+                        {isActiveAdvertiser(advertiser.status) ? "Active" : "Paused"}
                       </span>
                     </td>
                     <td className="px-6 py-3.5 relative">
@@ -428,14 +506,14 @@ export default function AdvertisersList({ onCreateNew }) {
             <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-gray-200 rounded-xl bg-white border-dashed">
               Loading advertisers...
             </div>
-          ) : filteredAdvertisers.length === 0 ? (
+          ) : arrangedAdvertisers.length === 0 ? (
             <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-gray-200 rounded-xl bg-white border-dashed">
               {searchQuery
                 ? "No advertisers found matching your search"
                 : "No advertisers yet. Click 'Add new Advertiser' to get started."}
             </div>
           ) : (
-            filteredAdvertisers.map((advertiser) => (
+            arrangedAdvertisers.map((advertiser) => (
               <div 
                 key={advertiser.id}
                 className="relative flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:border-gray-300 hover:shadow-md"
@@ -516,12 +594,12 @@ export default function AdvertisersList({ onCreateNew }) {
 
                 <div className="flex items-center justify-between mt-auto pt-2">
                   <span
-                    className={`inline-flex px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm border ${advertiser.status === "active"
+                    className={`inline-flex px-2 py-0.5 rounded-md text-[10px] uppercase font-bold tracking-wider shadow-sm border ${isActiveAdvertiser(advertiser.status)
                       ? "bg-green-50 text-green-700 border-green-200"
                       : "bg-gray-50 text-gray-600 border-gray-200"
                       }`}
                   >
-                    {advertiser.status === "active" ? "Active" : "Inactive"}
+                    {isActiveAdvertiser(advertiser.status) ? "Active" : "Paused"}
                   </span>
                   <div className="text-[10px] font-medium text-gray-400">
                     Next ad: <span className="text-gray-600">{formatDate(advertiser.next_ad_date)}</span>
@@ -595,14 +673,14 @@ export default function AdvertisersList({ onCreateNew }) {
                   <div>
                     <p className="text-xs text-gray-500">Status</p>
                     <span
-                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${viewModal.advertiser.status === "active"
+                      className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium ${isActiveAdvertiser(viewModal.advertiser.status)
                         ? "bg-green-100 text-green-800"
                         : "bg-gray-100 text-gray-600"
                         }`}
                     >
-                      {viewModal.advertiser.status === "active"
+                      {isActiveAdvertiser(viewModal.advertiser.status)
                         ? "Active"
-                        : "Inactive"}
+                        : "Paused"}
                     </span>
                   </div>
                 </div>
@@ -748,8 +826,11 @@ export default function AdvertisersList({ onCreateNew }) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200"
                 >
                   <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="inactive">Paused</option>
                 </select>
+                <p className="mt-1 text-xs text-gray-500">
+                  Paused advertisers can sign in, but newly approved ads are saved as Draft.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-4">
@@ -783,8 +864,9 @@ export default function AdvertisersList({ onCreateNew }) {
             <p className="text-sm text-gray-600 mb-6">
               Are you sure you want to delete{" "}
               <strong>{deleteModal.advertiser_name}</strong>? This will
-              permanently delete the advertiser and all associated ads and
-              reminders. This action cannot be undone.
+              permanently delete the advertiser account, linked login/profile,
+              and all associated ads, invoices, reminders, and pending records.
+              This action cannot be undone.
             </p>
 
             <div className="flex gap-3">
@@ -800,6 +882,37 @@ export default function AdvertisersList({ onCreateNew }) {
                 className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-red-400"
               >
                 {actionLoading ? "Deleting..." : "Yes, I'm Sure"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkDeleteModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Delete Inactive Advertisers
+            </h2>
+            <p className="text-sm text-gray-600 mb-6">
+              Delete all inactive advertisers ({inactiveAdvertiserCount})? This
+              permanently removes their account data and login access so they can
+              sign up again from scratch.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setBulkDeleteModalOpen(false)}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteInactive}
+                disabled={actionLoading}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:bg-red-400"
+              >
+                {actionLoading ? "Deleting..." : "Delete All Inactive"}
               </button>
             </div>
           </div>

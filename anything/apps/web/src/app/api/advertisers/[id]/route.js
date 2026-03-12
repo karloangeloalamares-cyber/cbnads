@@ -1,11 +1,32 @@
 import { advertiserResponse, dateOnly, db, table } from "../../utils/supabase-db.js";
 import { requireAdmin } from "../../utils/auth-check.js";
+import { findAuthUserByEmail, normalizeEmail } from "../../utils/advertiser-auth.js";
 import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
 
 const isInactive = (value) => String(value || "").toLowerCase() === "inactive";
+const isMissingColumnError = (error) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "42703" || /column .* does not exist/i.test(message);
+};
+
+const isMissingRelationError = (error) => {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "");
+  return code === "42P01" || /relation .* does not exist/i.test(message);
+};
+
+const isIgnorableSchemaError = (error) =>
+  isMissingColumnError(error) || isMissingRelationError(error);
+
+const isMissingAuthUserError = (error) => {
+  const message = String(error?.message || "");
+  const status = Number(error?.status || error?.statusCode || 0);
+  return status === 404 || /user not found/i.test(message);
+};
 
 const isFutureOrToday = (value) => {
   const asDate = dateOnly(value);
@@ -218,7 +239,7 @@ export async function DELETE(request, { params }) {
 
     const { data: advertiser, error: advertiserError } = await supabase
       .from(table("advertisers"))
-      .select("advertiser_name")
+      .select("id, advertiser_name, email")
       .eq("id", id)
       .maybeSingle();
 
@@ -227,27 +248,214 @@ export async function DELETE(request, { params }) {
       return Response.json({ error: "Advertiser not found" }, { status: 404 });
     }
 
-    const advertiserName = advertiser.advertiser_name;
+    const advertiserName = String(advertiser.advertiser_name || "").trim();
+    const advertiserEmail = normalizeEmail(advertiser.email || "");
 
-    const { data: adRows, error: adsFetchError } = await supabase
+    const collectIdsIntoSet = (targetSet, rows) => {
+      for (const row of rows || []) {
+        if (row?.id) {
+          targetSet.add(String(row.id));
+        }
+      }
+    };
+
+    const adIds = new Set();
+    let adsByAdvertiserId = await supabase
       .from(table("ads"))
       .select("id")
-      .or(`advertiser.eq.${advertiserName},advertiser_id.eq.${id}`);
-    if (adsFetchError) throw adsFetchError;
+      .eq("advertiser_id", id);
+    if (adsByAdvertiserId.error) {
+      if (!isIgnorableSchemaError(adsByAdvertiserId.error)) {
+        throw adsByAdvertiserId.error;
+      }
+      adsByAdvertiserId = { data: [] };
+    }
+    collectIdsIntoSet(adIds, adsByAdvertiserId.data);
 
-    const adIds = (adRows || []).map((row) => row.id);
-    if (adIds.length > 0) {
+    if (advertiserName) {
+      const { data: adsByAdvertiserName, error: adsByNameError } = await supabase
+        .from(table("ads"))
+        .select("id")
+        .eq("advertiser", advertiserName);
+      if (adsByNameError && !isIgnorableSchemaError(adsByNameError)) {
+        throw adsByNameError;
+      }
+      collectIdsIntoSet(adIds, adsByAdvertiserName);
+    }
+
+    const invoiceIds = new Set();
+    let invoicesByAdvertiserId = await supabase
+      .from(table("invoices"))
+      .select("id")
+      .eq("advertiser_id", id);
+    if (invoicesByAdvertiserId.error) {
+      if (!isIgnorableSchemaError(invoicesByAdvertiserId.error)) {
+        throw invoicesByAdvertiserId.error;
+      }
+      invoicesByAdvertiserId = { data: [] };
+    }
+    collectIdsIntoSet(invoiceIds, invoicesByAdvertiserId.data);
+
+    if (advertiserName) {
+      const { data: invoicesByAdvertiserName, error: invoicesByNameError } = await supabase
+        .from(table("invoices"))
+        .select("id")
+        .eq("advertiser_name", advertiserName);
+      if (invoicesByNameError && !isIgnorableSchemaError(invoicesByNameError)) {
+        throw invoicesByNameError;
+      }
+      collectIdsIntoSet(invoiceIds, invoicesByAdvertiserName);
+    }
+
+    const adIdList = Array.from(adIds);
+    const invoiceIdList = Array.from(invoiceIds);
+
+    if (adIdList.length > 0) {
       const { error: reminderDeleteError } = await supabase
         .from(table("sent_reminders"))
         .delete()
-        .in("ad_id", adIds);
-      if (reminderDeleteError) throw reminderDeleteError;
+        .in("ad_id", adIdList);
+      if (reminderDeleteError && !isIgnorableSchemaError(reminderDeleteError)) {
+        throw reminderDeleteError;
+      }
+    }
 
+    if (invoiceIdList.length > 0) {
+      const { error: invoiceItemDeleteByInvoiceError } = await supabase
+        .from(table("invoice_items"))
+        .delete()
+        .in("invoice_id", invoiceIdList);
+      if (
+        invoiceItemDeleteByInvoiceError &&
+        !isIgnorableSchemaError(invoiceItemDeleteByInvoiceError)
+      ) {
+        throw invoiceItemDeleteByInvoiceError;
+      }
+    }
+
+    if (adIdList.length > 0) {
+      const { error: invoiceItemDeleteByAdError } = await supabase
+        .from(table("invoice_items"))
+        .delete()
+        .in("ad_id", adIdList);
+      if (invoiceItemDeleteByAdError && !isIgnorableSchemaError(invoiceItemDeleteByAdError)) {
+        throw invoiceItemDeleteByAdError;
+      }
+    }
+
+    if (invoiceIdList.length > 0) {
+      const { error: invoiceDeleteError } = await supabase
+        .from(table("invoices"))
+        .delete()
+        .in("id", invoiceIdList);
+      if (invoiceDeleteError && !isIgnorableSchemaError(invoiceDeleteError)) {
+        throw invoiceDeleteError;
+      }
+    }
+
+    const { error: pendingDeleteByAdvertiserIdError } = await supabase
+      .from(table("pending_ads"))
+      .delete()
+      .eq("advertiser_id", id);
+    if (
+      pendingDeleteByAdvertiserIdError &&
+      !isIgnorableSchemaError(pendingDeleteByAdvertiserIdError)
+    ) {
+      throw pendingDeleteByAdvertiserIdError;
+    }
+
+    if (advertiserName) {
+      const { error: pendingDeleteByNameError } = await supabase
+        .from(table("pending_ads"))
+        .delete()
+        .eq("advertiser_name", advertiserName);
+      if (pendingDeleteByNameError && !isIgnorableSchemaError(pendingDeleteByNameError)) {
+        throw pendingDeleteByNameError;
+      }
+    }
+
+    if (advertiserEmail) {
+      const { error: pendingDeleteByEmailError } = await supabase
+        .from(table("pending_ads"))
+        .delete()
+        .eq("email", advertiserEmail);
+      if (pendingDeleteByEmailError && !isIgnorableSchemaError(pendingDeleteByEmailError)) {
+        throw pendingDeleteByEmailError;
+      }
+    }
+
+    if (adIdList.length > 0) {
       const { error: adsDeleteError } = await supabase
         .from(table("ads"))
         .delete()
-        .in("id", adIds);
+        .in("id", adIdList);
       if (adsDeleteError) throw adsDeleteError;
+    }
+
+    const profileIds = new Set();
+    const authUserIds = new Set();
+    const collectProfileRows = (rows, { requireAdvertiserRole = false } = {}) => {
+      for (const row of rows || []) {
+        if (!row?.id) continue;
+        const role = String(row?.role || "").trim().toLowerCase();
+        if (requireAdvertiserRole && role !== "advertiser") {
+          continue;
+        }
+        const profileId = String(row.id);
+        profileIds.add(profileId);
+        authUserIds.add(profileId);
+      }
+    };
+
+    let profilesByAdvertiserId = await supabase
+      .from("profiles")
+      .select("id, role")
+      .eq("advertiser_id", id);
+    if (profilesByAdvertiserId.error) {
+      if (!isIgnorableSchemaError(profilesByAdvertiserId.error)) {
+        throw profilesByAdvertiserId.error;
+      }
+      profilesByAdvertiserId = { data: [] };
+    }
+    collectProfileRows(profilesByAdvertiserId.data);
+
+    if (advertiserEmail) {
+      const { data: profilesByEmail, error: profilesByEmailError } = await supabase
+        .from("profiles")
+        .select("id, role")
+        .eq("email", advertiserEmail);
+      if (profilesByEmailError && !isIgnorableSchemaError(profilesByEmailError)) {
+        throw profilesByEmailError;
+      }
+      collectProfileRows(profilesByEmail, { requireAdvertiserRole: true });
+
+      const authUserByEmail = await findAuthUserByEmail(supabase, advertiserEmail);
+      if (authUserByEmail?.id) {
+        authUserIds.add(String(authUserByEmail.id));
+      }
+    }
+
+    let deletedAuthUsers = 0;
+    for (const userId of authUserIds) {
+      const { error: deleteAuthUserError } = await supabase.auth.admin.deleteUser(userId);
+      if (deleteAuthUserError) {
+        if (isMissingAuthUserError(deleteAuthUserError)) {
+          continue;
+        }
+        throw deleteAuthUserError;
+      }
+      deletedAuthUsers += 1;
+    }
+
+    const profileIdList = Array.from(profileIds);
+    if (profileIdList.length > 0) {
+      const { error: profileDeleteError } = await supabase
+        .from("profiles")
+        .delete()
+        .in("id", profileIdList);
+      if (profileDeleteError && !isIgnorableSchemaError(profileDeleteError)) {
+        throw profileDeleteError;
+      }
     }
 
     const { error: advertiserDeleteError } = await supabase
@@ -258,7 +466,13 @@ export async function DELETE(request, { params }) {
 
     return Response.json({
       success: true,
-      message: "Advertiser and all associated data deleted successfully",
+      message:
+        "Advertiser account and all associated records were permanently deleted.",
+      cleanup: {
+        ads_deleted: adIdList.length,
+        invoices_deleted: invoiceIdList.length,
+        auth_users_deleted: deletedAuthUsers,
+      },
     });
   } catch (error) {
     console.error("Error deleting advertiser:", error);
