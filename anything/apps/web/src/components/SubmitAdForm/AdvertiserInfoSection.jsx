@@ -36,7 +36,7 @@ export function AdvertiserInfoSection({
           <input
             type="text"
             name="advertiser_name"
-            required
+            required={!isReadOnly("advertiser_name")}
             value={formData.advertiser_name}
             readOnly={isReadOnly("advertiser_name")}
             aria-readonly={isReadOnly("advertiser_name")}
@@ -60,7 +60,7 @@ export function AdvertiserInfoSection({
           <input
             type="text"
             name="contact_name"
-            required
+            required={!isReadOnly("contact_name")}
             value={formData.contact_name}
             readOnly={isReadOnly("contact_name")}
             aria-readonly={isReadOnly("contact_name")}
@@ -84,7 +84,7 @@ export function AdvertiserInfoSection({
           <input
             type="email"
             name="email"
-            required
+            required={!isReadOnly("email")}
             value={formData.email}
             readOnly={isReadOnly("email")}
             aria-readonly={isReadOnly("email")}
@@ -108,7 +108,7 @@ export function AdvertiserInfoSection({
           <input
             type="tel"
             name="phone_number"
-            required
+            required={!isReadOnly("phone_number")}
             value={formData.phone_number}
             readOnly={isReadOnly("phone_number")}
             aria-readonly={isReadOnly("phone_number")}
@@ -120,7 +120,7 @@ export function AdvertiserInfoSection({
             inputMode="tel"
             autoComplete="tel-national"
             maxLength={US_PHONE_INPUT_MAX_LENGTH}
-            pattern="[\d\s\(\)\-\+]+"
+            pattern={isReadOnly("phone_number") ? undefined : "[\\d\\s\\(\\)\\-\\+]+"}
             title="Please enter a valid phone number (digits, spaces, dashes, and parentheses only)"
             placeholder="(123) 456-7890"
             className={inputClass(isReadOnly("phone_number"))}

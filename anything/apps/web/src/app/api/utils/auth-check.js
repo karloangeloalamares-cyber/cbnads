@@ -2,6 +2,7 @@ import { getCurrentRequest } from "./request-context.js";
 import { getSessionFromRequestContext } from "./session-auth.js";
 import { db, table } from "./supabase-db.js";
 import { can, isAdvertiserRole, isInternalRole, normalizeAppRole } from "../../../lib/permissions.js";
+import { normalizeUSPhoneNumber } from "../../../lib/phone.js";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
@@ -24,7 +25,7 @@ const loadProfile = async (supabase, { userId }) => {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id, role, advertiser_id, full_name, email")
+    .select("id, role, advertiser_id, full_name, email, whatsapp_number")
     .eq("id", userId)
     .maybeSingle();
 
@@ -172,6 +173,13 @@ const mapSessionUser = async (supabase, sessionUser) => {
     image: sessionUser?.image || null,
     role,
     advertiser_id: profile?.advertiser_id || null,
+    whatsapp_number: normalizeUSPhoneNumber(
+      sessionUser?.whatsapp_number ||
+        sessionUser?.phone_number ||
+        sessionUser?.phone ||
+        profile?.whatsapp_number ||
+        "",
+    ),
   };
 
   return attachAdvertiserIdentity(supabase, baseUser);
@@ -207,6 +215,13 @@ const mapSupabaseUser = async (supabase, authUser) => {
       authUser?.app_metadata?.advertiser_id ||
       profile?.advertiser_id ||
       null,
+    whatsapp_number: normalizeUSPhoneNumber(
+      authUser?.user_metadata?.whatsapp_number ||
+        authUser?.user_metadata?.phone_number ||
+        authUser?.user_metadata?.phone ||
+        profile?.whatsapp_number ||
+        "",
+    ),
     account_verified: authUser?.user_metadata?.account_verified === true,
   };
 

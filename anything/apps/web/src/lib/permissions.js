@@ -60,6 +60,8 @@ const permissionMatrix = {
     "dashboard:view",
     "calendar:view",
     "submissions:view",
+    "submissions:convert",
+    "submissions:reject",
     "ads:view",
     "ads:edit",
     "whatsapp:view",

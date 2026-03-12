@@ -13,7 +13,7 @@ import {
   checkAdAvailability,
   normalizeCustomDateEntries,
 } from "@/lib/adAvailabilityClient";
-import { formatUSPhoneNumber, isCompleteUSPhoneNumber } from "@/lib/phone";
+import { formatUSPhoneNumber } from "@/lib/phone";
 import { isPastDateTimeInAppTimeZone } from "@/lib/timezone";
 import { appToast } from "@/lib/toast";
 
@@ -246,22 +246,15 @@ export default function AdvertiserCreateAdSection({
       return false;
     }
 
-    if (
-      !current.advertiser_name ||
-      !current.contact_name ||
-      !current.email ||
-      !current.phone_number ||
-      !current.ad_name
-    ) {
+    const missingRequiredFields = [];
+    if (!String(current.advertiser_name || "").trim()) missingRequiredFields.push("advertiser name");
+    if (!String(current.email || "").trim()) missingRequiredFields.push("email");
+    if (!String(current.ad_name || "").trim()) missingRequiredFields.push("ad name");
+
+    if (missingRequiredFields.length > 0) {
       appToast.error({
         title: "Complete all required fields before submitting.",
-      });
-      return false;
-    }
-
-    if (current.phone_number && !isCompleteUSPhoneNumber(current.phone_number)) {
-      appToast.error({
-        title: "Phone number must be a complete US number.",
+        description: `Missing: ${missingRequiredFields.join(", ")}`,
       });
       return false;
     }

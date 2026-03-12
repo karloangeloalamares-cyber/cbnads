@@ -95,7 +95,6 @@ import {
   INVOICE_COMPANY_NAME,
 } from "@/lib/invoiceCompany";
 import {
-  approvePendingAd,
   createId,
   deleteAd,
   deleteAdvertiser,
@@ -140,7 +139,6 @@ const sections = [
 const CREATE_AD_SUBMIT_TOAST_ID = "create-ad-submit-toast";
 const INVOICE_SUBMIT_TOAST_ID = "invoice-submit-toast";
 const getInvoiceActionToastId = (action, invoiceId) => `invoice-${action}-toast-${invoiceId}`;
-const getSubmissionApproveToastId = (pendingAdId) => `submission-approve-${pendingAdId}`;
 const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
 const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
 const ADMIN_CREATED_AD_NOTIFICATION_SOURCE = "admin-created-ad";
@@ -2658,7 +2656,6 @@ export default function AdsPage() {
   };
 
   const [pendingAdDeleteIds, setPendingAdDeleteIds] = useState([]);
-  const [pendingSubmissionApproveIds, setPendingSubmissionApproveIds] = useState([]);
   const [selectedAdIds, setSelectedAdIds] = useState(new Set());
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState(new Set());
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState(new Set());
@@ -4313,10 +4310,6 @@ export default function AdsPage() {
     () => new Set(pendingAdDeleteIds),
     [pendingAdDeleteIds],
   );
-  const pendingSubmissionApproveIdSet = useMemo(
-    () => new Set(pendingSubmissionApproveIds.map((id) => String(id))),
-    [pendingSubmissionApproveIds],
-  );
 
   const filteredAds = useMemo(() => {
     const query = String(adsFilters.search || "").toLowerCase().trim();
@@ -4963,81 +4956,6 @@ export default function AdsPage() {
     setView("list");
   };
 
-  const handleApprovePendingAd = async (pendingAdId) => {
-    const normalizedPendingAdId = String(pendingAdId || "").trim();
-    if (!normalizedPendingAdId || pendingSubmissionApproveIdSet.has(normalizedPendingAdId)) {
-      return false;
-    }
-
-    const toastId = getSubmissionApproveToastId(normalizedPendingAdId);
-    setPendingSubmissionApproveIds((current) =>
-      current.includes(normalizedPendingAdId)
-        ? current
-        : [...current, normalizedPendingAdId],
-    );
-    appToast.info({
-      id: toastId,
-      title: "Approving Ad",
-      description: "Please wait while the submission is converted into an ad.",
-      duration: Infinity,
-    });
-
-    try {
-      let approvalInvoiceNumber = "";
-      if (!hasSupabaseConfig) {
-        await approvePendingAd(normalizedPendingAdId);
-        setDb(readDb());
-      } else {
-        const response = await fetchWithSessionAuth("/api/admin/pending-ads/approve", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            pending_ad_id: normalizedPendingAdId,
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to approve ad.");
-        }
-
-        if (data.warning) {
-          appToast.info({
-            title: "Approval Needs Confirmation",
-            description: data.message || "Approval requires additional confirmation.",
-          });
-          return false;
-        }
-        approvalInvoiceNumber = String(data?.invoice?.invoice_number || "").trim();
-
-        invalidateDbCache();
-        await ensureDb();
-        setDb(readDb());
-      }
-
-      appToast.success({
-        title: "Ad Approved and Invoiced",
-        description: approvalInvoiceNumber
-          ? `Invoice ${approvalInvoiceNumber} created. Ready-for-payment notice sent.`
-          : "The submission was moved out of pending items.",
-      });
-      return true;
-    } catch (error) {
-      console.error("[AdsPage] Approve submission failed", error);
-      appToast.error({
-        title: error instanceof Error ? error.message : "Failed to approve ad.",
-      });
-      return false;
-    } finally {
-      appToast.dismiss(toastId);
-      setPendingSubmissionApproveIds((current) =>
-        current.filter((id) => id !== normalizedPendingAdId),
-      );
-    }
-  };
-
   const handleRejectPendingAd = async (pendingAdId, { reasons = [], note = "" } = {}) => {
     const normalizedPendingAdId = String(pendingAdId || "").trim();
     if (!normalizedPendingAdId) {
@@ -5238,10 +5156,109 @@ export default function AdsPage() {
     }
     setSubmissionEditLoading(true);
     try {
-      const approved = await handleApprovePendingAd(submissionEditModal.id);
-      if (approved) {
-        resetSubmissionEditState();
+      const currentForm = submissionEditFormRef.current;
+      const advertiserId = resolveSubmissionAdvertiserId({
+        submission: submissionEditModal,
+        form: currentForm,
+      });
+      if (!advertiserId) {
+        appToast.error({
+          title: "Approval needs advertiser mapping",
+          description: "Match this submission to an advertiser record before approving.",
+        });
+        return;
       }
+
+      const productId = resolveSubmissionProductId({
+        submission: submissionEditModal,
+        form: currentForm,
+      });
+      if (!productId) {
+        appToast.error({
+          title: "Approval needs a product package",
+          description: "Create at least one product package, then approve again.",
+        });
+        return;
+      }
+
+      const normalizedPostType = normalizeCreateAdPostType(currentForm.post_type);
+      const placement =
+        String(currentForm.placement || submissionEditModal.placement || "").trim() || "Standard";
+      const conversionPayload = {
+        advertiser_id: advertiserId,
+        placement,
+        product_id: productId,
+        post_type: toCreateAdPostTypeValue(normalizedPostType),
+        schedule: buildSubmissionApprovalSchedule(currentForm),
+        ad_name: String(currentForm.ad_name || "").trim(),
+        ad_text: String(currentForm.ad_text || "").trim(),
+        notes: String(currentForm.notes || "").trim(),
+        media: Array.isArray(currentForm.media) ? currentForm.media : [],
+        billingAction: "stay_on_ads",
+      };
+
+      const response = await fetchWithSessionAuth(
+        `/api/submissions/${submissionEditModal.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...currentForm,
+            custom_dates: currentForm.custom_dates,
+            post_time:
+              currentForm.post_time && currentForm.post_time.length === 5
+                ? `${currentForm.post_time}:00`
+                : currentForm.post_time,
+          }),
+        },
+      );
+      const updateData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(updateData?.error || "Failed to save submission details before approval.");
+      }
+
+      const convertResponse = await fetchWithSessionAuth(
+        `/api/submissions/${submissionEditModal.id}/convert`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(conversionPayload),
+        },
+      );
+
+      const convertData = await convertResponse.json().catch(() => ({}));
+      if (!convertResponse.ok) {
+        throw new Error(convertData?.error || "Failed to convert submission.");
+      }
+
+      invalidateDbCache();
+      await ensureDb();
+      setDb(readDb());
+
+      const convertedAd = convertData?.ad || null;
+      resetSubmissionEditState();
+      if (convertedAd?.id) {
+        setActiveSection("Ads");
+        openAdEditor(convertedAd);
+      }
+
+      appToast.success({
+        title: "Submission moved to Ad Editor.",
+        description:
+          "Finalize product and invoice details there before sending ready-for-payment notifications.",
+      });
+    } catch (error) {
+      console.error("Failed to approve submission:", error);
+      appToast.error({
+        title:
+          error instanceof Error
+            ? error.message
+            : "Failed to move submission to Ad Editor.",
+      });
     } finally {
       setSubmissionEditLoading(false);
     }
@@ -5612,12 +5629,12 @@ export default function AdsPage() {
     const nextForm = toSubmissionEditForm(submission);
     const normalizedStatus = String(submission?.status || "").toLowerCase();
     let defaultReviewAction = "";
-    if (isAdmin && ["pending", "not_approved"].includes(normalizedStatus)) {
+    if (["pending", "not_approved"].includes(normalizedStatus)) {
       if (canConvertSubmissions) {
         defaultReviewAction = "approve";
       } else if (canRejectSubmissions) {
         defaultReviewAction = "reject";
-      } else if (normalizedStatus === "not_approved") {
+      } else if (canBatchDeleteSubmissions && normalizedStatus === "not_approved") {
         defaultReviewAction = "delete";
       }
     }
@@ -5637,6 +5654,99 @@ export default function AdsPage() {
     setSubmissionRejectSelectedReasons([]);
     setSubmissionRejectNote("");
     setSubmissionRejectNewReason("");
+  };
+
+  const resolveSubmissionAdvertiserId = ({ submission, form }) => {
+    const directAdvertiserId = String(submission?.advertiser_id || "").trim();
+    if (directAdvertiserId) {
+      return directAdvertiserId;
+    }
+
+    const advertiserEmail = normalizeEmailAddress(form?.email || submission?.email || "");
+    if (advertiserEmail) {
+      const advertiserByEmail = advertisers.find(
+        (item) => normalizeEmailAddress(item?.email || "") === advertiserEmail,
+      );
+      if (advertiserByEmail?.id) {
+        return String(advertiserByEmail.id).trim();
+      }
+    }
+
+    const advertiserName = normalizeComparableText(
+      form?.advertiser_name || submission?.advertiser_name || submission?.advertiser || "",
+    );
+    if (advertiserName) {
+      const advertiserByName = advertisers.find(
+        (item) => normalizeComparableText(item?.advertiser_name || item?.advertiser || "") === advertiserName,
+      );
+      if (advertiserByName?.id) {
+        return String(advertiserByName.id).trim();
+      }
+    }
+
+    return "";
+  };
+
+  const resolveSubmissionProductId = ({ submission, form }) => {
+    const directProductId = String(submission?.product_id || "").trim();
+    if (directProductId) {
+      return directProductId;
+    }
+
+    const placement = String(form?.placement || submission?.placement || "").trim();
+    if (placement) {
+      const productByPlacement = products.find(
+        (item) => String(item?.placement || "").trim().toLowerCase() === placement.toLowerCase(),
+      );
+      if (productByPlacement?.id) {
+        return String(productByPlacement.id).trim();
+      }
+    }
+
+    const firstProductId = String(products[0]?.id || "").trim();
+    return firstProductId || "";
+  };
+
+  const buildSubmissionApprovalSchedule = (form) => {
+    const normalizedPostType = normalizeCreateAdPostType(form?.post_type || "");
+    const normalizedPostTime = normalizeCustomDateTimeValue(form?.post_time || "");
+    const schedule = {};
+
+    if (normalizedPostType === "Daily Run") {
+      schedule.start_date = String(form?.post_date_from || "").trim();
+      schedule.end_date = String(form?.post_date_to || "").trim();
+    } else if (normalizedPostType === "Custom Schedule") {
+      schedule.custom_dates = normalizeCustomDatesForForm(form?.custom_dates, {
+        fallbackTime: normalizedPostTime,
+        fallbackReminder: "15-min",
+      });
+    } else {
+      schedule.post_date = String(form?.post_date_from || "").trim();
+    }
+
+    if (normalizedPostTime) {
+      schedule.post_time = normalizedPostTime;
+    }
+
+    return schedule;
+  };
+
+  const isSubmissionRowInteractiveTarget = (target) => {
+    return (
+      target instanceof Element &&
+      Boolean(
+        target.closest(
+          "button, a, input, select, textarea, label, [data-stop-submission-row-click='true']",
+        ),
+      )
+    );
+  };
+
+  const handleSubmissionRowClick = (event, submission) => {
+    if (isSubmissionRowInteractiveTarget(event.target)) {
+      return;
+    }
+    openSubmissionEditModal(submission);
   };
 
   const toggleSubmissionRejectReason = (reason, checked) => {
@@ -5998,27 +6108,25 @@ export default function AdsPage() {
 
   const submissionEditStatus = String(submissionEditModal?.status || "").toLowerCase();
   const canModalApproveSubmission =
-    isAdmin &&
     canConvertSubmissions &&
     ["pending", "not_approved"].includes(submissionEditStatus);
   const canModalRejectSubmission =
-    isAdmin &&
     canRejectSubmissions &&
     ["pending", "not_approved"].includes(submissionEditStatus);
   const canModalDeleteSubmission =
-    isAdmin && submissionEditStatus === "not_approved";
+    canBatchDeleteSubmissions && submissionEditStatus === "not_approved";
   const isSubmissionReviewMode =
     canModalApproveSubmission || canModalRejectSubmission || canModalDeleteSubmission;
   const submissionReviewDescription = canModalDeleteSubmission
-    ? "Review the submission details, then approve, reject, or delete."
-    : "Review the submission details, then approve or reject.";
+    ? "Review details, then approve to continue in Ad Editor, reject, or delete."
+    : "Review details, then approve to continue in Ad Editor or reject.";
   const hasSubmissionRejectFeedback =
     mergeUniqueSubmissionReasons(submissionRejectSelectedReasons).length > 0 ||
     String(submissionRejectNote || "").trim().length > 0;
   const submissionReviewActionOptions = useMemo(() => {
     const options = [];
     if (canModalApproveSubmission) {
-      options.push({ value: "approve", label: "Approve" });
+      options.push({ value: "approve", label: "Approve & Edit Ad" });
     }
     if (canModalRejectSubmission) {
       options.push({ value: "reject", label: "Reject" });
@@ -7357,7 +7465,7 @@ export default function AdsPage() {
   };
 
   const openAdEditor = (item) => {
-    if (!isAdmin) {
+    if (!canEditAds) {
       return;
     }
     const advertiserId =
@@ -9422,13 +9530,18 @@ export default function AdsPage() {
                         <tbody className="divide-y divide-gray-200">
                           {filteredPendingSubmissions.map((item) => {
                             return (
-                              <tr key={item.id} className="hover:bg-gray-50">
+                              <tr
+                                key={item.id}
+                                className="hover:bg-gray-50 cursor-pointer"
+                                onClick={(event) => handleSubmissionRowClick(event, item)}
+                              >
                                 {canBatchDeleteSubmissions && (
                                   <td className="px-6 py-3.5">
                                     <input
                                       type="checkbox"
                                       checked={selectedSubmissionIds.has(String(item.id || "").trim())}
                                       onChange={() => handleToggleSelectSubmission(item.id)}
+                                      data-stop-submission-row-click="true"
                                       className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
                                     />
                                   </td>
@@ -10565,11 +10678,11 @@ export default function AdsPage() {
                 onClose={() => setAdsPreviewAd(null)}
                 onEdit={openAdEditor}
                 linkedInvoices={linkedPreviewInvoices}
-                canEdit={isAdmin}
+                canEdit={canEditAds}
               />
             </div>
           )}
-          {activeSection === "Ads" && view === "createAd" && isAdmin && (
+          {activeSection === "Ads" && view === "createAd" && canEditAds && (
             <div className="flex-1 overflow-auto bg-white -m-8">
               {advertiserCreateOpen && advertiserCreateSource === "createAd" ? (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] p-4">

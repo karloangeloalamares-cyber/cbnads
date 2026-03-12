@@ -153,9 +153,14 @@ export async function PUT(request, { params }) {
       );
     }
 
-    if (!isAdvertiserUser(auth.user)) {
+    const isAdvertiser = isAdvertiserUser(auth.user);
+    const canManageSubmission =
+      can(auth.user.role, "submissions:convert") ||
+      can(auth.user.role, "submissions:reject");
+
+    if (!isAdvertiser && !canManageSubmission) {
       return Response.json(
-        { error: "Unauthorized - Advertiser access required" },
+        { error: "Unauthorized - Submission access required" },
         { status: 403 },
       );
     }
@@ -176,19 +181,28 @@ export async function PUT(request, { params }) {
       return Response.json({ error: "Submission not found" }, { status: 404 });
     }
 
-    const scope = await resolveAdvertiserScope(auth.user);
-    if (
-      !matchesAdvertiserScope(submission, scope, {
-        advertiserNameFields: ["advertiser_name", "advertiser"],
-        emailFields: ["email", "contact_email"],
-      })
-    ) {
-      return Response.json({ error: "Submission not found" }, { status: 404 });
+    let scope = null;
+    if (isAdvertiser) {
+      scope = await resolveAdvertiserScope(auth.user);
+      if (
+        !matchesAdvertiserScope(submission, scope, {
+          advertiserNameFields: ["advertiser_name", "advertiser"],
+          emailFields: ["email", "contact_email"],
+        })
+      ) {
+        return Response.json({ error: "Submission not found" }, { status: 404 });
+      }
     }
 
-    if (String(submission.status || "").trim().toLowerCase() !== "pending") {
+    const normalizedStatus = String(submission.status || "").trim().toLowerCase();
+    const editableStatuses = isAdvertiser ? ["pending"] : ["pending", "not_approved"];
+    if (!editableStatuses.includes(normalizedStatus)) {
       return Response.json(
-        { error: "Only pending submissions can be edited." },
+        {
+          error: isAdvertiser
+            ? "Only pending submissions can be edited."
+            : "Only pending or not approved submissions can be edited.",
+        },
         { status: 400 },
       );
     }
@@ -219,17 +233,13 @@ export async function PUT(request, { params }) {
       productRow = product;
     }
 
-    const normalizedPhoneNumber =
+    const normalizedPhoneCandidate =
       body.phone_number !== undefined
         ? normalizeUSPhoneNumber(body.phone_number || "")
         : normalizeUSPhoneNumber(submission.phone_number || submission.phone || "");
-
-    if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
-      return Response.json(
-        { error: "Phone number must be a complete US number." },
-        { status: 400 },
-      );
-    }
+    const normalizedPhoneNumber = isCompleteUSPhoneNumber(normalizedPhoneCandidate)
+      ? normalizedPhoneCandidate
+      : "";
 
     const nextPostType = normalizePostType(body.post_type || submission.post_type || "");
     if (!["one_time", "daily_run", "custom_schedule"].includes(nextPostType)) {
@@ -249,11 +259,10 @@ export async function PUT(request, { params }) {
       !String(body.advertiser_name ?? submission.advertiser_name ?? "").trim() ||
       !String(body.contact_name ?? submission.contact_name ?? "").trim() ||
       !String(body.email ?? submission.email ?? "").trim() ||
-      !normalizedPhoneNumber ||
       !String(body.ad_name ?? submission.ad_name ?? "").trim()
     ) {
       return Response.json(
-        { error: "Advertiser name, contact name, email, phone number, and ad name are required." },
+        { error: "Advertiser name, contact name, email, and ad name are required." },
         { status: 400 },
       );
     }
@@ -383,7 +392,7 @@ export async function PUT(request, { params }) {
       updated_at: new Date().toISOString(),
     };
 
-    if (scope?.id) {
+    if (isAdvertiser && scope?.id) {
       patch.advertiser_id = scope.id;
     }
 

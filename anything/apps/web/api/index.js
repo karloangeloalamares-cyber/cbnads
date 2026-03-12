@@ -43,8 +43,8 @@ import * as route_40 from "../src/app/api/user/profile/route.js";
 import * as route_41 from "../src/app/api/user/role/route.js";
 import * as route_42 from "../src/app/api/webhook/whatsapp/route.js";
 import * as route_43 from "../src/app/api/__create/ssr-test/route.js";
-import * as route_44 from "../src/app/api/admin/ads/internal-notify/route.js";
-import * as route_45 from "../src/app/api/admin/ads/send-approval-email/route.js";
+import * as route_44 from "../src/app/api/admin/ads/send-approval-email/route.js";
+import * as route_45 from "../src/app/api/admin/ads/internal-notify/route.js";
 import * as route_46 from "../src/app/api/admin/advertisers/ensure-account/route.js";
 import * as route_47 from "../src/app/api/admin/invoices/send-payment-received/route.js";
 import * as route_48 from "../src/app/api/admin/members/[id]/route.js";
@@ -73,10 +73,10 @@ const routes = [
   { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_60 },
   { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_62 },
   { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_54 },
-  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_45 },
+  { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_44 },
   { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_52 },
   { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_63 },
-  { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_44 },
+  { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_45 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_49 },
   { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_50 },
   { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_53 },

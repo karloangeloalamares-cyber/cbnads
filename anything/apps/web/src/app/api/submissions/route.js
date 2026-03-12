@@ -8,6 +8,7 @@ import {
   matchesAdvertiserScope,
 } from "../utils/auth-check.js";
 import { createPendingAdSubmission } from "../utils/pending-ad-submission.js";
+import { isCompleteUSPhoneNumber, normalizeUSPhoneNumber } from "../../../lib/phone.js";
 
 const submissionPriority = (status) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -25,6 +26,26 @@ const isMissingColumnError = (error) => {
     message.includes("does not exist") ||
     message.includes("could not find the")
   );
+};
+
+const pickFirstNonEmpty = (...values) => {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+};
+
+const pickCompleteUSPhoneNumber = (...values) => {
+  for (const value of values) {
+    const normalized = normalizeUSPhoneNumber(value || "");
+    if (isCompleteUSPhoneNumber(normalized)) {
+      return normalized;
+    }
+  }
+  return "";
 };
 
 const ADVERTISER_SELECT_VARIANTS = [
@@ -213,6 +234,21 @@ export async function POST(request) {
       String(advertiser?.advertiser_name || scope?.name || auth.user?.advertiser_name || "").trim();
     const canonicalEmail =
       String(advertiser?.email || scope?.email || auth.user?.email || "").trim().toLowerCase();
+    const canonicalContactName = pickFirstNonEmpty(
+      advertiser?.contact_name,
+      auth.user?.name,
+      body?.contact_name,
+      canonicalAdvertiserName,
+      canonicalEmail,
+    );
+    const canonicalPhoneNumber = pickCompleteUSPhoneNumber(
+      advertiser?.phone_number,
+      advertiser?.phone,
+      auth.user?.whatsapp_number,
+      auth.user?.phone_number,
+      auth.user?.phone,
+      body?.phone_number,
+    );
 
     if (!canonicalAdvertiserName || !canonicalEmail) {
       return Response.json(
@@ -230,13 +266,10 @@ export async function POST(request) {
         advertiser_id: advertiser?.id || scope?.id || auth.user?.advertiser_id || null,
         advertiser_name: canonicalAdvertiserName,
         email: canonicalEmail,
-        contact_name: String(
-          body?.contact_name || advertiser?.contact_name || auth.user?.name || "",
-        ).trim(),
-        phone_number: String(
-          body?.phone_number || advertiser?.phone_number || advertiser?.phone || "",
-        ).trim(),
+        contact_name: canonicalContactName,
+        phone_number: canonicalPhoneNumber,
       },
+      requirePhoneNumber: false,
     });
 
     if (result?.error) {
