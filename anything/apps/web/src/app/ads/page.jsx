@@ -11231,35 +11231,6 @@ export default function AdsPage() {
                         excludeAdId={ad.id || null}
                       />
 
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-900 mb-4">Payment</h3>
-                        <div className="border border-gray-200 rounded-lg bg-gray-50 px-4 pt-4 pb-3 mb-3">
-                          <label className="block text-xs font-semibold text-gray-700 mb-1">
-                            Estimated Total
-                          </label>
-                          <div className="w-full text-sm font-medium text-gray-900">
-                            {(() => {
-                              const selectedProduct = products.find((item) => item.id === ad.product_id);
-                              const unitPrice = parseFloat(selectedProduct?.price || 0);
-                              if (!unitPrice) return "$0.00";
-
-                              let days = 1;
-                              const postType = normalizeCreateAdPostType(selectedCreateAdPostType);
-                              if (postType === "Daily Run" && ad.post_date_from && ad.post_date_to) {
-                                const start = new Date(ad.post_date_from);
-                                const end = new Date(ad.post_date_to);
-                                if (!isNaN(start) && !isNaN(end) && end >= start) {
-                                  days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
-                                }
-                              } else if (postType === "Custom Schedule" && Array.isArray(ad.custom_dates)) {
-                                days = ad.custom_dates.length;
-                              }
-                              return `$${(unitPrice * days).toFixed(2)}`;
-                            })()}
-                          </div>
-                        </div>
-                      </div>
-
                       <NotesSection notes={ad.notes || ""} onChange={handleCreateAdChange} />
                     </form>
                   </div>

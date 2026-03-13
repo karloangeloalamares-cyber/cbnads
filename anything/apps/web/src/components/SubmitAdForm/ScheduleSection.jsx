@@ -230,7 +230,7 @@ function AvailabilityDateField({
   variant = "default",
 }) {
   const containerClasses = variant === "subtle"
-    ? "rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all"
+    ? "rounded-lg bg-gray-50 px-3 pt-2.5 pb-2 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all"
     : "border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0";
 
   const fieldRef = useRef(null);
@@ -728,7 +728,7 @@ export function ScheduleSection({
             return (
               <div
                 key={index}
-                className={`border rounded-xl p-4 transition-all ${isDateFull ? "bg-red-50 border-red-200" : "bg-white border-gray-200 hover:border-gray-300"}`}
+                className={`border rounded-xl px-4 py-3 transition-all ${isDateFull ? "bg-red-50 border-red-200" : "bg-white border-gray-200 hover:border-gray-300"}`}
               >
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -782,9 +782,9 @@ export function ScheduleSection({
                   </div>
 
                   {!isDateFull && (
-                  <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Time (ET)</label>
-                    <div className="flex items-center gap-1 pr-6">
+                  <div className="relative rounded-lg bg-gray-50 px-3 pt-2.5 pb-2 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
+                    <label className="block text-xs font-semibold text-gray-700 mb-0.5">Time (ET)</label>
+                    <div className="flex items-center gap-1 pr-6 mt-0.5">
                       <TimeSelect
                         value={timeForInput(timeStr)}
                         onChange={(val) => {
@@ -801,14 +801,14 @@ export function ScheduleSection({
                         minTime={dateStr === getTodayInAppTimeZone() ? getCurrentETTime() : null}
                       />
                     </div>
-                    <Clock size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <Clock size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   </div>
                   )}
 
                   {!isDateFull && (
-                  <div className="relative rounded-lg bg-gray-50 px-4 pt-4 pb-3 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Reminder</label>
-                    <div className="relative">
+                  <div className="relative rounded-lg bg-gray-50 px-3 pt-2.5 pb-2 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all">
+                    <label className="block text-xs font-semibold text-gray-700 mb-0.5">Reminder</label>
+                    <div className="relative mt-0.5">
                       <select
                         value={reminderStr}
                         onChange={(e) => {
