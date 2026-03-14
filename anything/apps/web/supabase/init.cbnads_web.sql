@@ -136,6 +136,9 @@ create index if not exists idx_cbnads_web_ads_post_date on cbnads_web_ads(post_d
 create index if not exists idx_cbnads_web_ads_advertiser on cbnads_web_ads(advertiser_id);
 create index if not exists idx_cbnads_web_pending_ads_status on cbnads_web_pending_ads(status);
 create index if not exists idx_cbnads_web_invoices_advertiser on cbnads_web_invoices(advertiser_id);
+create unique index if not exists uq_cbnads_web_advertisers_email
+on cbnads_web_advertisers(email)
+where email is not null and email <> '';
 create index if not exists idx_cbnads_web_credit_ledger_advertiser on cbnads_web_credit_ledger(advertiser_id, created_at desc);
 create index if not exists idx_cbnads_web_credit_ledger_invoice on cbnads_web_credit_ledger(invoice_id);
 
