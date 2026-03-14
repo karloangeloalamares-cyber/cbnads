@@ -4985,6 +4985,14 @@ export default function AdsPage() {
     return sorted;
   }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
 
+  const deletableFilteredInvoiceIds = useMemo(
+    () =>
+      filteredInvoices
+        .filter((item) => !isInvoicePaidViaCredits(item))
+        .map((item) => String(item.id)),
+    [filteredInvoices],
+  );
+
   const invoiceSummary = useMemo(() => {
       const summary = invoices.reduce(
         (acc, item) => {
@@ -7556,39 +7564,164 @@ export default function AdsPage() {
   };
 
   const handleToggleSelectInvoice = (invoiceId) => {
+    const normalizedInvoiceId = String(invoiceId || "").trim();
+    if (!normalizedInvoiceId) {
+      return;
+    }
+
+    const invoiceRecord = invoices.find(
+      (item) => String(item?.id || "").trim() === normalizedInvoiceId,
+    );
+    if (invoiceRecord && isInvoicePaidViaCredits(invoiceRecord)) {
+      return;
+    }
+
     setSelectedInvoiceIds((prev) => {
       const next = new Set(prev);
-      next.has(String(invoiceId)) ? next.delete(String(invoiceId)) : next.add(String(invoiceId));
+      next.has(normalizedInvoiceId)
+        ? next.delete(normalizedInvoiceId)
+        : next.add(normalizedInvoiceId);
       return next;
     });
   };
 
   const handleSelectAllInvoices = () => {
-    const allIds = filteredInvoices.map((i) => String(i.id));
-    const allSelected = allIds.length > 0 && allIds.every((id) => selectedInvoiceIds.has(id));
-    setSelectedInvoiceIds(allSelected ? new Set() : new Set(allIds));
+    const allSelected =
+      deletableFilteredInvoiceIds.length > 0 &&
+      deletableFilteredInvoiceIds.every((id) => selectedInvoiceIds.has(id));
+    setSelectedInvoiceIds(allSelected ? new Set() : new Set(deletableFilteredInvoiceIds));
   };
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setSelectedInvoiceIds(new Set());
+      return;
+    }
+
+    setSelectedInvoiceIds((current) => {
+      if (current.size === 0) {
+        return current;
+      }
+
+      const cleaned = new Set();
+      for (const invoiceId of current) {
+        const normalizedInvoiceId = String(invoiceId || "").trim();
+        if (!normalizedInvoiceId) {
+          continue;
+        }
+
+        const invoiceRecord = invoices.find(
+          (item) => String(item?.id || "").trim() === normalizedInvoiceId,
+        );
+        if (!invoiceRecord) {
+          continue;
+        }
+        if (isInvoicePaidViaCredits(invoiceRecord)) {
+          continue;
+        }
+        cleaned.add(normalizedInvoiceId);
+      }
+
+      if (cleaned.size === current.size) {
+        let identical = true;
+        for (const invoiceId of current) {
+          if (!cleaned.has(invoiceId)) {
+            identical = false;
+            break;
+          }
+        }
+        if (identical) {
+          return current;
+        }
+      }
+
+      return cleaned;
+    });
+  }, [invoices, isAdmin]);
 
   const executeBatchDeleteInvoices = async (invoiceIds) => {
     const toastId = "batch-delete-invoices";
+    const uniqueInvoiceIds = [...new Set(invoiceIds.map((id) => String(id || "").trim()))].filter(
+      Boolean,
+    );
+    const blockedCreditPaidInvoiceIds = [];
+    const deletableInvoiceIds = [];
+
+    for (const id of uniqueInvoiceIds) {
+      const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
+      if (invoiceRecord && isInvoicePaidViaCredits(invoiceRecord)) {
+        blockedCreditPaidInvoiceIds.push(id);
+        continue;
+      }
+      deletableInvoiceIds.push(id);
+    }
+
+    if (deletableInvoiceIds.length === 0) {
+      appToast.warning({
+        title: "No invoices deleted",
+        description:
+          blockedCreditPaidInvoiceIds.length > 0
+            ? `${blockedCreditPaidInvoiceIds.length} invoice${blockedCreditPaidInvoiceIds.length > 1 ? "s" : ""} skipped (paid via credits).`
+            : "No valid invoices were selected.",
+      });
+      return;
+    }
+
     appToast.info({ id: toastId, title: "Deleting invoices...", duration: Infinity });
     try {
-      for (const id of invoiceIds) {
-        await deleteInvoice(id);
+      const deletedInvoiceIds = [];
+      const failedInvoiceIds = [];
+      const failedMessages = [];
+
+      for (const id of deletableInvoiceIds) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await deleteInvoice(id);
+          deletedInvoiceIds.push(id);
+        } catch (error) {
+          failedInvoiceIds.push(id);
+          failedMessages.push(error instanceof Error ? error.message : "Failed to delete invoice.");
+        }
       }
-      if (invoiceIds.includes(String(invoicePreviewModal?.id || "").trim())) {
+
+      if (deletedInvoiceIds.includes(String(invoicePreviewModal?.id || "").trim())) {
         setInvoicePreviewModal(null);
       }
+
       setDb(readDb());
-      setSelectedInvoiceIds(new Set());
+      setSelectedInvoiceIds(new Set(failedInvoiceIds));
+
+      if (failedInvoiceIds.length > 0) {
+        appToast.warning({
+          title: "Some invoices were not deleted",
+          description: failedMessages[0] || "One or more invoices could not be deleted.",
+        });
+        return;
+      }
+
+      if (deletedInvoiceIds.length === 0 && blockedCreditPaidInvoiceIds.length > 0) {
+        appToast.warning({
+          title: "No invoices deleted",
+          description: `${blockedCreditPaidInvoiceIds.length} invoice${blockedCreditPaidInvoiceIds.length > 1 ? "s" : ""} skipped (paid via credits).`,
+        });
+        return;
+      }
+
+      if (deletedInvoiceIds.length === 0) {
+        appToast.warning({
+          title: "No invoices deleted",
+          description: "No invoices were deleted.",
+        });
+        return;
+      }
+
+      const skippedCount = blockedCreditPaidInvoiceIds.length;
       appToast.success({
-        title: `${invoiceIds.length} invoice${invoiceIds.length > 1 ? "s" : ""} deleted`,
-      });
-    } catch (error) {
-      console.error("[AdsPage] Batch invoice delete failed", error);
-      appToast.error({
-        title: "Delete failed",
-        description: error instanceof Error ? error.message : "Failed to delete invoices.",
+        title: `${deletedInvoiceIds.length} invoice${deletedInvoiceIds.length > 1 ? "s" : ""} deleted`,
+        description:
+          skippedCount > 0
+            ? `${skippedCount} invoice${skippedCount > 1 ? "s" : ""} skipped (paid via credits).`
+            : "",
       });
     } finally {
       appToast.dismiss(toastId);
@@ -7597,11 +7730,27 @@ export default function AdsPage() {
 
   const handleBatchDeleteInvoices = () => {
     if (selectedInvoiceIds.size === 0) return;
-    const ids = [...selectedInvoiceIds];
+    const ids = [...selectedInvoiceIds].map((id) => String(id || "").trim()).filter(Boolean);
+    const blockedCount = ids.filter((id) => {
+      const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
+      return invoiceRecord && isInvoicePaidViaCredits(invoiceRecord);
+    }).length;
+    const deletableCount = Math.max(ids.length - blockedCount, 0);
+    if (deletableCount === 0) {
+      appToast.warning({
+        title: "Nothing to delete",
+        description: "Selected invoices are paid via credits and cannot be deleted.",
+      });
+      return;
+    }
+
     appToast.warning({
       id: "confirm-batch-delete-invoices",
-      title: `Delete ${ids.length} invoice${ids.length > 1 ? "s" : ""}?`,
-      description: "This cannot be undone.",
+      title: `Delete ${deletableCount} invoice${deletableCount !== 1 ? "s" : ""}?`,
+      description:
+        blockedCount > 0
+          ? `${blockedCount} invoice${blockedCount > 1 ? "s" : ""} will be skipped (paid via credits). This cannot be undone.`
+          : "This cannot be undone.",
       duration: 8000,
       action: {
         label: "Delete",
@@ -12953,9 +13102,15 @@ export default function AdsPage() {
                             <th className="px-4 py-3 w-10">
                               <input
                                 type="checkbox"
-                                checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedInvoiceIds.has(String(i.id)))}
+                                checked={
+                                  deletableFilteredInvoiceIds.length > 0 &&
+                                  deletableFilteredInvoiceIds.every((id) =>
+                                    selectedInvoiceIds.has(id),
+                                  )
+                                }
+                                disabled={deletableFilteredInvoiceIds.length === 0}
                                 onChange={handleSelectAllInvoices}
-                                className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                                className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                               />
                             </th>
                           )}
@@ -13022,7 +13177,13 @@ export default function AdsPage() {
                                     type="checkbox"
                                     checked={selectedInvoiceIds.has(String(item.id))}
                                     onChange={() => handleToggleSelectInvoice(item.id)}
-                                    className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer"
+                                    disabled={isInvoicePaidViaCredits(item)}
+                                    title={
+                                      isInvoicePaidViaCredits(item)
+                                        ? "Credit-paid invoices cannot be deleted."
+                                        : undefined
+                                    }
+                                    className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                   />
                                 </td>
                               )}
@@ -13157,7 +13318,15 @@ export default function AdsPage() {
                                               setOpenInvoiceMenuId(null);
                                               deleteInvoiceRecord(item.id);
                                             }}
-                                            disabled={isInvoiceActionPending(item.id)}
+                                            disabled={
+                                              isInvoiceActionPending(item.id) ||
+                                              isInvoicePaidViaCredits(item)
+                                            }
+                                            title={
+                                              isInvoicePaidViaCredits(item)
+                                                ? "Credit-paid invoices cannot be deleted."
+                                                : undefined
+                                            }
                                             className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                           >
                                             <Trash2 size={16} className="text-red-500" />
