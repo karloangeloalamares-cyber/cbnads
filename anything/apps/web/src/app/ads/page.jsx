@@ -8155,7 +8155,9 @@ export default function AdsPage() {
           });
         }
 
-        if (isAdmin && shouldNotifyAdCreated) {
+        const shouldSendApprovalNotices =
+          isAdmin && shouldNotifyAdCreated && mode !== "continue";
+        if (shouldSendApprovalNotices) {
           const accountInviteResult = await ensureAdvertiserAccountInvite(
             payload.advertiser_id || savedAd?.advertiser_id,
           );
@@ -8192,7 +8194,7 @@ export default function AdsPage() {
         }
 
         const shouldNotifyLifecycle =
-          isInternalUserRole && mode !== "draft";
+          isInternalUserRole && mode !== "draft" && mode !== "continue";
         const skipLifecycleNotification =
           isAdmin && shouldNotifyAdCreated && approvalEmailResult?.success;
 
