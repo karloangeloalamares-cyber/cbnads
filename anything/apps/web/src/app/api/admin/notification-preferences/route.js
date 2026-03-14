@@ -24,12 +24,13 @@ const isRecoverablePreferencesError = (error) => {
   );
 };
 
-const isMissingWhatsAppPreferencesColumnsError = (error) => {
+const isMissingMessagingPreferencesColumnsError = (error) => {
   const code = String(error?.code || "").trim();
   const message = String(error?.message || error || "").trim().toLowerCase();
   return (
     code === "PGRST204" ||
     code === "42703" ||
+    message.includes("telegram_chat_ids") ||
     message.includes("whatsapp_recipients") ||
     message.includes("whatsapp_settings")
   );
@@ -296,12 +297,11 @@ export async function POST(request) {
 
     const supabase = db();
     let saved = null;
-    let degradedMissingWhatsAppColumns = false;
+    let degradedMissingMessagingColumns = false;
 
     const writeRow = async () => {
-      const fallbackPatch = {
-        ...patch,
-      };
+      const fallbackPatch = { ...patch };
+      delete fallbackPatch.telegram_chat_ids;
       delete fallbackPatch.whatsapp_recipients;
       delete fallbackPatch.whatsapp_settings;
 
@@ -316,8 +316,8 @@ export async function POST(request) {
           .select("*")
           .single();
 
-        if (result.error && isMissingWhatsAppPreferencesColumnsError(result.error)) {
-          degradedMissingWhatsAppColumns = true;
+        if (result.error && isMissingMessagingPreferencesColumnsError(result.error)) {
+          degradedMissingMessagingColumns = true;
           result = await supabase
             .from(table("admin_notification_preferences"))
             .upsert(
@@ -343,8 +343,8 @@ export async function POST(request) {
             .select("*")
             .single();
 
-          if (result.error && isMissingWhatsAppPreferencesColumnsError(result.error)) {
-            degradedMissingWhatsAppColumns = true;
+          if (result.error && isMissingMessagingPreferencesColumnsError(result.error)) {
+            degradedMissingMessagingColumns = true;
             result = await supabase
               .from(table("admin_notification_preferences"))
               .update(fallbackPatch)
@@ -366,8 +366,8 @@ export async function POST(request) {
             .select("*")
             .single();
 
-          if (result.error && isMissingWhatsAppPreferencesColumnsError(result.error)) {
-            degradedMissingWhatsAppColumns = true;
+          if (result.error && isMissingMessagingPreferencesColumnsError(result.error)) {
+            degradedMissingMessagingColumns = true;
             result = await supabase
               .from(table("admin_notification_preferences"))
               .insert({
@@ -390,9 +390,9 @@ export async function POST(request) {
     return Response.json({
       success: true,
       preferences: normalizePreferences(saved, email),
-      degraded: degradedMissingWhatsAppColumns,
-      warning: degradedMissingWhatsAppColumns
-        ? "WhatsApp recipient columns are not available yet. Apply the latest migration."
+      degraded: degradedMissingMessagingColumns,
+      warning: degradedMissingMessagingColumns
+        ? "Messaging preferences columns are not available yet. Apply the latest migration."
         : null,
     });
   } catch (err) {

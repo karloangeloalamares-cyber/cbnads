@@ -206,10 +206,32 @@ export async function nextSequentialInvoiceNumber(
   invoicesTableName,
   { date = new Date(), prefix = DEFAULT_INVOICE_PREFIX } = {},
 ) {
-  const { data, error } = await supabase
-    .from(invoicesTableName)
-    .select("invoice_number")
-    .is("deleted_at", null);
+  const isMissingColumnError = (error, columnName) => {
+    const code = String(error?.code || "").trim();
+    const message = String(error?.message || "").toLowerCase();
+    return (
+      code === "42703" ||
+      code === "PGRST204" ||
+      message.includes(`column \"${String(columnName || "").toLowerCase()}\"`) ||
+      message.includes(`column "${String(columnName || "").toLowerCase()}"`) ||
+      message.includes(String(columnName || "").toLowerCase())
+    );
+  };
+
+  const fetchInvoiceNumbers = async (withDeletedFilter) => {
+    let query = supabase.from(invoicesTableName).select("invoice_number");
+    if (withDeletedFilter) {
+      query = query.is("deleted_at", null);
+    }
+    return query;
+  };
+
+  let data;
+  let error;
+  ({ data, error } = await fetchInvoiceNumbers(true));
+  if (error && isMissingColumnError(error, "deleted_at")) {
+    ({ data, error } = await fetchInvoiceNumbers(false));
+  }
   if (error) throw error;
 
   const existing = new Set(

@@ -24,6 +24,23 @@ const isAmbiguousCreditsRpcError = (error) =>
     .toLowerCase()
     .includes('column reference "credits" is ambiguous');
 
+const extractMissingColumnName = (error) => {
+  const message = String(error?.message || "");
+  const match = message.match(/column \"([^\"]+)\"/i);
+  return match ? match[1] : null;
+};
+
+const isMissingColumnError = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "42703" ||
+    code === "PGRST204" ||
+    message.includes("does not exist") ||
+    message.includes("column")
+  );
+};
+
 const adjustCreditsFallback = async ({
   supabase,
   advertiserId,
@@ -108,6 +125,39 @@ const adjustCreditsFallback = async ({
   }
 
   throw new Error("Failed to adjust credits. Please retry.");
+};
+
+const insertCreditInvoiceWithFallback = async (supabase, payload) => {
+  let candidate = { ...payload };
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { data, error } = await supabase
+      .from(table("invoices"))
+      .insert(candidate)
+      .select("*")
+      .limit(1);
+    if (!error) {
+      const invoice = Array.isArray(data) ? data[0] || null : data || null;
+      return invoice;
+    }
+
+    lastError = error;
+    if (!isMissingColumnError(error)) {
+      throw error;
+    }
+
+    const missingColumn = extractMissingColumnName(error);
+    if (!missingColumn || !(missingColumn in candidate)) {
+      throw error;
+    }
+
+    const nextCandidate = { ...candidate };
+    delete nextCandidate[missingColumn];
+    candidate = nextCandidate;
+  }
+
+  throw lastError || new Error("Failed to create the credit invoice.");
 };
 
 export async function POST(request, { params }) {
@@ -199,40 +249,28 @@ export async function POST(request, { params }) {
         prefix: "CRE",
       });
       const total = roundMoney(amount);
-
-      const { data: insertedInvoiceRows, error: insertedInvoiceError } = await supabase
-        .from(table("invoices"))
-        .insert({
-          invoice_number: invoiceNumber,
-          advertiser_id: advertiserId,
-          advertiser_name: String(advertiser?.advertiser_name || "").trim() || null,
-          issue_date: today,
-          due_date: today,
-          status: "Paid",
-          amount: total,
-          total,
-          amount_paid: total,
-          paid_date: today,
-          bill_to:
-            String(advertiser?.business_name || "").trim() ||
-            String(advertiser?.advertiser_name || "").trim() ||
-            null,
-          contact_name: String(advertiser?.contact_name || "").trim() || null,
-          contact_email: String(advertiser?.email || "").trim() || null,
-          ad_ids: [],
-          notes: `Credit top-up: ${reason}`,
-          paid_via_credits: false,
-          updated_at: new Date().toISOString(),
-        })
-        .select("*")
-        .limit(1);
-      if (insertedInvoiceError) {
-        throw insertedInvoiceError;
-      }
-
-      creditInvoice = Array.isArray(insertedInvoiceRows)
-        ? insertedInvoiceRows[0] || null
-        : insertedInvoiceRows || null;
+      creditInvoice = await insertCreditInvoiceWithFallback(supabase, {
+        invoice_number: invoiceNumber,
+        advertiser_id: advertiserId,
+        advertiser_name: String(advertiser?.advertiser_name || "").trim() || null,
+        issue_date: today,
+        due_date: today,
+        status: "Paid",
+        amount: total,
+        total,
+        amount_paid: total,
+        paid_date: today,
+        bill_to:
+          String(advertiser?.business_name || "").trim() ||
+          String(advertiser?.advertiser_name || "").trim() ||
+          null,
+        contact_name: String(advertiser?.contact_name || "").trim() || null,
+        contact_email: String(advertiser?.email || "").trim() || null,
+        ad_ids: [],
+        notes: `Credit top-up: ${reason}`,
+        paid_via_credits: false,
+        updated_at: new Date().toISOString(),
+      });
     }
 
     return Response.json({
