@@ -4967,12 +4967,12 @@ export default function AdsPage() {
   }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
 
   const invoiceSummary = useMemo(() => {
-    return invoices.reduce(
-      (acc, item) => {
-        const total = Number(item.total ?? item.amount ?? 0) || 0;
-        const amountPaid = Number(item.amount_paid ?? 0) || 0;
-        const outstanding = Math.max(total - amountPaid, 0);
-        const status = normalizeInvoiceStatus(item.status);
+      const summary = invoices.reduce(
+        (acc, item) => {
+          const total = Number(item.total ?? item.amount ?? 0) || 0;
+          const amountPaid = Number(item.amount_paid ?? 0) || 0;
+          const outstanding = Math.max(total - amountPaid, 0);
+          const status = normalizeInvoiceStatus(item.status);
         if (status === "Paid") {
           acc.totalPaid += amountPaid || total;
         }
@@ -4983,14 +4983,24 @@ export default function AdsPage() {
         if (status === "Pending" || status === "Overdue") {
           acc.totalOutstanding += outstanding || total;
         }
-        if (status === "Overdue") {
-          acc.overdueCount += 1;
-        }
-        return acc;
-      },
-      { totalOutstanding: 0, totalPaid: 0, overdueCount: 0 },
-    );
-  }, [invoices]);
+          if (status === "Overdue") {
+            acc.overdueCount += 1;
+          }
+          return acc;
+        },
+        { totalOutstanding: 0, totalPaid: 0, overdueCount: 0 },
+      );
+      const totalCredits = advertisers.reduce((sum, advertiser) => {
+        const credits = Number(advertiser?.credits ?? 0) || 0;
+        if (credits <= 0) return sum;
+        return sum + credits;
+      }, 0);
+
+      return {
+        ...summary,
+        totalCredits,
+      };
+    }, [advertisers, invoices]);
 
   const reconciliation = useMemo(() => getReconciliationReport(), [db]);
 
@@ -12680,27 +12690,35 @@ export default function AdsPage() {
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                <div className="bg-white border border-gray-200 rounded-xl p-5">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                    Outstanding
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                  <div className="bg-white border border-gray-200 rounded-xl p-5">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                      Outstanding
+                    </div>
                   <div className="text-2xl font-bold text-gray-900">
                     {formatCurrency(invoiceSummary.totalOutstanding)}
                   </div>
                 </div>
-                <div className="bg-white border border-gray-200 rounded-xl p-5">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                    Collected
+                  <div className="bg-white border border-gray-200 rounded-xl p-5">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                      Collected
+                    </div>
+                    <div className="text-2xl font-bold text-emerald-600">
+                      {formatCurrency(invoiceSummary.totalPaid)}
+                    </div>
                   </div>
-                  <div className="text-2xl font-bold text-emerald-600">
-                    {formatCurrency(invoiceSummary.totalPaid)}
+                  <div className="bg-white border border-gray-200 rounded-xl p-5">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                      Total Available Credits
+                    </div>
+                    <div className="text-2xl font-bold text-sky-600">
+                      {formatCurrency(invoiceSummary.totalCredits)}
+                    </div>
                   </div>
-                </div>
-                <div className="bg-white border border-gray-200 rounded-xl p-5">
-                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                    Overdue
-                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-5">
+                    <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                      Overdue
+                    </div>
                   <div className="text-2xl font-bold text-rose-600">
                     {invoiceSummary.overdueCount} invoice
                     {invoiceSummary.overdueCount !== 1 ? "s" : ""}
