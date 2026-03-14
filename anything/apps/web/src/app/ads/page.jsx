@@ -306,6 +306,7 @@ const blankAdvertiser = {
   phone: "",
   phone_number: "",
   business_name: "",
+  credits: "0.00",
   status: "active",
 };
 
@@ -334,6 +335,7 @@ const blankInvoice = {
   tax: "0.00",
   total: "",
   amount_paid: "0.00",
+  paid_via_credits: false,
   notes: "",
 };
 
@@ -508,6 +510,8 @@ const getInvoiceStatusColor = (status) => {
       return "text-gray-700 bg-gray-50 border-gray-100";
   }
 };
+
+const isInvoicePaidViaCredits = (invoice) => invoice?.paid_via_credits === true;
 
 const formatInvoiceListDate = (value) => {
   if (!value) {
@@ -2728,6 +2732,11 @@ export default function AdsPage() {
   const [advertiserEditModal, setAdvertiserEditModal] = useState(null);
   const [advertiserDeleteModal, setAdvertiserDeleteModal] = useState(null);
   const [advertiserActionLoading, setAdvertiserActionLoading] = useState(false);
+  const [advertiserCreditsLoading, setAdvertiserCreditsLoading] = useState(false);
+  const [advertiserCreditsForm, setAdvertiserCreditsForm] = useState({
+    amount: "",
+    reason: "",
+  });
   const [advertiserCreateOpen, setAdvertiserCreateOpen] = useState(false);
   const [advertiserCreateSource, setAdvertiserCreateSource] = useState("advertisers");
   const [advertiserCreateLoading, setAdvertiserCreateLoading] = useState(false);
@@ -3803,6 +3812,7 @@ export default function AdsPage() {
     return {
       advertiser,
       status,
+      paidViaCredits: isInvoicePaidViaCredits(invoicePreviewModal),
       invoiceNumber,
       issueDate,
       linkedAds,
@@ -3878,6 +3888,7 @@ export default function AdsPage() {
           <div style="margin-top:8px;"><span class="badge">${escapeHtml(
             getInvoiceStatusLabel(details.status).toUpperCase(),
           )}</span></div>
+          ${details.paidViaCredits ? '<div style="margin-top:8px;"><span class="badge" style="background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;">PAID VIA CREDITS</span></div>' : ""}
         </div>
       </div>
       <div class="section row">
@@ -3914,7 +3925,9 @@ export default function AdsPage() {
       </div>
       <div class="footer">
         <div class="title">Thank you for your business</div>
-        <div class="muted">Please include invoice #${escapeHtml(details.invoiceNumber)} in transfer description.</div>
+        <div class="muted">${details.paidViaCredits
+          ? "This invoice was fully covered by prepaid credits. No transfer is required."
+          : `Please include invoice #${escapeHtml(details.invoiceNumber)} in transfer description.`}</div>
       </div>
     </div>
   </body>
@@ -5588,6 +5601,10 @@ export default function AdsPage() {
       return { skipped: true, reason: "missing_invoice" };
     }
 
+    if (isInvoicePaidViaCredits(invoiceRecord)) {
+      return { skipped: true, reason: "paid_via_credits" };
+    }
+
     const resolvedAdRecord = resolveInvoiceReminderAdRecord(invoiceRecord);
     if (!resolvedAdRecord?.id) {
       return { skipped: true, reason: "missing_ad" };
@@ -5631,6 +5648,12 @@ export default function AdsPage() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
+        if (data?.reason === "paid_via_credits") {
+          return {
+            ...data,
+            skipped: true,
+          };
+        }
         return {
           skipped: false,
           error: data?.error || "Failed to send payment received notifications.",
@@ -7552,6 +7575,8 @@ export default function AdsPage() {
     });
     let paymentNoticeInvoiceId = "";
     let readyForPaymentReminderInvoice = null;
+    let creditApplicationResult = null;
+    let creditApplicationError = "";
     try {
       await run(async () => {
         const issueDate = getTodayInAppTimeZone();
@@ -7606,6 +7631,37 @@ export default function AdsPage() {
         }
         if (
           nextInvoiceStatus === "Pending" &&
+          hasSupabaseConfig
+        ) {
+          try {
+            const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                invoice_id: String(savedInvoice?.id || invoice.id || "").trim(),
+              }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(data?.error || "Failed to check prepaid credits.");
+            }
+            creditApplicationResult = data || null;
+            if (
+              !creditApplicationResult?.applied &&
+              !isInvoicePaidViaCredits(creditApplicationResult?.invoice)
+            ) {
+              if (!hasExistingInvoice || previousInvoiceStatus !== "Pending") {
+                readyForPaymentReminderInvoice = creditApplicationResult?.invoice || savedInvoice;
+              }
+            }
+          } catch (error) {
+            creditApplicationError =
+              error instanceof Error ? error.message : "Failed to check prepaid credits.";
+          }
+        } else if (
+          nextInvoiceStatus === "Pending" &&
           (!hasExistingInvoice || previousInvoiceStatus !== "Pending")
         ) {
           readyForPaymentReminderInvoice = savedInvoice;
@@ -7613,6 +7669,36 @@ export default function AdsPage() {
         setInvoice(createBlankInvoice());
         setView("list");
       }, "Invoice saved.");
+
+      if (creditApplicationResult?.invoice || creditApplicationResult?.applied) {
+        await refreshDbFromSupabase();
+      }
+
+      if (
+        creditApplicationResult?.applied ||
+        isInvoicePaidViaCredits(creditApplicationResult?.invoice)
+      ) {
+        appToast.success({
+          title: "Invoice paid via credits.",
+        });
+        if (
+          creditApplicationResult?.notice &&
+          creditApplicationResult.notice.skipped !== true &&
+          creditApplicationResult.notice?.advertiser_email_sent === false
+        ) {
+          appToast.warning({
+            title: "Credits applied, but the advertiser notice was not sent.",
+            description:
+              creditApplicationResult.notice?.advertiser_email_error ||
+              "Failed to send the credit notice email.",
+          });
+        }
+      } else if (creditApplicationError) {
+        appToast.warning({
+          title: "Invoice saved, but prepaid credit check failed.",
+          description: creditApplicationError,
+        });
+      }
 
       if (readyForPaymentReminderInvoice) {
         const readyReminderResult = await sendReadyForPaymentReminder({
@@ -8084,7 +8170,10 @@ export default function AdsPage() {
           });
           if (approvalEmailResult?.success) {
             appToast.success({
-              title: "Ready-for-payment email sent.",
+              title:
+                approvalEmailResult?.notice_type === "covered_by_credits"
+                  ? "Covered-by-credits email sent."
+                  : "Ready-for-payment email sent.",
               description: `Sent to ${approvalEmailResult.email || "the advertiser email"}.`,
             });
           } else if (approvalEmailResult?.error) {
@@ -8570,6 +8659,30 @@ export default function AdsPage() {
     );
   };
 
+  const buildAdvertiserViewModalState = (item, dbValue = db) => {
+    const advertiserAds = (dbValue?.ads || []).filter(
+      (adItem) =>
+        adItem.advertiser_id === item.id ||
+        (!adItem.advertiser_id &&
+          String(adItem.advertiser || "") === String(item.advertiser_name || "")),
+    );
+
+    return {
+      advertiser: {
+        ...item,
+        contact_name: item.contact_name || item.business_name || "\u2014",
+        phone_number: formatUSPhoneNumber(item.phone_number || item.phone || ""),
+        total_spend: Number(item.total_spend ?? item.ad_spend ?? 0) || 0,
+        credits: Number(item.credits || 0) || 0,
+        status: item.status || "active",
+      },
+      ads: advertiserAds.map((adItem) => ({
+        ...adItem,
+        post_date_from: adItem.post_date_from || adItem.post_date || "",
+      })),
+    };
+  };
+
   const openAdvertiserCreate = (source = "advertisers") => {
     setAdvertiserCreateForm({
       advertiser_name: "",
@@ -8598,32 +8711,81 @@ export default function AdsPage() {
   };
 
   const openAdvertiserView = (item) => {
-    const advertiserAds = ads.filter(
-      (adItem) =>
-        adItem.advertiser_id === item.id ||
-        (!adItem.advertiser_id &&
-          String(adItem.advertiser || "") === String(item.advertiser_name || "")),
-    );
-
-    setAdvertiserViewModal({
-      advertiser: {
-        ...item,
-        contact_name: item.contact_name || item.business_name || "\u2014",
-        phone_number: formatUSPhoneNumber(item.phone_number || item.phone || ""),
-        total_spend: Number(item.total_spend ?? item.ad_spend ?? 0) || 0,
-        status: item.status || "active",
-      },
-      ads: advertiserAds.map((adItem) => ({
-        ...adItem,
-        post_date_from: adItem.post_date_from || adItem.post_date || "",
-      })),
+    setAdvertiserCreditsForm({
+      amount: "",
+      reason: "",
     });
+    setAdvertiserViewModal(buildAdvertiserViewModalState(item));
     setOpenAdvertiserMenuId(null);
   };
 
   const closeAdvertiserCreate = () => {
     setAdvertiserCreateOpen(false);
     setAdvertiserCreateSource("advertisers");
+  };
+
+  const adjustAdvertiserCredits = async (direction) => {
+    const advertiserId = String(advertiserViewModal?.advertiser?.id || "").trim();
+    if (!advertiserId || !hasSupabaseConfig) {
+      return;
+    }
+
+    const absoluteAmount = Math.abs(
+      Number.parseFloat(String(advertiserCreditsForm.amount || "").trim()) || 0,
+    );
+    const reason = String(advertiserCreditsForm.reason || "").trim();
+    if (!absoluteAmount) {
+      appToast.error({ title: "Enter a credit amount." });
+      return;
+    }
+    if (!reason) {
+      appToast.error({ title: "Add a reason for this credit change." });
+      return;
+    }
+
+    const signedAmount = direction === "deduct" ? -absoluteAmount : absoluteAmount;
+    setAdvertiserCreditsLoading(true);
+    try {
+      const response = await fetchWithSessionAuth(
+        `/api/admin/advertisers/${advertiserId}/credits`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            amount: signedAmount,
+            reason,
+          }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to update advertiser credits.");
+      }
+
+      const nextDb = await refreshDbFromSupabase();
+      const updatedAdvertiser = (nextDb?.advertisers || []).find(
+        (item) => String(item?.id || "") === advertiserId,
+      );
+      if (updatedAdvertiser) {
+        setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
+      }
+      setAdvertiserCreditsForm({
+        amount: "",
+        reason: "",
+      });
+      appToast.success({
+        title: direction === "deduct" ? "Credits deducted." : "Credits added.",
+      });
+    } catch (error) {
+      appToast.error({
+        title:
+          error instanceof Error ? error.message : "Failed to update advertiser credits.",
+      });
+    } finally {
+      setAdvertiserCreditsLoading(false);
+    }
   };
 
   const saveAdvertiserModal = async () => {
@@ -11453,6 +11615,9 @@ export default function AdsPage() {
                             Total Spend
                           </th>
                           <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
+                            Credits
+                          </th>
+                          <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
                             Next Ad Date
                           </th>
                           <th className="text-left px-6 py-3 text-[11px] font-semibold text-gray-900">
@@ -11467,7 +11632,7 @@ export default function AdsPage() {
                         {filteredAdvertisers.length === 0 ? (
                           <tr>
                             <td
-                              colSpan={8}
+                              colSpan={9}
                               className="px-6 py-12 text-center text-xs text-gray-500"
                             >
                               {advertiserSearch
@@ -11519,6 +11684,11 @@ export default function AdsPage() {
                                 <td className="px-6 py-3.5">
                                   <div className="text-xs font-medium text-gray-900">
                                     {formatCurrency(item.total_spend ?? item.ad_spend ?? 0)}
+                                  </div>
+                                </td>
+                                <td className="px-6 py-3.5">
+                                  <div className="text-xs font-medium text-blue-700">
+                                    {formatCurrency(item.credits || 0)}
                                   </div>
                                 </td>
                                 <td className="px-6 py-3.5">
@@ -11713,6 +11883,12 @@ export default function AdsPage() {
                             </p>
                           </div>
                           <div>
+                            <p className="text-xs text-gray-500">Credits Balance</p>
+                            <p className="text-sm font-medium text-blue-700">
+                              {formatCurrency(advertiserViewModal.advertiser.credits || 0)}
+                            </p>
+                          </div>
+                          <div>
                             <p className="text-xs text-gray-500">Date Added</p>
                             <p className="text-sm font-medium text-gray-900">
                               {formatAdvertiserDate(advertiserViewModal.advertiser.created_at)}
@@ -11731,6 +11907,74 @@ export default function AdsPage() {
                                 ? "Active"
                                 : "Inactive"}
                             </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                          Credits Adjustment
+                        </h3>
+                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                Amount
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={advertiserCreditsForm.amount}
+                                onChange={(event) =>
+                                  setAdvertiserCreditsForm((current) => ({
+                                    ...current,
+                                    amount: event.target.value,
+                                  }))
+                                }
+                                placeholder="0.00"
+                                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                Reason
+                              </label>
+                              <input
+                                type="text"
+                                value={advertiserCreditsForm.reason}
+                                onChange={(event) =>
+                                  setAdvertiserCreditsForm((current) => ({
+                                    ...current,
+                                    reason: event.target.value,
+                                  }))
+                                }
+                                placeholder="Manual top-up, correction, etc."
+                                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void adjustAdvertiserCredits("add");
+                              }}
+                              disabled={advertiserCreditsLoading}
+                              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {advertiserCreditsLoading ? "Saving..." : "Add Credits"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void adjustAdvertiserCredits("deduct");
+                              }}
+                              disabled={advertiserCreditsLoading}
+                              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {advertiserCreditsLoading ? "Saving..." : "Deduct Credits"}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -12598,13 +12842,20 @@ export default function AdsPage() {
                                 </span>
                               </td>
                               <td className="px-6 py-4">
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
-                                    status,
-                                  )}`}
-                                >
-                                  {statusLabel}
-                                </span>
+                                <div className="flex flex-col items-start gap-1.5">
+                                  <span
+                                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border ${getInvoiceStatusColor(
+                                      status,
+                                    )}`}
+                                  >
+                                    {statusLabel}
+                                  </span>
+                                  {isInvoicePaidViaCredits(item) ? (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] font-semibold border border-blue-200 bg-blue-50 text-blue-700">
+                                      Paid via Credits
+                                    </span>
+                                  ) : null}
+                                </div>
                               </td>
                               <td className="px-6 py-4">
                                 <span className="text-xs text-gray-700 font-medium">
@@ -12783,6 +13034,11 @@ export default function AdsPage() {
                                     "",
                                 ).toUpperCase()}
                               </span>
+                              {isInvoicePaidViaCredits(invoicePreviewModal) ? (
+                                <span className="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700">
+                                  Paid via Credits
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -12817,7 +13073,9 @@ export default function AdsPage() {
                             </div>
                             <div>
                               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                                Amount Due
+                                {isInvoicePaidViaCredits(invoicePreviewModal)
+                                  ? "Amount Covered"
+                                  : "Amount Due"}
                               </div>
                               <div className="text-lg font-bold text-gray-900">
                                 {formatCurrency(invoicePreviewDetails?.total || 0)}
@@ -12875,9 +13133,15 @@ export default function AdsPage() {
                             Thank you for your business
                           </div>
                           <div className="text-xs text-gray-500 leading-relaxed">
-                            Please include invoice #
-                            {invoicePreviewDetails?.invoiceNumber || invoicePreviewModal.id} in
-                            transfer description.
+                            {isInvoicePaidViaCredits(invoicePreviewModal)
+                              ? "This invoice was fully covered by prepaid credits. No transfer is required."
+                              : (
+                                  <>
+                                    Please include invoice #
+                                    {invoicePreviewDetails?.invoiceNumber || invoicePreviewModal.id} in
+                                    transfer description.
+                                  </>
+                                )}
                           </div>
                         </div>
 
@@ -12980,6 +13244,23 @@ export default function AdsPage() {
                       </select>
                     </div>
 
+                    {selectedInvoiceAdvertiser ? (
+                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                          Prepaid Credits
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-blue-900">
+                          {formatCurrency(selectedInvoiceAdvertiser.credits || 0)}
+                        </div>
+                        <div className="mt-1 text-xs text-blue-800">
+                          {Number(selectedInvoiceAdvertiser.credits || 0) >= invoicePreviewAmount &&
+                          invoicePreviewAmount > 0
+                            ? "This balance can fully cover the current invoice total."
+                            : "Pending invoices are automatically paid by credits when the full balance covers the invoice total."}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs font-semibold text-gray-700 mb-2">
@@ -13056,12 +13337,18 @@ export default function AdsPage() {
                         onChange={(event) =>
                           setInvoice({ ...invoice, status: event.target.value })
                         }
+                        disabled={isInvoicePaidViaCredits(invoice)}
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
                         <option value="Paid">Paid</option>
                         <option value="Pending">Ready for Payment</option>
                         <option value="Overdue">Overdue</option>
                       </select>
+                      {isInvoicePaidViaCredits(invoice) ? (
+                        <p className="mt-2 text-xs text-blue-700">
+                          Credit-paid invoices stay marked as Paid.
+                        </p>
+                      ) : null}
                     </div>
 
                     <div className="flex gap-3">
@@ -13116,6 +13403,11 @@ export default function AdsPage() {
                       >
                         {getInvoiceStatusLabel(invoicePreviewStatus).toUpperCase()}
                       </div>
+                      {isInvoicePaidViaCredits(invoice) ? (
+                        <div className="mt-2 inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700">
+                          Paid via Credits
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -13148,7 +13440,7 @@ export default function AdsPage() {
                       </div>
                       <div>
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                          Amount Due
+                          {isInvoicePaidViaCredits(invoice) ? "Amount Covered" : "Amount Due"}
                         </div>
                         <div className="text-lg font-bold text-gray-900">
                           {formatCurrency(invoicePreviewAmount)}

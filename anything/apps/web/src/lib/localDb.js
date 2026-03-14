@@ -938,6 +938,7 @@ const fromAdvertiserRow = (row) => ({
   status: row.status || 'active',
   ad_spend: toMoney(row.ad_spend ?? row.total_spend),
   total_spend: toMoney(row.total_spend ?? row.ad_spend),
+  credits: toMoney(row.credits),
   next_ad_date: toDateOnly(row.next_ad_date),
   created_at: row.created_at || nowIso(),
   updated_at: row.updated_at || nowIso(),
@@ -954,6 +955,7 @@ const toAdvertiserRow = (input) => ({
   status: String(input.status || 'active'),
   ad_spend: toMoney(input.ad_spend ?? input.total_spend),
   total_spend: toMoney(input.total_spend ?? input.ad_spend),
+  credits: toMoney(input.credits),
   next_ad_date: toDateColumn(input.next_ad_date),
   created_at: input.created_at || nowIso(),
   updated_at: input.updated_at || nowIso(),
@@ -1153,6 +1155,7 @@ const fromInvoiceRow = (row) => {
     total: toMoney(row.total),
     notes: row.notes || '',
     amount_paid: toMoney(row.amount_paid),
+    paid_via_credits: Boolean(row.paid_via_credits),
     deleted_at: row.deleted_at || null,
     is_recurring: Boolean(row.is_recurring),
     recurring_period: row.recurring_period || '',
@@ -1181,6 +1184,7 @@ const toInvoiceRow = (input) => ({
   total: toMoney(input.total ?? input.amount),
   notes: String(input.notes || '').trim(),
   amount_paid: toMoney(input.amount_paid),
+  paid_via_credits: Boolean(input.paid_via_credits),
   deleted_at: input.deleted_at || null,
   is_recurring: Boolean(input.is_recurring),
   recurring_period: String(input.recurring_period || '').trim(),
@@ -1960,6 +1964,7 @@ export const upsertAdvertiser = async (input) => {
       status: input.status || 'active',
       ad_spend: toMoney(input.ad_spend ?? input.total_spend),
       total_spend: toMoney(input.total_spend ?? input.ad_spend),
+      credits: toMoney(input.credits),
       next_ad_date: toDateOnly(input.next_ad_date),
       created_at: input.created_at || now,
       updated_at: now,
@@ -2437,8 +2442,15 @@ export const upsertInvoice = async (input) => {
     }
 
     const status = input.status || 'Unpaid';
+    if (existing?.paid_via_credits && normalizeText(status) !== 'paid') {
+      throw new Error('Credit-paid invoices must remain marked as Paid.');
+    }
     const amountPaid =
       normalizeText(status) === 'paid' ? total : toMoney(input.amount_paid);
+    const paidViaCredits =
+      input.paid_via_credits !== undefined
+        ? Boolean(input.paid_via_credits)
+        : Boolean(existing?.paid_via_credits);
 
     const payload = {
       id: invoiceId,
@@ -2470,6 +2482,7 @@ export const upsertInvoice = async (input) => {
       total,
       notes: String(input.notes || '').trim(),
       amount_paid: amountPaid,
+      paid_via_credits: paidViaCredits,
       created_at: existing?.created_at || now,
       updated_at: now,
     };
@@ -2496,6 +2509,9 @@ export const deleteInvoice = async (invoiceId) => {
 
   await updateDb((db) => {
     const invoice = db.invoices.find((item) => sameId(item.id, normalizedInvoiceId));
+    if (invoice?.paid_via_credits) {
+      throw new Error('Credit-paid invoices cannot be deleted.');
+    }
     const linkedAdIds = invoice?.ad_ids || [];
     db.invoices = db.invoices.filter((item) => !sameId(item.id, normalizedInvoiceId));
     applyInvoiceLinks(db, normalizedInvoiceId, linkedAdIds, [], 'Unpaid');

@@ -73,5 +73,6 @@ export const advertiserResponse = (row) => ({
   phone_number: normalizeUSPhoneNumber(row?.phone_number ?? row?.phone ?? "") || null,
   phone: normalizeUSPhoneNumber(row?.phone ?? row?.phone_number ?? "") || null,
   total_spend: row?.total_spend ?? row?.ad_spend ?? 0,
+  credits: row?.credits ?? 0,
   status: row?.status ?? "active",
 });

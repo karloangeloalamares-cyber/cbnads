@@ -11,6 +11,7 @@ create table if not exists cbnads_web_advertisers (
   phone text,
   business_name text,
   ad_spend numeric(12,2) not null default 0,
+  credits numeric(12,2) not null default 0,
   next_ad_date date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -85,10 +86,25 @@ create table if not exists cbnads_web_invoices (
   amount numeric(12,2) not null default 0,
   due_date date,
   status text not null default 'Unpaid',
+  paid_via_credits boolean not null default false,
   paid_date date,
   ad_ids jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
+);
+
+create table if not exists cbnads_web_credit_ledger (
+  id uuid primary key default gen_random_uuid(),
+  advertiser_id uuid not null references cbnads_web_advertisers(id) on delete cascade,
+  invoice_id uuid references cbnads_web_invoices(id) on delete set null,
+  ad_id uuid references cbnads_web_ads(id) on delete set null,
+  amount numeric(12,2) not null,
+  balance_before numeric(12,2) not null,
+  balance_after numeric(12,2) not null,
+  entry_type text not null,
+  note text not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists cbnads_web_admin_settings (
@@ -120,6 +136,8 @@ create index if not exists idx_cbnads_web_ads_post_date on cbnads_web_ads(post_d
 create index if not exists idx_cbnads_web_ads_advertiser on cbnads_web_ads(advertiser_id);
 create index if not exists idx_cbnads_web_pending_ads_status on cbnads_web_pending_ads(status);
 create index if not exists idx_cbnads_web_invoices_advertiser on cbnads_web_invoices(advertiser_id);
+create index if not exists idx_cbnads_web_credit_ledger_advertiser on cbnads_web_credit_ledger(advertiser_id, created_at desc);
+create index if not exists idx_cbnads_web_credit_ledger_invoice on cbnads_web_credit_ledger(invoice_id);
 
 insert into cbnads_web_admin_settings (max_ads_per_slot, default_post_time)
 select 2, '09:00'
@@ -128,4 +146,3 @@ where not exists (select 1 from cbnads_web_admin_settings);
 insert into cbnads_web_notification_preferences (email_enabled, reminder_email)
 select false, ''
 where not exists (select 1 from cbnads_web_notification_preferences);
-

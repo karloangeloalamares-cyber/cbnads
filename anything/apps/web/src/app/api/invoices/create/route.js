@@ -1,6 +1,7 @@
 import { db, table, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
 import { nextSequentialInvoiceNumber } from "../../utils/invoice-helpers.js";
+import { applyInvoiceCredits } from "../../utils/prepaid-credits.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
@@ -57,6 +58,7 @@ export async function POST(request) {
     ];
 
     let invoice = null;
+    let creditApplication = null;
     try {
       const createInvoiceResult = await supabase
         .from(table("invoices"))
@@ -122,6 +124,18 @@ export async function POST(request) {
           .in("id", linkedAdIds);
         if (adUpdateError) throw adUpdateError;
       }
+
+      if (String(status).toLowerCase() === "pending") {
+        creditApplication = await applyInvoiceCredits({
+          supabase,
+          invoiceId: invoice.id,
+          actorUserId: auth.user.id,
+          note: "Prepaid credits applied automatically during invoice creation.",
+        });
+        if (creditApplication?.invoice) {
+          invoice = creditApplication.invoice;
+        }
+      }
     } catch (creationError) {
       if (invoice?.id) {
         await supabase.from(table("invoices")).delete().eq("id", invoice.id);
@@ -141,7 +155,14 @@ export async function POST(request) {
     }
 
     return Response.json(
-      { invoice: { ...invoice, items: invoiceItems || [] } },
+      {
+        invoice: {
+          ...invoice,
+          items: Array.isArray(invoice?.items) ? invoice.items : invoiceItems || [],
+        },
+        credits_applied: creditApplication?.applied === true,
+        credit_notice_type: creditApplication?.notice_type || "none",
+      },
       { status: 201 },
     );
   } catch (error) {

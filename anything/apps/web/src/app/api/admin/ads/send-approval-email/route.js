@@ -9,6 +9,11 @@ import {
   nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
+import {
+  applyInvoiceCredits,
+  sendInvoiceCoveredByCreditsNotice,
+  shouldSendCoveredCreditsNotice,
+} from "../../../utils/prepaid-credits.js";
 import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
@@ -395,13 +400,56 @@ export async function POST(request) {
       advertiser,
       bodyInvoiceId: body?.invoice_id,
     });
-    const invoice = invoiceResolution?.invoice || null;
+    let invoice = invoiceResolution?.invoice || null;
     const resolvedAd = invoiceResolution?.ad || ad;
     const invoiceCreated = Boolean(invoiceResolution?.invoiceCreated);
+    let creditApplication = null;
 
     if (!invoice?.id) {
       return Response.json(
         { error: "No linked invoice found for this ad. Please create an invoice first." },
+        { status: 409 },
+      );
+    }
+
+    if (normalizeText(invoice.status) === "pending") {
+      creditApplication = await applyInvoiceCredits({
+        supabase,
+        invoiceId: invoice.id,
+        actorUserId: admin.user.id,
+        note: "Prepaid credits applied automatically during ready-for-payment processing.",
+      });
+      if (creditApplication?.invoice) {
+        invoice = creditApplication.invoice;
+      }
+    }
+
+    if (shouldSendCoveredCreditsNotice(invoice)) {
+      const creditNotice = await sendInvoiceCoveredByCreditsNotice({
+        request,
+        supabase,
+        invoice,
+      });
+
+      return Response.json({
+        success: true,
+        email: creditNotice.email || advertiserEmail,
+        internal_emails: creditNotice.internal_emails || [],
+        internal_telegram_chat_ids: creditNotice.internal_telegram_chat_ids || [],
+        ad_id: resolvedAd.id,
+        invoice_id: invoice.id,
+        invoice_number: String(invoice.invoice_number || "").trim() || fallbackInvoiceNumber(),
+        amount_due: formatCurrency(0),
+        invoice_created: invoiceCreated,
+        invoice,
+        credits_applied: creditApplication?.applied === true || invoice.paid_via_credits === true,
+        notice_type: "covered_by_credits",
+      });
+    }
+
+    if (normalizeText(invoice.status) === "paid") {
+      return Response.json(
+        { error: "Invoice is already marked as paid." },
         { status: 409 },
       );
     }
@@ -579,6 +627,8 @@ export async function POST(request) {
       amount_due: amountDueText,
       invoice_created: invoiceCreated,
       invoice,
+      credits_applied: creditApplication?.applied === true,
+      notice_type: "ready_for_payment",
     });
   } catch (error) {
     console.error("[admin/ads/send-approval-email] Failed:", error);

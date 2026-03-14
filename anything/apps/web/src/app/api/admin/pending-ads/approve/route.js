@@ -15,6 +15,7 @@ import {
   nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
+import { applyInvoiceCredits } from "../../../utils/prepaid-credits.js";
 import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-dashboard-url.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 import { ensureAdvertiserRecord } from "../../../utils/advertiser-auth.js";
@@ -330,6 +331,7 @@ export async function POST(request) {
 
     let approvedInvoice = null;
     let approvedInvoiceAmount = invoiceAmount;
+    let creditApplication = null;
     try {
       const invoiceNumber = await nextSequentialInvoiceNumber(
         supabase,
@@ -443,6 +445,18 @@ export async function POST(request) {
         console.error("[approve] Unable to create invoice item:", invoiceItemError);
         throw invoiceItemError;
       }
+
+      creditApplication = await applyInvoiceCredits({
+        request,
+        supabase,
+        invoiceId: approvedInvoice.id,
+        actorUserId: admin.user.id,
+        note: "Prepaid credits applied automatically during pending ad approval.",
+        sendNotice: true,
+      });
+      if (creditApplication?.invoice) {
+        approvedInvoice = creditApplication.invoice;
+      }
     } catch (invoiceError) {
       console.error("[approve] Invoice creation failed. Rolling back ad:", invoiceError);
       if (approvedInvoice?.id) {
@@ -482,6 +496,17 @@ export async function POST(request) {
     });
 
     try {
+      if (creditApplication?.applied) {
+        return Response.json({
+          success: true,
+          ad: newAd,
+          advertiser_id: advertiserId,
+          invoice: approvedInvoice,
+          credits_applied: true,
+          credit_notice_type: creditApplication.notice_type,
+        });
+      }
+
       const advertiserEmailHTML = `
 <!DOCTYPE html>
 <html>
@@ -623,6 +648,8 @@ export async function POST(request) {
       ad: newAd,
       advertiser_id: advertiserId,
       invoice: approvedInvoice,
+      credits_applied: creditApplication?.applied === true,
+      credit_notice_type: creditApplication?.notice_type || "none",
     });
   } catch (error) {
     console.error("Error approving ad:", error);

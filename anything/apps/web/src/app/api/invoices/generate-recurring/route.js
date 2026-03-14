@@ -7,6 +7,7 @@ import {
   nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../utils/invoice-helpers.js";
+import { applyInvoiceCredits } from "../../utils/prepaid-credits.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 const inRange = (value, from, to) => {
@@ -172,6 +173,7 @@ export async function POST(request) {
     const total = toNumber(subtotal, 0);
 
     let invoice = null;
+    let creditApplication = null;
     try {
       const createInvoiceResult = await supabase
         .from(table("invoices"))
@@ -230,6 +232,16 @@ export async function POST(request) {
         })
         .in("id", ads.map((ad) => ad.id));
       if (updateAdsError) throw updateAdsError;
+
+      creditApplication = await applyInvoiceCredits({
+        supabase,
+        invoiceId: invoice.id,
+        actorUserId: admin.user.id,
+        note: "Prepaid credits applied automatically during recurring invoice generation.",
+      });
+      if (creditApplication?.invoice) {
+        invoice = creditApplication.invoice;
+      }
     } catch (creationError) {
       if (invoice?.id) {
         await supabase.from(table("invoices")).delete().eq("id", invoice.id);
@@ -241,6 +253,8 @@ export async function POST(request) {
       success: true,
       invoice,
       adsIncluded: ads.length,
+      credits_applied: creditApplication?.applied === true,
+      credit_notice_type: creditApplication?.notice_type || "none",
     });
   } catch (error) {
     console.error("Error generating recurring invoice:", error);

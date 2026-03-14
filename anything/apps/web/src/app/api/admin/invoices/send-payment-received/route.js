@@ -76,6 +76,17 @@ export async function POST(request) {
       return Response.json({ error: "Invoice not found." }, { status: 404 });
     }
 
+    if (invoice?.paid_via_credits === true) {
+      return Response.json(
+        {
+          skipped: true,
+          reason: "paid_via_credits",
+          error: "Payment-received notifications are not sent for credit-paid invoices.",
+        },
+        { status: 409 },
+      );
+    }
+
     if (normalizeStatus(invoice.status) !== "paid") {
       return Response.json(
         { error: "Invoice is not marked as paid yet." },
