@@ -13171,7 +13171,12 @@ export default function AdsPage() {
                               {isAdmin && (
                                 <td
                                   className="px-4 py-4"
-                                  onClick={(e) => e.stopPropagation()}
+                                  onClick={(event) => {
+                                    if (isInvoicePaidViaCredits(item)) {
+                                      return;
+                                    }
+                                    event.stopPropagation();
+                                  }}
                                 >
                                   <input
                                     type="checkbox"
