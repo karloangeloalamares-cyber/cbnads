@@ -11960,7 +11960,8 @@ export default function AdsPage() {
                             return (
                               <tr
                                 key={item.id}
-                                className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                                className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                                onClick={() => openAdvertiserView(item)}
                               >
                                 <td className="px-6 py-3.5">
                                   <div className="text-xs font-medium text-gray-900">
@@ -12018,7 +12019,10 @@ export default function AdsPage() {
                                     {isActive ? "Active" : "Inactive"}
                                   </span>
                                 </td>
-                                <td className="px-6 py-3.5 relative">
+                                <td
+                                  className="px-6 py-3.5 relative"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
                                   <button
                                     type="button"
                                     onClick={(event) => openAdvertiserMenu(item.id, event)}
