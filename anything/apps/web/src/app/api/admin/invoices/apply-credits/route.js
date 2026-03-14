@@ -39,7 +39,13 @@ export async function POST(request) {
   } catch (error) {
     console.error("Error applying prepaid credits:", error);
     return Response.json(
-      { error: "Failed to apply prepaid credits" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to apply prepaid credits",
+        code: error?.code || null,
+      },
       { status: 500 },
     );
   }
