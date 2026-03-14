@@ -2826,6 +2826,7 @@ export default function AdsPage() {
   const [invoice, setInvoice] = useState(() => createBlankInvoice());
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [invoiceCreditsApplying, setInvoiceCreditsApplying] = useState(false);
+  const [invoiceLowCreditSending, setInvoiceLowCreditSending] = useState(false);
   const [pendingInvoiceActionIds, setPendingInvoiceActionIds] = useState([]);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
@@ -3741,12 +3742,20 @@ export default function AdsPage() {
   const selectedAdvertiserCredits = Number(selectedInvoiceAdvertiser?.credits ?? 0) || 0;
   const creditsCoverInvoiceTotal =
     !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
+  const creditsInsufficientForInvoice =
+    !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits < invoicePreviewAmount;
   const canApplyCreditsToInvoice =
     !isCreditComposer &&
     Boolean(String(invoice?.id || "").trim()) &&
     !isInvoicePaidViaCredits(invoice) &&
     invoicePreviewStatus === "Pending" &&
     creditsCoverInvoiceTotal;
+  const canSendLowCreditReminder =
+    !isCreditComposer &&
+    Boolean(String(invoice?.id || "").trim()) &&
+    !isInvoicePaidViaCredits(invoice) &&
+    (invoicePreviewStatus === "Pending" || (invoicePreviewStatus === "Paid" && (Number(invoice?.amount_paid ?? 0) || 0) <= 0)) &&
+    creditsInsufficientForInvoice;
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
     const paidAds = ads.filter((item) => item.payment === "Paid");
@@ -8961,6 +8970,68 @@ export default function AdsPage() {
     }
   };
 
+  const sendLowCreditReminder = async () => {
+    const invoiceId = String(invoice?.id || "").trim();
+    if (!invoiceId) {
+      appToast.error({ title: "Save the invoice before sending this reminder." });
+      return;
+    }
+    if (!hasSupabaseConfig) {
+      appToast.error({ title: "Supabase configuration is required to send reminders." });
+      return;
+    }
+    if (invoiceLowCreditSending || invoiceSaving) {
+      return;
+    }
+    setInvoiceLowCreditSending(true);
+    try {
+      const response = await fetchWithSessionAuth(
+        "/api/admin/invoices/send-low-credit-reminder",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            invoice_id: invoiceId,
+          }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to send low credit reminder.");
+      }
+
+      const refreshedDb = await refreshDbFromSupabase();
+      const refreshedInvoice =
+        (refreshedDb?.invoices || []).find(
+          (item) => String(item?.id || "") === invoiceId,
+        ) || null;
+
+      if (refreshedInvoice) {
+        setInvoice({
+          ...createBlankInvoice(),
+          ...refreshedInvoice,
+          issue_date: getTodayInAppTimeZone(),
+          status: normalizeInvoiceStatus(refreshedInvoice.status),
+          ad_ids: toStringArray(refreshedInvoice.ad_ids),
+        });
+      }
+
+      appToast.success({
+        title: "Low credit reminder sent.",
+        description: data?.email ? `Sent to ${data.email}.` : undefined,
+      });
+    } catch (error) {
+      appToast.error({
+        title:
+          error instanceof Error ? error.message : "Failed to send low credit reminder.",
+      });
+    } finally {
+      setInvoiceLowCreditSending(false);
+    }
+  };
+
   const openBillingCreditsComposer = () => {
     const defaultAdvertiserId =
       String(advertiserViewModal?.advertiser?.id || "").trim() ||
@@ -13471,6 +13542,19 @@ export default function AdsPage() {
                                 className="inline-flex items-center justify-center self-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                               >
                                 {invoiceCreditsApplying ? "Applying..." : "Apply Credit"}
+                              </button>
+                            ) : !isCreditComposer && canSendLowCreditReminder ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void sendLowCreditReminder();
+                                }}
+                                disabled={invoiceLowCreditSending}
+                                className="inline-flex items-center justify-center self-center rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+                              >
+                                {invoiceLowCreditSending
+                                  ? "Sending..."
+                                  : "Send Low Credit Reminder"}
                               </button>
                             ) : null}
                           </div>
