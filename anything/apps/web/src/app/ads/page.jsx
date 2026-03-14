@@ -4986,10 +4986,7 @@ export default function AdsPage() {
   }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
 
   const deletableFilteredInvoiceIds = useMemo(
-    () =>
-      filteredInvoices
-        .filter((item) => !isInvoicePaidViaCredits(item))
-        .map((item) => String(item.id)),
+    () => filteredInvoices.map((item) => String(item.id)),
     [filteredInvoices],
   );
 
@@ -7569,13 +7566,6 @@ export default function AdsPage() {
       return;
     }
 
-    const invoiceRecord = invoices.find(
-      (item) => String(item?.id || "").trim() === normalizedInvoiceId,
-    );
-    if (invoiceRecord && isInvoicePaidViaCredits(invoiceRecord)) {
-      return;
-    }
-
     setSelectedInvoiceIds((prev) => {
       const next = new Set(prev);
       next.has(normalizedInvoiceId)
@@ -7616,9 +7606,6 @@ export default function AdsPage() {
         if (!invoiceRecord) {
           continue;
         }
-        if (isInvoicePaidViaCredits(invoiceRecord)) {
-          continue;
-        }
         cleaned.add(normalizedInvoiceId);
       }
 
@@ -7644,25 +7631,10 @@ export default function AdsPage() {
     const uniqueInvoiceIds = [...new Set(invoiceIds.map((id) => String(id || "").trim()))].filter(
       Boolean,
     );
-    const blockedCreditPaidInvoiceIds = [];
-    const deletableInvoiceIds = [];
-
-    for (const id of uniqueInvoiceIds) {
-      const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
-      if (invoiceRecord && isInvoicePaidViaCredits(invoiceRecord)) {
-        blockedCreditPaidInvoiceIds.push(id);
-        continue;
-      }
-      deletableInvoiceIds.push(id);
-    }
-
-    if (deletableInvoiceIds.length === 0) {
+    if (uniqueInvoiceIds.length === 0) {
       appToast.warning({
         title: "No invoices deleted",
-        description:
-          blockedCreditPaidInvoiceIds.length > 0
-            ? `${blockedCreditPaidInvoiceIds.length} invoice${blockedCreditPaidInvoiceIds.length > 1 ? "s" : ""} skipped (paid via credits).`
-            : "No valid invoices were selected.",
+        description: "No valid invoices were selected.",
       });
       return;
     }
@@ -7673,7 +7645,7 @@ export default function AdsPage() {
       const failedInvoiceIds = [];
       const failedMessages = [];
 
-      for (const id of deletableInvoiceIds) {
+      for (const id of uniqueInvoiceIds) {
         try {
           // eslint-disable-next-line no-await-in-loop
           await deleteInvoice(id);
@@ -13171,23 +13143,12 @@ export default function AdsPage() {
                               {isAdmin && (
                                 <td
                                   className="px-4 py-4"
-                                  onClick={(event) => {
-                                    if (isInvoicePaidViaCredits(item)) {
-                                      return;
-                                    }
-                                    event.stopPropagation();
-                                  }}
+                                  onClick={(event) => event.stopPropagation()}
                                 >
                                   <input
                                     type="checkbox"
                                     checked={selectedInvoiceIds.has(String(item.id))}
                                     onChange={() => handleToggleSelectInvoice(item.id)}
-                                    disabled={isInvoicePaidViaCredits(item)}
-                                    title={
-                                      isInvoicePaidViaCredits(item)
-                                        ? "Credit-paid invoices cannot be deleted."
-                                        : undefined
-                                    }
                                     className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                   />
                                 </td>
@@ -13323,15 +13284,7 @@ export default function AdsPage() {
                                               setOpenInvoiceMenuId(null);
                                               deleteInvoiceRecord(item.id);
                                             }}
-                                            disabled={
-                                              isInvoiceActionPending(item.id) ||
-                                              isInvoicePaidViaCredits(item)
-                                            }
-                                            title={
-                                              isInvoicePaidViaCredits(item)
-                                                ? "Credit-paid invoices cannot be deleted."
-                                                : undefined
-                                            }
+                                            disabled={isInvoiceActionPending(item.id)}
                                             className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                           >
                                             <Trash2 size={16} className="text-red-500" />

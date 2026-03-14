@@ -2509,9 +2509,25 @@ export const deleteInvoice = async (invoiceId) => {
 
   await updateDb((db) => {
     const invoice = db.invoices.find((item) => sameId(item.id, normalizedInvoiceId));
-    if (invoice?.paid_via_credits) {
-      throw new Error('Credit-paid invoices cannot be deleted.');
+    if (!invoice) {
+      return db;
     }
+
+    if (invoice.paid_via_credits && invoice.advertiser_id) {
+      const creditRefund = numberOrZero(invoice.total ?? invoice.amount ?? invoice.amount_paid);
+      if (creditRefund > 0) {
+        db.advertisers = db.advertisers.map((advertiser) =>
+          sameId(advertiser.id, invoice.advertiser_id)
+            ? {
+              ...advertiser,
+              credits: toMoney(numberOrZero(advertiser.credits) + creditRefund),
+              updated_at: nowIso(),
+            }
+            : advertiser,
+        );
+      }
+    }
+
     const linkedAdIds = invoice?.ad_ids || [];
     db.invoices = db.invoices.filter((item) => !sameId(item.id, normalizedInvoiceId));
     applyInvoiceLinks(db, normalizedInvoiceId, linkedAdIds, [], 'Unpaid');

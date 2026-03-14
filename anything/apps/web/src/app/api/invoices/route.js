@@ -3,6 +3,7 @@ import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
+  requireAdmin,
   requireAuth,
   requirePermission,
   resolveAdvertiserScope,
@@ -314,7 +315,7 @@ export async function DELETE(request) {
 
     const { data: invoice, error: invoiceError } = await supabase
       .from(table("invoices"))
-      .select("id, advertiser_id")
+      .select("id, advertiser_id, invoice_number, paid_via_credits, total, amount, amount_paid")
       .eq("id", id)
       .maybeSingle();
     if (invoiceError) throw invoiceError;
@@ -340,9 +341,31 @@ export async function DELETE(request) {
     if (adIds.length > 0) {
       const { error: unlinkError } = await supabase
         .from(table("ads"))
-        .update({ paid_via_invoice_id: null })
+        .update({
+          invoice_id: null,
+          paid_via_invoice_id: null,
+          payment: "Unpaid",
+          updated_at: new Date().toISOString(),
+        })
         .in("id", adIds);
       if (unlinkError) throw unlinkError;
+    }
+
+    if (invoice.paid_via_credits === true && invoice.advertiser_id) {
+      const refundAmount = toNumber(invoice.total ?? invoice.amount ?? invoice.amount_paid, 0);
+      if (refundAmount > 0) {
+        const refundNote = `Prepaid credits restored after deleting invoice ${invoice.invoice_number || invoice.id}`;
+        const { error: refundError } = await supabase.rpc("cbnads_web_adjust_prepaid_credits", {
+          p_advertiser_id: invoice.advertiser_id,
+          p_amount: refundAmount,
+          p_entry_type: "invoice_delete_credit_refund",
+          p_note: refundNote,
+          p_created_by: admin.user?.id || null,
+          p_invoice_id: invoice.id,
+          p_ad_id: null,
+        });
+        if (refundError) throw refundError;
+      }
     }
 
     if (invoice.advertiser_id) {
