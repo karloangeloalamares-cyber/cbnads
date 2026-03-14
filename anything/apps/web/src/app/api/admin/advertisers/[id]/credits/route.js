@@ -2,7 +2,7 @@ import { requirePermission } from "../../../../utils/auth-check.js";
 import { advertiserResponse, db, table, toNumber } from "../../../../utils/supabase-db.js";
 import { isCreditRuleViolation } from "../../../../utils/prepaid-credits.js";
 import { nextSequentialInvoiceNumber } from "../../../../utils/invoice-helpers.js";
-import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
+import { getTodayInAppTimeZone } from "../../../../../../lib/timezone.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
