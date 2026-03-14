@@ -13436,7 +13436,7 @@ export default function AdsPage() {
                                   void applyCreditsToInvoice();
                                 }}
                                 disabled={invoiceCreditsApplying}
-                                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                                className="inline-flex items-center justify-center self-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                               >
                                 {invoiceCreditsApplying ? "Applying..." : "Apply Credit"}
                               </button>
