@@ -2770,13 +2770,7 @@ export default function AdsPage() {
     left: 0,
   });
   const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
-  const [billingCreditsModalOpen, setBillingCreditsModalOpen] = useState(false);
-  const [billingCreditsLoading, setBillingCreditsLoading] = useState(false);
-  const [billingCreditsForm, setBillingCreditsForm] = useState({
-    advertiser_id: "",
-    amount: "",
-    reason: "",
-  });
+  const [billingComposerMode, setBillingComposerMode] = useState("invoice");
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
   const [submissionEditModal, setSubmissionEditModal] = useState(null);
   const [submissionEditForm, setSubmissionEditForm] = useState(blankSubmissionEditForm);
@@ -3665,7 +3659,22 @@ export default function AdsPage() {
     [ads, invoice.ad_ids, invoice.items],
   );
 
+  const isCreditComposer = billingComposerMode === "credit";
+
   const invoicePreviewItems = useMemo(() => {
+    if (isCreditComposer) {
+      return [
+        {
+          key: "credit-top-up",
+          title: "Prepaid credit top-up",
+          detail:
+            String(invoice.notes || "").trim() ||
+            "Credits will be added to the advertiser balance.",
+          amount: Number(invoice.amount || invoice.total || 0) || 0,
+        },
+      ];
+    }
+
     const invoiceItems = Array.isArray(invoice.items) ? invoice.items : [];
     if (invoiceItems.length > 0) {
       return invoiceItems.map((item, index) => ({
@@ -3700,9 +3709,11 @@ export default function AdsPage() {
       },
     ];
   }, [
+    isCreditComposer,
     invoice.items,
     invoice.amount,
     invoice.total,
+    invoice.notes,
     invoicePreviewLinkedAds,
     selectedInvoiceAdvertiser?.advertiser_name,
   ]);
@@ -4987,9 +4998,11 @@ export default function AdsPage() {
     try {
       await fn();
       setDb(readDb());
-      appToast.success({
-        title: successText,
-      });
+      if (successText) {
+        appToast.success({
+          title: successText,
+        });
+      }
     } catch (error) {
       console.error("[AdsPage] Action failed", error);
       appToast.error({
@@ -7336,6 +7349,7 @@ export default function AdsPage() {
     if (!isAdmin) {
       return;
     }
+    setBillingComposerMode("invoice");
     setInvoice({
       ...createBlankInvoice(),
       ...item,
@@ -7586,6 +7600,50 @@ export default function AdsPage() {
     let creditApplicationError = "";
     try {
       await run(async () => {
+        if (isCreditComposer) {
+          const advertiserId = String(invoice.advertiser_id || "").trim();
+          const absoluteAmount = Math.abs(
+            Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0,
+          );
+          const reason = String(invoice.notes || "").trim();
+
+          if (!advertiserId) {
+            throw new Error("Advertiser required");
+          }
+          if (!absoluteAmount) {
+            throw new Error("Enter a credit amount.");
+          }
+          if (!reason) {
+            throw new Error("Reason required");
+          }
+
+          const { data, updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
+            advertiserId,
+            amount: absoluteAmount,
+            reason,
+          });
+
+          if (
+            advertiserViewModal?.advertiser?.id &&
+            String(advertiserViewModal.advertiser.id) === advertiserId &&
+            updatedAdvertiser
+          ) {
+            setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
+          }
+
+          setBillingComposerMode("invoice");
+          setInvoice(createBlankInvoice());
+          setView("list");
+
+          appToast.success({
+            title: "Credits added.",
+            description: data?.credit_invoice?.invoice_number
+              ? `Recorded as ${data.credit_invoice.invoice_number}.`
+              : undefined,
+          });
+          return;
+        }
+
         const issueDate = getTodayInAppTimeZone();
         if (!invoice.advertiser_id) {
           throw new Error("Advertiser required");
@@ -7674,8 +7732,9 @@ export default function AdsPage() {
           readyForPaymentReminderInvoice = savedInvoice;
         }
         setInvoice(createBlankInvoice());
+        setBillingComposerMode("invoice");
         setView("list");
-      }, "Invoice saved.");
+      }, isCreditComposer ? "" : "Invoice saved.");
 
       if (creditApplicationResult?.invoice || creditApplicationResult?.applied) {
         await refreshDbFromSupabase();
@@ -8228,6 +8287,7 @@ export default function AdsPage() {
         }
 
         if (mode === "continue") {
+          setBillingComposerMode("invoice");
           const linkedInvoiceId =
             savedAd?.paid_via_invoice_id ||
             savedAd?.invoice_id ||
@@ -8771,78 +8831,22 @@ export default function AdsPage() {
     return { data, nextDb, updatedAdvertiser };
   };
 
-  const openBillingCreditsModal = () => {
+  const openBillingCreditsComposer = () => {
     const defaultAdvertiserId =
       String(advertiserViewModal?.advertiser?.id || "").trim() ||
       String(advertisers?.[0]?.id || "").trim() ||
       "";
-    setBillingCreditsForm({
+    setBillingComposerMode("credit");
+    setInvoice({
+      ...createBlankInvoice(),
       advertiser_id: defaultAdvertiserId,
       amount: "",
-      reason: "",
+      total: "",
+      status: "Paid",
+      notes: "",
     });
-    setBillingCreditsModalOpen(true);
+    setView("newInvoice");
     setShowInvoiceCreateMenu(false);
-  };
-
-  const submitBillingCreditsTopUp = async () => {
-    if (!isAdmin || billingCreditsLoading) {
-      return;
-    }
-
-    const advertiserId = String(billingCreditsForm.advertiser_id || "").trim();
-    const absoluteAmount = Math.abs(
-      Number.parseFloat(String(billingCreditsForm.amount || "").trim()) || 0,
-    );
-    const reason = String(billingCreditsForm.reason || "").trim();
-
-    if (!advertiserId) {
-      appToast.error({ title: "Select an advertiser." });
-      return;
-    }
-    if (!absoluteAmount) {
-      appToast.error({ title: "Enter a credit amount." });
-      return;
-    }
-    if (!reason) {
-      appToast.error({ title: "Add a reason for this credit top-up." });
-      return;
-    }
-
-    setBillingCreditsLoading(true);
-    try {
-      const { data, updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
-        advertiserId,
-        amount: absoluteAmount,
-        reason,
-      });
-      if (
-        advertiserViewModal?.advertiser?.id &&
-        String(advertiserViewModal.advertiser.id) === advertiserId &&
-        updatedAdvertiser
-      ) {
-        setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
-      }
-      setBillingCreditsModalOpen(false);
-      setBillingCreditsForm({
-        advertiser_id: "",
-        amount: "",
-        reason: "",
-      });
-      appToast.success({
-        title: "Credits added.",
-        description: data?.credit_invoice?.invoice_number
-          ? `Recorded as ${data.credit_invoice.invoice_number}.`
-          : undefined,
-      });
-    } catch (error) {
-      appToast.error({
-        title:
-          error instanceof Error ? error.message : "Failed to update advertiser credits.",
-      });
-    } finally {
-      setBillingCreditsLoading(false);
-    }
   };
 
   const adjustAdvertiserCredits = async (direction) => {
@@ -12667,7 +12671,7 @@ export default function AdsPage() {
                 {isAdmin ? (
                   <button
                     type="button"
-                    onClick={openBillingCreditsModal}
+                    onClick={openBillingCreditsComposer}
                     className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
                   >
                     <Plus size={16} />
@@ -12762,7 +12766,7 @@ export default function AdsPage() {
                   {isAdmin ? (
                     <button
                       type="button"
-                      onClick={openBillingCreditsModal}
+                      onClick={openBillingCreditsComposer}
                       className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
                     >
                       Add Credits
@@ -13236,6 +13240,7 @@ export default function AdsPage() {
                 type="button"
                 onClick={() => {
                   setView("list");
+                  setBillingComposerMode("invoice");
                   setInvoice(createBlankInvoice());
                 }}
                 disabled={invoiceSaving}
@@ -13248,10 +13253,16 @@ export default function AdsPage() {
               <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-8">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
                   <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-                    {invoice.id ? "Edit Invoice" : "Create Invoice"}
+                    {invoice.id
+                      ? "Edit Invoice"
+                      : isCreditComposer
+                        ? "Add Credits"
+                        : "Create Invoice"}
                   </h2>
                   <p className="text-sm text-gray-500 mb-8">
-                    Select an advertiser and include linked ads for billing
+                    {isCreditComposer
+                      ? "Create a CRE-prefixed billing record and add prepaid credits to an advertiser."
+                      : "Select an advertiser and include linked ads for billing"}
                   </p>
 
                   <div className="space-y-6">
@@ -13263,11 +13274,17 @@ export default function AdsPage() {
                         type="text"
                         value={invoice.invoice_number}
                         readOnly
-                        placeholder="Auto-generated on save"
+                        placeholder={
+                          isCreditComposer
+                            ? "Auto-generated as CRE on save"
+                            : "Auto-generated on save"
+                        }
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700 focus:outline-none transition-all"
                       />
                       <p className="mt-2 text-xs text-gray-500">
-                        Invoice numbers are assigned automatically and cannot be edited.
+                        {isCreditComposer
+                          ? "Credit records are assigned a CRE number automatically and cannot be edited."
+                          : "Invoice numbers are assigned automatically and cannot be edited."}
                       </p>
                     </div>
 
@@ -13298,16 +13315,20 @@ export default function AdsPage() {
                     {selectedInvoiceAdvertiser ? (
                       <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
                         <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                          Prepaid Credits
+                          {isCreditComposer ? "Current Credit Balance" : "Prepaid Credits"}
                         </div>
                         <div className="mt-1 text-sm font-semibold text-blue-900">
                           {formatCurrency(selectedInvoiceAdvertiser.credits || 0)}
                         </div>
                         <div className="mt-1 text-xs text-blue-800">
-                          {Number(selectedInvoiceAdvertiser.credits || 0) >= invoicePreviewAmount &&
-                          invoicePreviewAmount > 0
-                            ? "This balance can fully cover the current invoice total."
-                            : "Pending invoices are automatically paid by credits when the full balance covers the invoice total."}
+                          {isCreditComposer
+                            ? `Balance after top-up: ${formatCurrency(
+                                Number(selectedInvoiceAdvertiser.credits || 0) + invoicePreviewAmount,
+                              )}`
+                            : Number(selectedInvoiceAdvertiser.credits || 0) >= invoicePreviewAmount &&
+                                invoicePreviewAmount > 0
+                              ? "This balance can fully cover the current invoice total."
+                              : "Pending invoices are automatically paid by credits when the full balance covers the invoice total."}
                         </div>
                       </div>
                     ) : null}
@@ -13323,6 +13344,15 @@ export default function AdsPage() {
                           value={invoice.amount}
                           onChange={(event) => {
                             const nextAmountText = event.target.value;
+                            if (isCreditComposer) {
+                              setInvoice({
+                                ...invoice,
+                                amount: nextAmountText,
+                                total: nextAmountText,
+                                status: "Paid",
+                              });
+                              return;
+                            }
                             const parsedAmount = Number.parseFloat(
                               String(nextAmountText || "").trim(),
                             );
@@ -13379,23 +13409,48 @@ export default function AdsPage() {
                       </div>
                     </div>
 
+                    {isCreditComposer ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                          Reason
+                        </label>
+                        <input
+                          type="text"
+                          value={invoice.notes}
+                          onChange={(event) =>
+                            setInvoice({
+                              ...invoice,
+                              notes: event.target.value,
+                              status: "Paid",
+                            })
+                          }
+                          placeholder="Manual credit top-up"
+                          className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                        />
+                      </div>
+                    ) : null}
+
                     <div>
                       <label className="block text-xs font-semibold text-gray-700 mb-2">
                         Status
                       </label>
                       <select
-                        value={normalizeInvoiceStatus(invoice.status)}
+                        value={isCreditComposer ? "Paid" : normalizeInvoiceStatus(invoice.status)}
                         onChange={(event) =>
                           setInvoice({ ...invoice, status: event.target.value })
                         }
-                        disabled={isInvoicePaidViaCredits(invoice)}
+                        disabled={isCreditComposer || isInvoicePaidViaCredits(invoice)}
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
                         <option value="Paid">Paid</option>
                         <option value="Pending">Ready for Payment</option>
                         <option value="Overdue">Overdue</option>
                       </select>
-                      {isInvoicePaidViaCredits(invoice) ? (
+                      {isCreditComposer ? (
+                        <p className="mt-2 text-xs text-blue-700">
+                          Credit top-up records stay marked as Paid.
+                        </p>
+                      ) : isInvoicePaidViaCredits(invoice) ? (
                         <p className="mt-2 text-xs text-blue-700">
                           Credit-paid invoices stay marked as Paid.
                         </p>
@@ -13409,11 +13464,20 @@ export default function AdsPage() {
                         disabled={invoiceSaving}
                         className="rounded-lg bg-black px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        {invoiceSaving ? "Submitting..." : "Save Invoice"}
+                        {invoiceSaving
+                          ? "Submitting..."
+                          : isCreditComposer
+                            ? "Add Credits"
+                            : "Save Invoice"}
                       </button>
                       <button
                         type="button"
-                        onClick={() => setInvoice(createBlankInvoice())}
+                        onClick={() =>
+                          setInvoice({
+                            ...createBlankInvoice(),
+                            status: isCreditComposer ? "Paid" : "Pending",
+                          })
+                        }
                         disabled={invoiceSaving}
                         className="rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -13425,7 +13489,7 @@ export default function AdsPage() {
 
                 <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-10 h-fit sticky top-8">
                   <div className="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    Invoice Preview
+                    {isCreditComposer ? "Credit Preview" : "Invoice Preview"}
                   </div>
 
                   <div className="flex items-start justify-between mb-10 pb-8 border-b border-gray-200">
@@ -13445,7 +13509,7 @@ export default function AdsPage() {
                     </div>
                     <div className="text-right">
                       <div className="text-xs text-gray-500 mb-2">
-                        {invoice.invoice_number || "New Invoice"}
+                        {invoice.invoice_number || (isCreditComposer ? "New Credit Entry" : "New Invoice")}
                       </div>
                       <div
                         className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getInvoiceStatusColor(
@@ -13491,7 +13555,11 @@ export default function AdsPage() {
                       </div>
                       <div>
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                          {isInvoicePaidViaCredits(invoice) ? "Amount Covered" : "Amount Due"}
+                          {isCreditComposer
+                            ? "Credit Amount"
+                            : isInvoicePaidViaCredits(invoice)
+                              ? "Amount Covered"
+                              : "Amount Due"}
                         </div>
                         <div className="text-lg font-bold text-gray-900">
                           {formatCurrency(invoicePreviewAmount)}
@@ -13565,8 +13633,9 @@ export default function AdsPage() {
                       Thank you for your business
                     </div>
                     <div className="text-xs text-gray-500 leading-relaxed">
-                      Payment is due upon receipt. Please include invoice number in transfer
-                      description.
+                      {isCreditComposer
+                        ? "These credits will be added to the advertiser balance when you save."
+                        : "Payment is due upon receipt. Please include invoice number in transfer description."}
                     </div>
                   </div>
                 </div>
@@ -14591,116 +14660,6 @@ export default function AdsPage() {
             </div>
           )}
         </main>
-
-        <Modal
-          isOpen={billingCreditsModalOpen}
-          onClose={() => {
-            if (!billingCreditsLoading) {
-              setBillingCreditsModalOpen(false);
-            }
-          }}
-          size="md"
-        >
-          <div className="p-6">
-            <div className="mb-4">
-              <h2 className="text-xl font-semibold text-gray-900">Add Credits</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Top up advertiser prepaid credits. Invoices are generated from approved ads.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Advertiser
-                </label>
-                <select
-                  value={billingCreditsForm.advertiser_id}
-                  onChange={(event) =>
-                    setBillingCreditsForm((current) => ({
-                      ...current,
-                      advertiser_id: event.target.value,
-                    }))
-                  }
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
-                  disabled={billingCreditsLoading}
-                >
-                  <option value="">Select advertiser</option>
-                  {[...(Array.isArray(advertisers) ? advertisers : [])]
-                    .sort((left, right) =>
-                      String(left?.advertiser_name || "")
-                        .toLowerCase()
-                        .localeCompare(String(right?.advertiser_name || "").toLowerCase()),
-                    )
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.advertiser_name || "Unnamed advertiser"}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Amount
-                </label>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={billingCreditsForm.amount}
-                  onChange={(event) =>
-                    setBillingCreditsForm((current) => ({
-                      ...current,
-                      amount: event.target.value,
-                    }))
-                  }
-                  placeholder="0.00"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
-                  disabled={billingCreditsLoading}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Reason
-                </label>
-                <input
-                  type="text"
-                  value={billingCreditsForm.reason}
-                  onChange={(event) =>
-                    setBillingCreditsForm((current) => ({
-                      ...current,
-                      reason: event.target.value,
-                    }))
-                  }
-                  placeholder="Manual top-up"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
-                  disabled={billingCreditsLoading}
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setBillingCreditsModalOpen(false)}
-                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
-                disabled={billingCreditsLoading}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitBillingCreditsTopUp}
-                className="px-4 py-2 rounded-lg bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
-                disabled={billingCreditsLoading}
-              >
-                {billingCreditsLoading ? "Adding..." : "Add Credits"}
-              </button>
-            </div>
-          </div>
-        </Modal>
 
         <Modal
           isOpen={Boolean(submissionEditModal)}
