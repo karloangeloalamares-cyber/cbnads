@@ -2825,6 +2825,7 @@ export default function AdsPage() {
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(() => createBlankInvoice());
   const [invoiceSaving, setInvoiceSaving] = useState(false);
+  const [invoiceCreditsApplying, setInvoiceCreditsApplying] = useState(false);
   const [pendingInvoiceActionIds, setPendingInvoiceActionIds] = useState([]);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
@@ -3737,6 +3738,15 @@ export default function AdsPage() {
     () => Math.max(0, invoicePreviewSubtotal - invoicePreviewDiscount + invoicePreviewTax),
     [invoicePreviewDiscount, invoicePreviewSubtotal, invoicePreviewTax],
   );
+  const selectedAdvertiserCredits = Number(selectedInvoiceAdvertiser?.credits ?? 0) || 0;
+  const creditsCoverInvoiceTotal =
+    !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
+  const canApplyCreditsToInvoice =
+    !isCreditComposer &&
+    Boolean(String(invoice?.id || "").trim()) &&
+    !isInvoicePaidViaCredits(invoice) &&
+    invoicePreviewStatus === "Pending" &&
+    creditsCoverInvoiceTotal;
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
     const paidAds = ads.filter((item) => item.payment === "Paid");
@@ -8841,6 +8851,84 @@ export default function AdsPage() {
     return { data, nextDb, updatedAdvertiser };
   };
 
+  const applyCreditsToInvoice = async () => {
+    const invoiceId = String(invoice?.id || "").trim();
+    if (!invoiceId) {
+      appToast.error({ title: "Save the invoice before applying credits." });
+      return;
+    }
+    if (!hasSupabaseConfig) {
+      appToast.error({ title: "Supabase configuration is required to apply credits." });
+      return;
+    }
+    if (invoiceCreditsApplying) {
+      return;
+    }
+    setInvoiceCreditsApplying(true);
+    try {
+      const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          invoice_id: invoiceId,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to apply credits.");
+      }
+
+      const refreshedDb = await refreshDbFromSupabase();
+      const refreshedInvoice =
+        (refreshedDb?.invoices || []).find(
+          (item) => String(item?.id || "") === invoiceId,
+        ) || null;
+
+      if (refreshedInvoice) {
+        setInvoice({
+          ...createBlankInvoice(),
+          ...refreshedInvoice,
+          issue_date: getTodayInAppTimeZone(),
+          status: normalizeInvoiceStatus(refreshedInvoice.status),
+          ad_ids: toStringArray(refreshedInvoice.ad_ids),
+        });
+      }
+
+      if (
+        data?.applied ||
+        isInvoicePaidViaCredits(data?.invoice) ||
+        isInvoicePaidViaCredits(refreshedInvoice)
+      ) {
+        appToast.success({ title: "Invoice paid via credits." });
+      } else {
+        appToast.warning({
+          title: "Credits were not applied.",
+          description: data?.reason || "The invoice remains pending.",
+        });
+      }
+
+      if (
+        data?.notice &&
+        data.notice.skipped !== true &&
+        data.notice?.advertiser_email_sent === false
+      ) {
+        appToast.warning({
+          title: "Credits applied, but the advertiser notice was not sent.",
+          description:
+            data.notice?.advertiser_email_error || "Failed to send the credit notice email.",
+        });
+      }
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to apply credits.",
+      });
+    } finally {
+      setInvoiceCreditsApplying(false);
+    }
+  };
+
   const openBillingCreditsComposer = () => {
     const defaultAdvertiserId =
       String(advertiserViewModal?.advertiser?.id || "").trim() ||
@@ -13330,26 +13418,43 @@ export default function AdsPage() {
                       </select>
                     </div>
 
-                    {selectedInvoiceAdvertiser ? (
-                      <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                          {isCreditComposer ? "Current Credit Balance" : "Prepaid Credits"}
+                      {selectedInvoiceAdvertiser ? (
+                        <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                {isCreditComposer ? "Current Credit Balance" : "Prepaid Credits"}
+                              </div>
+                              <div className="mt-1 text-sm font-semibold text-blue-900">
+                                {formatCurrency(selectedAdvertiserCredits)}
+                              </div>
+                            </div>
+                            {!isCreditComposer && canApplyCreditsToInvoice ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void applyCreditsToInvoice();
+                                }}
+                                disabled={invoiceCreditsApplying}
+                                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {invoiceCreditsApplying ? "Applying..." : "Apply Credit"}
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="mt-2 text-xs text-blue-800">
+                            {isCreditComposer
+                              ? `Balance after top-up: ${formatCurrency(
+                                  selectedAdvertiserCredits + invoicePreviewAmount,
+                                )}`
+                              : invoicePreviewAmount <= 0
+                                ? "Enter an invoice total to check credit coverage."
+                                : creditsCoverInvoiceTotal
+                                  ? "This balance can fully cover the current invoice total."
+                                  : "Available credits are not enough to cover the current invoice total."}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm font-semibold text-blue-900">
-                          {formatCurrency(selectedInvoiceAdvertiser.credits || 0)}
-                        </div>
-                        <div className="mt-1 text-xs text-blue-800">
-                          {isCreditComposer
-                            ? `Balance after top-up: ${formatCurrency(
-                                Number(selectedInvoiceAdvertiser.credits || 0) + invoicePreviewAmount,
-                              )}`
-                            : Number(selectedInvoiceAdvertiser.credits || 0) >= invoicePreviewAmount &&
-                                invoicePreviewAmount > 0
-                              ? "This balance can fully cover the current invoice total."
-                              : "Pending invoices are automatically paid by credits when the full balance covers the invoice total."}
-                        </div>
-                      </div>
-                    ) : null}
+                      ) : null}
 
                     <div className="grid grid-cols-2 gap-4">
                       <div>
