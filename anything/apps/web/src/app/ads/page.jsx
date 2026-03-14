@@ -7545,12 +7545,22 @@ export default function AdsPage() {
       duration: Infinity,
     });
     try {
+      const invoiceRecord = invoices.find(
+        (item) => String(item?.id || "").trim() === normalizedInvoiceId,
+      );
+      const refundedCredits = isInvoicePaidViaCredits(invoiceRecord);
       await run(async () => {
         await deleteInvoice(normalizedInvoiceId);
         if (String(invoicePreviewModal?.id || "").trim() === normalizedInvoiceId) {
           setInvoicePreviewModal(null);
         }
-      }, "Invoice deleted.");
+      });
+      appToast.success({
+        title: "Invoice deleted.",
+        description: refundedCredits
+          ? "Paid credits were refunded to the advertiser."
+          : "",
+      });
     } finally {
       appToast.dismiss(toastId);
       pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
@@ -7671,14 +7681,6 @@ export default function AdsPage() {
         return;
       }
 
-      if (deletedInvoiceIds.length === 0 && blockedCreditPaidInvoiceIds.length > 0) {
-        appToast.warning({
-          title: "No invoices deleted",
-          description: `${blockedCreditPaidInvoiceIds.length} invoice${blockedCreditPaidInvoiceIds.length > 1 ? "s" : ""} skipped (paid via credits).`,
-        });
-        return;
-      }
-
       if (deletedInvoiceIds.length === 0) {
         appToast.warning({
           title: "No invoices deleted",
@@ -7687,12 +7689,15 @@ export default function AdsPage() {
         return;
       }
 
-      const skippedCount = blockedCreditPaidInvoiceIds.length;
+      const refundedCount = deletedInvoiceIds.filter((id) => {
+        const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
+        return Boolean(invoiceRecord && isInvoicePaidViaCredits(invoiceRecord));
+      }).length;
       appToast.success({
         title: `${deletedInvoiceIds.length} invoice${deletedInvoiceIds.length > 1 ? "s" : ""} deleted`,
         description:
-          skippedCount > 0
-            ? `${skippedCount} invoice${skippedCount > 1 ? "s" : ""} skipped (paid via credits).`
+          refundedCount > 0
+            ? `Credits refunded for ${refundedCount} deleted invoice${refundedCount > 1 ? "s" : ""} that were paid via credits.`
             : "",
       });
     } finally {
@@ -7703,25 +7708,17 @@ export default function AdsPage() {
   const handleBatchDeleteInvoices = () => {
     if (selectedInvoiceIds.size === 0) return;
     const ids = [...selectedInvoiceIds].map((id) => String(id || "").trim()).filter(Boolean);
-    const blockedCount = ids.filter((id) => {
+    const refundedCount = ids.filter((id) => {
       const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
       return invoiceRecord && isInvoicePaidViaCredits(invoiceRecord);
     }).length;
-    const deletableCount = Math.max(ids.length - blockedCount, 0);
-    if (deletableCount === 0) {
-      appToast.warning({
-        title: "Nothing to delete",
-        description: "Selected invoices are paid via credits and cannot be deleted.",
-      });
-      return;
-    }
 
     appToast.warning({
       id: "confirm-batch-delete-invoices",
-      title: `Delete ${deletableCount} invoice${deletableCount !== 1 ? "s" : ""}?`,
+      title: `Delete ${ids.length} invoice${ids.length !== 1 ? "s" : ""}?`,
       description:
-        blockedCount > 0
-          ? `${blockedCount} invoice${blockedCount > 1 ? "s" : ""} will be skipped (paid via credits). This cannot be undone.`
+        refundedCount > 0
+          ? `${refundedCount} invoice${refundedCount > 1 ? "s" : ""} ${refundedCount > 1 ? "were" : "was"} paid via credits and ${refundedCount > 1 ? "will" : "will"} refund those credits. This cannot be undone.`
           : "This cannot be undone.",
       duration: 8000,
       action: {
