@@ -8861,18 +8861,49 @@ export default function AdsPage() {
       appToast.error({ title: "Supabase configuration is required to apply credits." });
       return;
     }
-    if (invoiceCreditsApplying) {
+    if (invoiceCreditsApplying || invoiceSaving) {
       return;
     }
     setInvoiceCreditsApplying(true);
     try {
+      const issueDate = getTodayInAppTimeZone();
+      if (!invoice.advertiser_id) {
+        throw new Error("Advertiser required");
+      }
+
+      let existingInvoice = null;
+      const refreshedDbBefore = await refreshDbFromSupabase();
+      existingInvoice =
+        (Array.isArray(refreshedDbBefore?.invoices) ? refreshedDbBefore.invoices : []).find(
+          (item) => String(item?.id || "") === invoiceId,
+        ) || null;
+
+      const syncedInvoice = await upsertInvoice({
+        ...(existingInvoice || {}),
+        ...invoice,
+        ad_ids:
+          Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
+            ? invoice.ad_ids
+            : Array.isArray(existingInvoice?.ad_ids)
+              ? existingInvoice.ad_ids
+              : [],
+        items:
+          Array.isArray(invoice.items) && invoice.items.length > 0
+            ? invoice.items
+            : Array.isArray(existingInvoice?.items)
+              ? existingInvoice.items
+              : [],
+        issue_date: issueDate,
+        status: normalizeInvoiceStatus(invoice.status),
+      });
+
       const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          invoice_id: invoiceId,
+          invoice_id: String(syncedInvoice?.id || invoiceId).trim(),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -8881,9 +8912,10 @@ export default function AdsPage() {
       }
 
       const refreshedDb = await refreshDbFromSupabase();
+      const refreshedInvoiceId = String(syncedInvoice?.id || invoiceId).trim();
       const refreshedInvoice =
         (refreshedDb?.invoices || []).find(
-          (item) => String(item?.id || "") === invoiceId,
+          (item) => String(item?.id || "") === refreshedInvoiceId,
         ) || null;
 
       if (refreshedInvoice) {
