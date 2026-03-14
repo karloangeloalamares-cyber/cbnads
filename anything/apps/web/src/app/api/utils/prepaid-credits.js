@@ -5,9 +5,15 @@ import { buildAdvertiserDashboardSignInUrl } from "./advertiser-dashboard-url.js
 import { table } from "./supabase-db.js";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const readNumber = (value) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+const normalizeOptionalUuid = (value) => {
+  const normalized = String(value || "").trim();
+  return UUID_REGEX.test(normalized) ? normalized : null;
 };
 const toArray = (value) => (Array.isArray(value) ? value : []);
 const uniqueIds = (values) =>
@@ -350,7 +356,7 @@ export const attemptInvoiceCreditPayment = async ({
 
   const { data, error } = await supabase.rpc("cbnads_web_try_pay_invoice_with_credits", {
     p_invoice_id: normalizedInvoiceId,
-    p_created_by: actorUserId || null,
+    p_created_by: normalizeOptionalUuid(actorUserId),
     p_note: note || null,
   });
   if (error) {

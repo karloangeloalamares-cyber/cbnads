@@ -67,10 +67,10 @@ begin
     raise exception 'note is required';
   end if;
 
-  select coalesce(credits, 0)
+  select coalesce(a.credits, 0)
   into v_current
-  from cbnads_web_advertisers
-  where id = p_advertiser_id
+  from cbnads_web_advertisers a
+  where a.id = p_advertiser_id
   for update;
 
   if not found then
