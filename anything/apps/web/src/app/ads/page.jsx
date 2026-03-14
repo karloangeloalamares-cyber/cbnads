@@ -2770,6 +2770,13 @@ export default function AdsPage() {
     left: 0,
   });
   const [showInvoiceCreateMenu, setShowInvoiceCreateMenu] = useState(false);
+  const [billingCreditsModalOpen, setBillingCreditsModalOpen] = useState(false);
+  const [billingCreditsLoading, setBillingCreditsLoading] = useState(false);
+  const [billingCreditsForm, setBillingCreditsForm] = useState({
+    advertiser_id: "",
+    amount: "",
+    reason: "",
+  });
   const [invoicePreviewModal, setInvoicePreviewModal] = useState(null);
   const [submissionEditModal, setSubmissionEditModal] = useState(null);
   const [submissionEditForm, setSubmissionEditForm] = useState(blankSubmissionEditForm);
@@ -8724,6 +8731,115 @@ export default function AdsPage() {
     setAdvertiserCreateSource("advertisers");
   };
 
+  const requestAdvertiserCreditsAdjustment = async ({
+    advertiserId,
+    amount,
+    reason,
+  }) => {
+    const normalizedAdvertiserId = String(advertiserId || "").trim();
+    if (!normalizedAdvertiserId) {
+      throw new Error("Advertiser is required.");
+    }
+    if (!hasSupabaseConfig) {
+      throw new Error("Supabase configuration is required to adjust credits.");
+    }
+
+    const response = await fetchWithSessionAuth(
+      `/api/admin/advertisers/${normalizedAdvertiserId}/credits`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          amount,
+          reason,
+        }),
+      },
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to update advertiser credits.");
+    }
+
+    const nextDb = await refreshDbFromSupabase();
+    const updatedAdvertiser = (nextDb?.advertisers || []).find(
+      (item) => String(item?.id || "") === normalizedAdvertiserId,
+    );
+    return { data, nextDb, updatedAdvertiser };
+  };
+
+  const openBillingCreditsModal = () => {
+    const defaultAdvertiserId =
+      String(advertiserViewModal?.advertiser?.id || "").trim() ||
+      String(advertisers?.[0]?.id || "").trim() ||
+      "";
+    setBillingCreditsForm({
+      advertiser_id: defaultAdvertiserId,
+      amount: "",
+      reason: "",
+    });
+    setBillingCreditsModalOpen(true);
+    setShowInvoiceCreateMenu(false);
+  };
+
+  const submitBillingCreditsTopUp = async () => {
+    if (!isAdmin || billingCreditsLoading) {
+      return;
+    }
+
+    const advertiserId = String(billingCreditsForm.advertiser_id || "").trim();
+    const absoluteAmount = Math.abs(
+      Number.parseFloat(String(billingCreditsForm.amount || "").trim()) || 0,
+    );
+    const reason = String(billingCreditsForm.reason || "").trim();
+
+    if (!advertiserId) {
+      appToast.error({ title: "Select an advertiser." });
+      return;
+    }
+    if (!absoluteAmount) {
+      appToast.error({ title: "Enter a credit amount." });
+      return;
+    }
+    if (!reason) {
+      appToast.error({ title: "Add a reason for this credit top-up." });
+      return;
+    }
+
+    setBillingCreditsLoading(true);
+    try {
+      const { updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
+        advertiserId,
+        amount: absoluteAmount,
+        reason,
+      });
+      if (
+        advertiserViewModal?.advertiser?.id &&
+        String(advertiserViewModal.advertiser.id) === advertiserId &&
+        updatedAdvertiser
+      ) {
+        setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
+      }
+      setBillingCreditsModalOpen(false);
+      setBillingCreditsForm({
+        advertiser_id: "",
+        amount: "",
+        reason: "",
+      });
+      appToast.success({
+        title: "Credits added.",
+      });
+    } catch (error) {
+      appToast.error({
+        title:
+          error instanceof Error ? error.message : "Failed to update advertiser credits.",
+      });
+    } finally {
+      setBillingCreditsLoading(false);
+    }
+  };
+
   const adjustAdvertiserCredits = async (direction) => {
     const advertiserId = String(advertiserViewModal?.advertiser?.id || "").trim();
     if (!advertiserId || !hasSupabaseConfig) {
@@ -8746,28 +8862,11 @@ export default function AdsPage() {
     const signedAmount = direction === "deduct" ? -absoluteAmount : absoluteAmount;
     setAdvertiserCreditsLoading(true);
     try {
-      const response = await fetchWithSessionAuth(
-        `/api/admin/advertisers/${advertiserId}/credits`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            amount: signedAmount,
-            reason,
-          }),
-        },
-      );
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error || "Failed to update advertiser credits.");
-      }
-
-      const nextDb = await refreshDbFromSupabase();
-      const updatedAdvertiser = (nextDb?.advertisers || []).find(
-        (item) => String(item?.id || "") === advertiserId,
-      );
+      const { nextDb, updatedAdvertiser } = await requestAdvertiserCreditsAdjustment({
+        advertiserId,
+        amount: signedAmount,
+        reason,
+      });
       if (updatedAdvertiser) {
         setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
       }
@@ -12557,68 +12656,14 @@ export default function AdsPage() {
                   </p>
                 </div>
                 {isAdmin ? (
-                  <div className="relative" ref={invoiceCreateMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowInvoiceCreateMenu((current) => !current)}
-                      className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
-                    >
-                      <Plus size={16} />
-                      Create Invoice
-                      <ChevronDown size={16} />
-                    </button>
-                    {showInvoiceCreateMenu ? (
-                      <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInvoice(createBlankInvoice());
-                            setView("newInvoice");
-                            setShowInvoiceCreateMenu(false);
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                        >
-                          <Plus size={16} />
-                          <div>
-                            <div className="font-medium">New Invoice</div>
-                            <div className="text-xs text-gray-500">Create a single invoice</div>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowInvoiceCreateMenu(false);
-                            appToast.info({
-                              title: "Batch Invoice is coming soon.",
-                            });
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                        >
-                          <Receipt size={16} />
-                          <div>
-                            <div className="font-medium">Batch Invoice</div>
-                            <div className="text-xs text-gray-500">Invoice by date range</div>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowInvoiceCreateMenu(false);
-                            appToast.info({
-                              title: "Recurring Invoice is coming soon.",
-                            });
-                          }}
-                          className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
-                        >
-                          <RefreshCw size={16} />
-                          <div>
-                            <div className="font-medium">Recurring Invoice</div>
-                            <div className="text-xs text-gray-500">Generate for period</div>
-                          </div>
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={openBillingCreditsModal}
+                    className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
+                  >
+                    <Plus size={16} />
+                    Add Credits
+                  </button>
                 ) : null}
               </div>
 
@@ -12703,18 +12748,15 @@ export default function AdsPage() {
                   <p className="text-sm text-gray-400 mb-4">
                     {isAdvertiser
                       ? "Invoices linked to your account will appear here."
-                      : "Create your first invoice to get started"}
+                      : "Invoices are generated from approved ads."}
                   </p>
                   {isAdmin ? (
                     <button
                       type="button"
-                      onClick={() => {
-                        setInvoice(createBlankInvoice());
-                        setView("newInvoice");
-                      }}
+                      onClick={openBillingCreditsModal}
                       className="px-4 py-2 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800"
                     >
-                      Create Invoice
+                      Add Credits
                     </button>
                   ) : null}
                 </div>
@@ -14540,6 +14582,116 @@ export default function AdsPage() {
             </div>
           )}
         </main>
+
+        <Modal
+          isOpen={billingCreditsModalOpen}
+          onClose={() => {
+            if (!billingCreditsLoading) {
+              setBillingCreditsModalOpen(false);
+            }
+          }}
+          size="md"
+        >
+          <div className="p-6">
+            <div className="mb-4">
+              <h2 className="text-xl font-semibold text-gray-900">Add Credits</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Top up advertiser prepaid credits. Invoices are generated from approved ads.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Advertiser
+                </label>
+                <select
+                  value={billingCreditsForm.advertiser_id}
+                  onChange={(event) =>
+                    setBillingCreditsForm((current) => ({
+                      ...current,
+                      advertiser_id: event.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  disabled={billingCreditsLoading}
+                >
+                  <option value="">Select advertiser</option>
+                  {[...(Array.isArray(advertisers) ? advertisers : [])]
+                    .sort((left, right) =>
+                      String(left?.advertiser_name || "")
+                        .toLowerCase()
+                        .localeCompare(String(right?.advertiser_name || "").toLowerCase()),
+                    )
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.advertiser_name || "Unnamed advertiser"}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Amount
+                </label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={billingCreditsForm.amount}
+                  onChange={(event) =>
+                    setBillingCreditsForm((current) => ({
+                      ...current,
+                      amount: event.target.value,
+                    }))
+                  }
+                  placeholder="0.00"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  disabled={billingCreditsLoading}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Reason
+                </label>
+                <input
+                  type="text"
+                  value={billingCreditsForm.reason}
+                  onChange={(event) =>
+                    setBillingCreditsForm((current) => ({
+                      ...current,
+                      reason: event.target.value,
+                    }))
+                  }
+                  placeholder="Manual top-up"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  disabled={billingCreditsLoading}
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBillingCreditsModalOpen(false)}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                disabled={billingCreditsLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitBillingCreditsTopUp}
+                className="px-4 py-2 rounded-lg bg-black text-white font-semibold hover:bg-gray-800 disabled:opacity-50"
+                disabled={billingCreditsLoading}
+              >
+                {billingCreditsLoading ? "Adding..." : "Add Credits"}
+              </button>
+            </div>
+          </div>
+        </Modal>
 
         <Modal
           isOpen={Boolean(submissionEditModal)}
