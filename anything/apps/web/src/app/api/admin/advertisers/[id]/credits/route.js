@@ -1,6 +1,8 @@
 import { requirePermission } from "../../../../utils/auth-check.js";
 import { advertiserResponse, db, table, toNumber } from "../../../../utils/supabase-db.js";
 import { isCreditRuleViolation } from "../../../../utils/prepaid-credits.js";
+import { nextSequentialInvoiceNumber } from "../../../../utils/invoice-helpers.js";
+import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -190,9 +192,53 @@ export async function POST(request, { params }) {
       return Response.json({ error: "Advertiser not found" }, { status: 404 });
     }
 
+    let creditInvoice = null;
+    if (amount > 0) {
+      const today = getTodayInAppTimeZone();
+      const invoiceNumber = await nextSequentialInvoiceNumber(supabase, table("invoices"), {
+        prefix: "CRE",
+      });
+      const total = roundMoney(amount);
+
+      const { data: insertedInvoiceRows, error: insertedInvoiceError } = await supabase
+        .from(table("invoices"))
+        .insert({
+          invoice_number: invoiceNumber,
+          advertiser_id: advertiserId,
+          advertiser_name: String(advertiser?.advertiser_name || "").trim() || null,
+          issue_date: today,
+          due_date: today,
+          status: "Paid",
+          amount: total,
+          total,
+          amount_paid: total,
+          paid_date: today,
+          bill_to:
+            String(advertiser?.business_name || "").trim() ||
+            String(advertiser?.advertiser_name || "").trim() ||
+            null,
+          contact_name: String(advertiser?.contact_name || "").trim() || null,
+          contact_email: String(advertiser?.email || "").trim() || null,
+          ad_ids: [],
+          notes: `Credit top-up: ${reason}`,
+          paid_via_credits: false,
+          updated_at: new Date().toISOString(),
+        })
+        .select("*")
+        .limit(1);
+      if (insertedInvoiceError) {
+        throw insertedInvoiceError;
+      }
+
+      creditInvoice = Array.isArray(insertedInvoiceRows)
+        ? insertedInvoiceRows[0] || null
+        : insertedInvoiceRows || null;
+    }
+
     return Response.json({
       advertiser: advertiserResponse(advertiser),
       adjustment,
+      credit_invoice: creditInvoice,
     });
   } catch (error) {
     console.error("Error adjusting advertiser credits:", error);

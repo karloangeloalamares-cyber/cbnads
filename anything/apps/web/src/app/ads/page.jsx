@@ -8809,7 +8809,7 @@ export default function AdsPage() {
 
     setBillingCreditsLoading(true);
     try {
-      const { updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
+      const { data, updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
         advertiserId,
         amount: absoluteAmount,
         reason,
@@ -8829,6 +8829,9 @@ export default function AdsPage() {
       });
       appToast.success({
         title: "Credits added.",
+        description: data?.credit_invoice?.invoice_number
+          ? `Recorded as ${data.credit_invoice.invoice_number}.`
+          : undefined,
       });
     } catch (error) {
       appToast.error({
@@ -8862,7 +8865,7 @@ export default function AdsPage() {
     const signedAmount = direction === "deduct" ? -absoluteAmount : absoluteAmount;
     setAdvertiserCreditsLoading(true);
     try {
-      const { nextDb, updatedAdvertiser } = await requestAdvertiserCreditsAdjustment({
+      const { data, nextDb, updatedAdvertiser } = await requestAdvertiserCreditsAdjustment({
         advertiserId,
         amount: signedAmount,
         reason,
@@ -8876,6 +8879,10 @@ export default function AdsPage() {
       });
       appToast.success({
         title: direction === "deduct" ? "Credits deducted." : "Credits added.",
+        description:
+          direction !== "deduct" && data?.credit_invoice?.invoice_number
+            ? `Recorded as ${data.credit_invoice.invoice_number}.`
+            : undefined,
       });
     } catch (error) {
       appToast.error({

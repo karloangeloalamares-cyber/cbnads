@@ -168,7 +168,7 @@ export function sumInvoiceItemAmounts(items) {
   );
 }
 
-const INVOICE_PREFIX = "INV";
+const DEFAULT_INVOICE_PREFIX = "INV";
 const SUFFIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const SUFFIX_LENGTH = 4;
 
@@ -182,20 +182,29 @@ const generateSuffix = () =>
     SUFFIX_CHARS[Math.floor(Math.random() * SUFFIX_CHARS.length)],
   ).join("");
 
-export function formatInvoiceNumber({ date = new Date(), suffix } = {}) {
+const normalizeInvoicePrefix = (value, fallback = DEFAULT_INVOICE_PREFIX) => {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  return normalized || fallback;
+};
+
+export function formatInvoiceNumber({ date = new Date(), suffix, prefix = DEFAULT_INVOICE_PREFIX } = {}) {
   const dateDigits = toInvoiceDateDigits(date);
   const safeSuffix = suffix || generateSuffix();
-  return `${INVOICE_PREFIX}-${dateDigits}-${safeSuffix}`;
+  const invoicePrefix = normalizeInvoicePrefix(prefix);
+  return `${invoicePrefix}-${dateDigits}-${safeSuffix}`;
 }
 
-export function fallbackInvoiceNumber(date = new Date()) {
-  return formatInvoiceNumber({ date });
+export function fallbackInvoiceNumber(date = new Date(), { prefix = DEFAULT_INVOICE_PREFIX } = {}) {
+  return formatInvoiceNumber({ date, prefix });
 }
 
 export async function nextSequentialInvoiceNumber(
   supabase,
   invoicesTableName,
-  { date = new Date() } = {},
+  { date = new Date(), prefix = DEFAULT_INVOICE_PREFIX } = {},
 ) {
   const { data, error } = await supabase
     .from(invoicesTableName)
@@ -210,7 +219,7 @@ export async function nextSequentialInvoiceNumber(
   let candidate;
   let attempts = 0;
   do {
-    candidate = formatInvoiceNumber({ date });
+    candidate = formatInvoiceNumber({ date, prefix });
     if (++attempts > 100) throw new Error("Could not generate a unique invoice number");
   } while (existing.has(candidate));
 
