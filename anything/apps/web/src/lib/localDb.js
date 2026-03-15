@@ -1011,6 +1011,10 @@ const fromAdRow = (row) => {
     archived: Boolean(row.archived),
     published_at: row.published_at || null,
     published_dates: toArray(row.published_dates),
+    series_id: row.series_id || null,
+    series_index: Number.isFinite(Number(row.series_index)) ? Number(row.series_index) : null,
+    series_total: Number.isFinite(Number(row.series_total)) ? Number(row.series_total) : null,
+    series_week_start: toDateOnly(row.series_week_start),
     scheduled_timezone: String(row.scheduled_timezone || APP_TIME_ZONE).trim() || APP_TIME_ZONE,
     created_at: row.created_at || nowIso(),
     updated_at: row.updated_at || nowIso(),
@@ -1049,6 +1053,16 @@ const toAdRow = (input) => {
     archived: Boolean(input.archived),
     published_at: input.published_at || null,
     published_dates: toArray(input.published_dates),
+    series_id: input.series_id || null,
+    series_index:
+      Number.isFinite(Number(input.series_index)) && Number(input.series_index) > 0
+        ? Number(input.series_index)
+        : null,
+    series_total:
+      Number.isFinite(Number(input.series_total)) && Number(input.series_total) > 0
+        ? Number(input.series_total)
+        : null,
+    series_week_start: toDateColumn(input.series_week_start),
     scheduled_timezone:
       String(input.scheduled_timezone || APP_TIME_ZONE).trim() || APP_TIME_ZONE,
     created_at: input.created_at || nowIso(),
@@ -1084,6 +1098,10 @@ const fromPendingAdRow = (row) => ({
   status: row.status || 'pending',
   viewed_by_admin: Boolean(row.viewed_by_admin),
   rejected_at: row.rejected_at || null,
+  series_id: row.series_id || null,
+  series_index: Number.isFinite(Number(row.series_index)) ? Number(row.series_index) : null,
+  series_total: Number.isFinite(Number(row.series_total)) ? Number(row.series_total) : null,
+  series_week_start: toDateOnly(row.series_week_start),
   created_at: row.created_at || nowIso(),
   updated_at: row.updated_at || nowIso(),
 });
@@ -1115,6 +1133,16 @@ const toPendingAdRow = (input) => ({
   review_notes: String(input.review_notes || '').trim() || null,
   status: input.status || 'pending',
   rejected_at: input.rejected_at || null,
+  series_id: input.series_id || null,
+  series_index:
+    Number.isFinite(Number(input.series_index)) && Number(input.series_index) > 0
+      ? Number(input.series_index)
+      : null,
+  series_total:
+    Number.isFinite(Number(input.series_total)) && Number(input.series_total) > 0
+      ? Number(input.series_total)
+      : null,
+  series_week_start: toDateColumn(input.series_week_start),
   created_at: input.created_at || nowIso(),
   updated_at: input.updated_at || nowIso(),
 });
@@ -2207,6 +2235,16 @@ export const submitPendingAd = async (input) => {
       notes: input.notes || '',
       review_notes: String(input.review_notes || '').trim(),
       status: 'pending',
+      series_id: input.series_id || null,
+      series_index:
+        Number.isFinite(Number(input.series_index)) && Number(input.series_index) > 0
+          ? Number(input.series_index)
+          : null,
+      series_total:
+        Number.isFinite(Number(input.series_total)) && Number(input.series_total) > 0
+          ? Number(input.series_total)
+          : null,
+      series_week_start: toDateOnly(input.series_week_start),
       created_at: nowIso(),
       updated_at: nowIso(),
     };
@@ -2295,6 +2333,16 @@ export const approvePendingAd = async (pendingAdId) => {
       placement: pending.placement || '',
       reminder_minutes: Number(pending.reminder_minutes) || 15,
       notes: pending.notes || '',
+      series_id: pending.series_id || null,
+      series_index:
+        Number.isFinite(Number(pending.series_index)) && Number(pending.series_index) > 0
+          ? Number(pending.series_index)
+          : null,
+      series_total:
+        Number.isFinite(Number(pending.series_total)) && Number(pending.series_total) > 0
+          ? Number(pending.series_total)
+          : null,
+      series_week_start: toDateOnly(pending.series_week_start),
       price: toMoney(pending.price || resolvedProduct?.price || 0),
       media_urls: [],
       invoice_id: invoiceId,

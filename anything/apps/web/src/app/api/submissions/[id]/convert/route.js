@@ -241,16 +241,27 @@ export async function POST(request, { params }) {
       ad_text: String(ad_text || submission.ad_text || "").trim() || null,
       media: Array.isArray(media) ? media : Array.isArray(submission.media) ? submission.media : [],
       notes: String(notes || submission.notes || "").trim() || null,
+      series_id: submission.series_id || null,
+      series_index: submission.series_index || null,
+      series_total: submission.series_total || null,
+      series_week_start: submission.series_week_start || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    const { data: ad, error: adError } = await supabase
-      .from(table("ads"))
-      .insert(payload)
-      .select("*")
-      .single();
-    if (adError) throw adError;
+    let insertPayload = payload;
+    let insertResult = await supabase.from(table("ads")).insert(insertPayload).select("*").single();
+    if (insertResult.error && isMissingColumnError(insertResult.error)) {
+      const fallback = { ...insertPayload };
+      delete fallback.series_id;
+      delete fallback.series_index;
+      delete fallback.series_total;
+      delete fallback.series_week_start;
+      insertPayload = fallback;
+      insertResult = await supabase.from(table("ads")).insert(insertPayload).select("*").single();
+    }
+    if (insertResult.error) throw insertResult.error;
+    const ad = insertResult.data;
 
     let deleteResult = await supabase
       .from(table("pending_ads"))

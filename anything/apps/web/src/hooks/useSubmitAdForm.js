@@ -34,6 +34,9 @@ const initialFormData = {
   media: [],
   placement: "",
   notes: "",
+  multi_week_weeks: 4,
+  series_week_start: "",
+  multi_week_overrides: [],
 };
 
 const createIdempotencyKey = () => {
@@ -258,6 +261,10 @@ export function useSubmitAdForm() {
   };
 
   const validateDateTime = (currentFormData) => {
+    if (currentFormData.post_type === "Multi-week booking (TBD)") {
+      return true;
+    }
+
     if (
       currentFormData.post_type === "One-Time Post" &&
       currentFormData.post_date_from &&
@@ -351,18 +358,31 @@ export function useSubmitAdForm() {
         return;
       }
 
-      const availability = await checkAdAvailability({
-        postType: currentFormData.post_type,
-        postDateFrom: currentFormData.post_date_from,
-        postDateTo: currentFormData.post_date_to,
-        customDates: normalizeCustomDateEntries(currentFormData.custom_dates),
-        postTime: currentFormData.post_time,
-      });
+      const isMultiWeek = currentFormData.post_type === "Multi-week booking (TBD)";
+      if (isMultiWeek) {
+        const weeks = Number(currentFormData.multi_week_weeks);
+        if (!Number.isFinite(weeks) || weeks < 2 || weeks > 12) {
+          showSubmitError("Weeks must be between 2 and 12.");
+          return;
+        }
+        if (!String(currentFormData.series_week_start || "").trim()) {
+          showSubmitError("Please select the Week 1 start date.");
+          return;
+        }
+      } else {
+        const availability = await checkAdAvailability({
+          postType: currentFormData.post_type,
+          postDateFrom: currentFormData.post_date_from,
+          postDateTo: currentFormData.post_date_to,
+          customDates: normalizeCustomDateEntries(currentFormData.custom_dates),
+          postTime: currentFormData.post_time,
+        });
 
-      if (!availability.available) {
-        setFullyBookedDates(availability.fullyBookedDates || []);
-        showSubmitError(availability.availabilityError || "Selected dates are unavailable.");
-        return;
+        if (!availability.available) {
+          setFullyBookedDates(availability.fullyBookedDates || []);
+          showSubmitError(availability.availabilityError || "Selected dates are unavailable.");
+          return;
+        }
       }
 
       const timeWithSeconds =
@@ -381,6 +401,17 @@ export function useSubmitAdForm() {
         body: JSON.stringify({
           ...currentFormData,
           post_time: timeWithSeconds,
+          ...(currentFormData.post_type === "Multi-week booking (TBD)"
+            ? {
+                multi_week: {
+                  weeks: Number(currentFormData.multi_week_weeks),
+                  series_week_start: String(currentFormData.series_week_start || "").slice(0, 10),
+                  overrides: Array.isArray(currentFormData.multi_week_overrides)
+                    ? currentFormData.multi_week_overrides
+                    : [],
+                },
+              }
+            : {}),
         }),
       });
 

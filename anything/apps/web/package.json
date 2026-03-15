@@ -10,6 +10,7 @@
 		"build": "react-router build",
 		"preview": "vite preview",
 		"typecheck": "react-router typegen && tsc --noEmit",
+		"test": "vitest run",
 		"smoke:launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-smoke.ps1",
 		"seed:demo": "node ./scripts/seed-supabase-demo.mjs"
 	},

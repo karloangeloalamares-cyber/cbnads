@@ -105,7 +105,13 @@ const resolveMediaType = (item) => {
   return "file";
 };
 
-export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert }) {
+export function MediaUploadSection({
+  media,
+  onAddMedia,
+  onRemoveMedia,
+  showAlert,
+  inputId = "media-upload",
+}) {
   const [playingVideo, setPlayingVideo] = useState(null);
   const [upload, { loading: uploading }] = useUpload();
 
@@ -243,7 +249,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
         <div className="w-full">
           <input
             type="file"
-            id="media-upload"
+            id={inputId}
             onChange={handleMediaUpload}
             accept="image/*,video/*,audio/*,.pdf"
             multiple
@@ -252,7 +258,7 @@ export function MediaUploadSection({ media, onAddMedia, onRemoveMedia, showAlert
           />
 
           <label
-            htmlFor="media-upload"
+            htmlFor={inputId}
             className="cursor-pointer flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-200 rounded-xl bg-white hover:border-gray-300 hover:bg-gray-50 transition-all"
           >
             <Plus size={18} className="text-gray-400" />

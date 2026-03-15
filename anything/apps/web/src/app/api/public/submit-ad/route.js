@@ -130,6 +130,8 @@ export async function POST(request) {
         body: {
           success: true,
           pending_ad: result.pendingAd,
+          ...(Array.isArray(result.pendingAds) ? { pending_ads: result.pendingAds } : {}),
+          ...(result.series_id ? { series_id: result.series_id } : {}),
         },
       };
     });

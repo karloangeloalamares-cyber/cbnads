@@ -36,7 +36,7 @@ const resolvePreviewMediaType = (item) => {
   return "file";
 };
 
-export function AdPreview({ formData }) {
+export function AdPreview({ formData, sticky = true }) {
   const data = formData || {};
   const mediaItems = Array.isArray(data.media) ? data.media : [];
   const primaryMedia = mediaItems[0] || null;
@@ -45,7 +45,7 @@ export function AdPreview({ formData }) {
   const primaryMediaName = primaryMedia?.name || "Attachment";
 
   return (
-    <div className="sticky top-8 flex items-center justify-center min-h-screen">
+    <div className={sticky ? "sticky top-8 flex items-center justify-center min-h-screen" : "flex items-center justify-center"}>
       <div className="flex justify-center">
         <div className="relative" style={{ width: "332px", height: "684px" }}>
           <svg

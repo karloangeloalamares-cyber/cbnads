@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Clock, X, ChevronDown } from "lucide-react";
+import { Clock, X, ChevronDown } from "lucide-react";
 import { fetchDateBlockedTimes, fetchMonthAvailability } from "@/lib/adAvailabilityClient";
 import { appToast } from "@/lib/toast";
 import {
@@ -7,6 +7,9 @@ import {
   getTodayDateInAppTimeZone,
   getTodayInAppTimeZone,
 } from "@/lib/timezone";
+import { MediaUploadSection } from "./MediaUploadSection";
+import { AdTextEditor } from "./AdTextEditor";
+import { AvailabilityDateField } from "./AvailabilityDateField";
 
 const HOURS = Array.from({ length: 12 }).map((_, i) => String(i === 0 ? 12 : i));
 const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
@@ -19,7 +22,7 @@ const to24Hour = (h12str, period) => {
   return h === 12 ? 12 : h + 12;
 };
 
-function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [], minTime = null }) {
+export function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [], minTime = null }) {
   // value is expected to be "HH:MM" (24-hour format)
   const currentHour24 = value ? parseInt(value.split(":")[0], 10) : null;
   const currentMinute = value ? value.split(":")[1] : "";
@@ -183,12 +186,6 @@ const formatDateLong = (dateStr) => {
   });
 };
 
-const formatMonthLabel = (date) =>
-  date.toLocaleDateString("en-US", {
-    month: "long",
-    year: "numeric",
-  });
-
 const timeForInput = (timeStr) => {
   if (!timeStr) return "";
   return timeStr.substring(0, 5);
@@ -196,217 +193,6 @@ const timeForInput = (timeStr) => {
 
 const toMonthKey = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-
-const buildCalendarDays = (month) => {
-  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
-  const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0);
-  const cells = [];
-
-  for (let index = 0; index < firstDay.getDay(); index += 1) {
-    cells.push(null);
-  }
-
-  for (let day = 1; day <= lastDay.getDate(); day += 1) {
-    cells.push(new Date(month.getFullYear(), month.getMonth(), day));
-  }
-
-  while (cells.length % 7 !== 0) {
-    cells.push(null);
-  }
-
-  return cells;
-};
-
-function AvailabilityDateField({
-  label,
-  value,
-  onChange,
-  minDate,
-  blockedDates,
-  onLoadMonth,
-  required,
-  placeholder,
-  helperText,
-  variant = "default",
-}) {
-  const containerClasses = variant === "subtle"
-    ? "rounded-lg bg-gray-50 px-3 pt-2.5 pb-2 focus-within:bg-white focus-within:ring-1 focus-within:ring-gray-900 transition-all"
-    : "border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0";
-
-  const fieldRef = useRef(null);
-  const [open, setOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(
-    () => parseDate(value) || getTodayDateInAppTimeZone(),
-  );
-
-  useEffect(() => {
-    const selectedDate = parseDate(value);
-    if (selectedDate) {
-      setVisibleMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
-    }
-  }, [value]);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const handleClickOutside = (event) => {
-      if (fieldRef.current && !fieldRef.current.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
-
-  useEffect(() => {
-    if (open && onLoadMonth) {
-      void onLoadMonth(visibleMonth);
-    }
-  }, [open, onLoadMonth, visibleMonth]);
-
-  const minDateValue = minDate || getMinDate();
-  const minMonthDate = parseDate(minDateValue) || parseDate(getMinDate());
-  const canGoPreviousMonth =
-    !minMonthDate ||
-    new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1) >
-    new Date(minMonthDate.getFullYear(), minMonthDate.getMonth(), 1);
-
-  const calendarDays = useMemo(() => buildCalendarDays(visibleMonth), [visibleMonth]);
-
-  const handleSelectDate = (dateKey) => {
-    onChange(dateKey);
-    setOpen(false);
-  };
-
-  return (
-    <div className="relative" ref={fieldRef}>
-      <div className={containerClasses}>
-        <label className="block text-xs font-semibold text-gray-700 mb-1">
-          {label}
-          {required ? <span className="text-red-500"> *</span> : null}
-        </label>
-
-        <button
-          type="button"
-          onClick={() => setOpen((current) => !current)}
-          className="w-full flex items-center justify-between gap-3 text-left text-sm text-gray-900"
-        >
-          <span className={value ? "text-gray-900" : "text-gray-400"}>
-            {value ? formatDateLong(value) : placeholder || "Select date"}
-          </span>
-          <CalendarDays size={16} className="text-gray-400" />
-        </button>
-
-        {helperText ? <p className="text-xs text-gray-500 mt-2">{helperText}</p> : null}
-      </div>
-
-      {open ? (
-        <div className="absolute left-0 top-full z-30 mt-2 w-[294px] rounded-2xl border border-gray-200 bg-white p-4 shadow-xl">
-          <div className="flex items-center justify-between mb-4">
-            <button
-              type="button"
-              onClick={() =>
-                canGoPreviousMonth &&
-                setVisibleMonth(
-                  new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() - 1, 1),
-                )
-              }
-              disabled={!canGoPreviousMonth}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <ChevronLeft size={16} />
-            </button>
-
-            <div className="text-sm font-semibold text-gray-900">
-              {formatMonthLabel(visibleMonth)}
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                setVisibleMonth(
-                  new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 1),
-                )
-              }
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              <ChevronRight size={16} />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {weekdayLabels.map((labelText) => (
-              <div
-                key={labelText}
-                className="text-[11px] font-semibold text-center text-gray-500 py-1"
-              >
-                {labelText}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-1">
-            {calendarDays.map((day, index) => {
-              if (!day) {
-                return <div key={`empty-${index}`} className="h-9" />;
-              }
-
-              const dateKey = formatDateKeyFromDate(day);
-              const blockedInfo = blockedDates?.[dateKey];
-              const isBlocked = Boolean(blockedInfo?.is_full || blockedInfo?.blocked);
-              const isPast = dateKey < minDateValue;
-              const isDisabled = isPast || isBlocked;
-              const isSelected = value === dateKey;
-
-              const className = [
-                "h-9 rounded-lg text-sm flex items-center justify-center",
-                isSelected ? "bg-gray-900 text-white font-semibold" : "",
-                !isSelected && !isDisabled ? "text-gray-900 hover:bg-gray-100" : "",
-                isPast ? "bg-gray-50 text-gray-300 cursor-not-allowed" : "",
-                isBlocked
-                  ? "bg-red-50 text-red-400 line-through cursor-not-allowed border border-red-100"
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" ");
-
-              if (isDisabled) {
-                const tooltipText = isBlocked
-                  ? blockedInfo?.tooltip || "All slots are taken on that day"
-                  : "Past dates unavailable";
-
-                return (
-                  <div
-                    key={dateKey}
-                    title={tooltipText}
-                    aria-disabled="true"
-                    className={className}
-                  >
-                    {day.getDate()}
-                  </div>
-                );
-              }
-
-              return (
-                <button
-                  key={dateKey}
-                  type="button"
-                  onClick={() => handleSelectDate(dateKey)}
-                  className={className}
-                >
-                  {day.getDate()}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function ScheduleSection({
   postType,
@@ -434,6 +220,18 @@ export function ScheduleSection({
   const loadingMonthsRef = useRef(new Set());
   const monthAbortControllerRef = useRef(null);
   const currentMonthRef = useRef(parseDate(formData.post_date_from) || getTodayDateInAppTimeZone());
+
+  const getWeekDateKeys = useCallback((dateKey) => {
+    const parsed = parseDate(dateKey);
+    if (!parsed) return [];
+    const start = new Date(parsed);
+    start.setDate(start.getDate() - start.getDay());
+    return Array.from({ length: 7 }).map((_, i) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + i);
+      return formatDateKeyFromDate(day);
+    });
+  }, []);
 
   const loadBlockedTimesForDate = useCallback(
     async (dateKey) => {
@@ -493,6 +291,67 @@ export function ScheduleSection({
     );
   }, [excludeAdId, formData.post_date_from, loadMonthAvailability]);
 
+  useEffect(() => {
+    if (postType !== "Multi-week booking (TBD)") {
+      return;
+    }
+
+    const weeks = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+    const overrides = Array.isArray(formData.multi_week_overrides)
+      ? formData.multi_week_overrides
+      : [];
+
+    const normalized = Array.from({ length: weeks }).map((_, index) => {
+      const existing = overrides[index] && typeof overrides[index] === "object" ? overrides[index] : {};
+      return {
+        ad_name: String(existing.ad_name || ""),
+        ad_text: String(existing.ad_text || ""),
+        use_base_media: existing.use_base_media !== false,
+        media: Array.isArray(existing.media) ? existing.media : [],
+      };
+    });
+
+    const needsUpdate =
+      overrides.length !== weeks ||
+      overrides.some((entry, index) => {
+        const normalizedEntry = normalized[index];
+        if (!entry || typeof entry !== "object") return true;
+        if (String(entry.ad_name || "") !== normalizedEntry.ad_name) return true;
+        if (String(entry.ad_text || "") !== normalizedEntry.ad_text) return true;
+        if ((entry.use_base_media !== false) !== normalizedEntry.use_base_media) return true;
+        if (!Array.isArray(entry.media)) return true;
+        return false;
+      });
+
+    if (needsUpdate) {
+      onChange("multi_week_overrides", normalized);
+    }
+  }, [formData.multi_week_overrides, formData.multi_week_weeks, onChange, postType]);
+
+  useEffect(() => {
+    if (!formData.post_date_from) {
+      return;
+    }
+
+    const weekKeys = getWeekDateKeys(formData.post_date_from);
+    if (weekKeys.length === 0) {
+      return;
+    }
+
+    const first = weekKeys[0];
+    const last = weekKeys[weekKeys.length - 1];
+    const firstDate = parseDate(first);
+    const lastDate = parseDate(last);
+    if (!firstDate || !lastDate) {
+      return;
+    }
+
+    void loadMonthAvailability(new Date(firstDate.getFullYear(), firstDate.getMonth(), 1));
+    if (firstDate.getMonth() !== lastDate.getMonth() || firstDate.getFullYear() !== lastDate.getFullYear()) {
+      void loadMonthAvailability(new Date(lastDate.getFullYear(), lastDate.getMonth(), 1));
+    }
+  }, [formData.post_date_from, getWeekDateKeys, loadMonthAvailability]);
+
   // Fetch blocked times for One-Time Post when the date is set
   useEffect(() => {
     if (postType === "One-Time Post" && formData.post_date_from) {
@@ -540,11 +399,7 @@ export function ScheduleSection({
     });
   }, [availabilityError, hasBookedDates]);
 
-  const blockedDates = useMemo(() => {
-    return Object.fromEntries(
-      Object.entries(monthAvailability).filter(([, info]) => info?.is_full),
-    );
-  }, [monthAvailability]);
+  const blockedDates = monthAvailability || {};
 
   const availabilityChecking = checkingAvailability || calendarLoading;
 
@@ -562,6 +417,194 @@ export function ScheduleSection({
       <p className="text-xs text-gray-500 mb-4">
         All times are in New York time (ET)
       </p>
+
+      {postType === "Multi-week booking (TBD)" && (
+        <>
+          {(() => {
+            const weeksValue = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+
+            return (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Weeks <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={12}
+                value={weeksValue}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  const clamped = Number.isFinite(next) ? Math.min(12, Math.max(1, Math.floor(next))) : 1;
+                  onChange("multi_week_weeks", clamped);
+                }}
+                className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+              />
+              <p className="text-xs text-gray-500 mt-2">Creates one TBD ad per week (1–12).</p>
+            </div>
+
+            <AvailabilityDateField
+              label="Week 1 start (week of)"
+              required
+              value={formData.series_week_start}
+              onChange={(value) => onChange("series_week_start", value)}
+              minDate={getMinDate()}
+              blockedDates={{}}
+              onLoadMonth={loadMonthAvailability}
+              placeholder="Select week start"
+              helperText="This is just an anchor for Week 1; each week will be scheduled later."
+            />
+          </div>
+            );
+          })()}
+
+          <div className="mt-5 border border-gray-200 rounded-xl bg-white p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <h4 className="text-sm font-semibold text-gray-900">Per-week overrides</h4>
+                <p className="text-xs text-gray-500">
+                  Each week inherits the base ad. Leave overrides blank to reuse it.
+                </p>
+              </div>
+            </div>
+
+            {(() => {
+              const weeks = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+              const baseWeekStart = String(formData.series_week_start || "").slice(0, 10);
+              const overrides = Array.isArray(formData.multi_week_overrides)
+                ? formData.multi_week_overrides
+                : [];
+
+              const normalizedOverrides = Array.from({ length: weeks }).map((_, index) => {
+                const existing = overrides[index] && typeof overrides[index] === "object" ? overrides[index] : {};
+                return {
+                  ad_name: String(existing.ad_name || ""),
+                  ad_text: String(existing.ad_text || ""),
+                  use_base_media: existing.use_base_media !== false,
+                  media: Array.isArray(existing.media) ? existing.media : [],
+                };
+              });
+
+              const computeWeekStart = (startKey, index) => {
+                const parsed = parseDate(startKey);
+                if (!parsed) return "";
+                const d = new Date(parsed);
+                d.setDate(d.getDate() + index * 7);
+                return formatDateKeyFromDate(d);
+              };
+
+              return (
+                <div className="space-y-4">
+                  {normalizedOverrides.map((entry, index) => {
+                    const weekStartKey = baseWeekStart ? computeWeekStart(baseWeekStart, index) : "";
+                    const label = weekStartKey ? formatDateLong(weekStartKey) : "—";
+
+                    return (
+                      <div key={index} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div>
+                            <div className="text-sm font-semibold text-gray-900">
+                              Week {index + 1} <span className="text-gray-500 font-medium">• week of {label}</span>
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">Schedule: TBD</div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="border border-gray-200 rounded-lg bg-white px-3 pt-3 pb-2.5">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Override Ad Name (optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={entry.ad_name}
+                              onChange={(e) => {
+                                const next = [...normalizedOverrides];
+                                next[index] = { ...next[index], ad_name: e.target.value };
+                                onChange("multi_week_overrides", next);
+                              }}
+                              placeholder="Leave blank to use base"
+                              className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="border border-gray-200 rounded-lg bg-white px-3 pt-3 pb-2.5">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Attachments
+                            </label>
+                            <label className="flex items-center gap-2 text-sm text-gray-700">
+                              <input
+                                type="checkbox"
+                                checked={!entry.use_base_media}
+                                onChange={(e) => {
+                                  const next = [...normalizedOverrides];
+                                  const enableOverride = Boolean(e.target.checked);
+                                  const baseMedia = Array.isArray(formData.media) ? formData.media : [];
+                                  const existingMedia = Array.isArray(next[index].media) ? next[index].media : [];
+                                  next[index] = {
+                                    ...next[index],
+                                    use_base_media: !enableOverride,
+                                    media: enableOverride && existingMedia.length === 0 ? baseMedia : existingMedia,
+                                  };
+                                  onChange("multi_week_overrides", next);
+                                }}
+                              />
+                              Use different attachments this week
+                            </label>
+                            <p className="text-xs text-gray-500 mt-2">
+                              Unchecked = uses the base attachments. Checked = customize attachments for this week.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <AdTextEditor
+                            label="Ad Text"
+                            name={`multi_week_overrides_${index}_ad_text`}
+                            value={entry.ad_text}
+                            onChange={(nextText) => {
+                              const next = [...normalizedOverrides];
+                              next[index] = { ...next[index], ad_text: nextText };
+                              onChange("multi_week_overrides", next);
+                            }}
+                          />
+                          <p className="text-xs text-gray-500 mt-2">
+                            Leave blank to use the base ad text.
+                          </p>
+                        </div>
+
+                        {!entry.use_base_media ? (
+                          <div className="mt-3">
+                            <MediaUploadSection
+                              media={entry.media}
+                              inputId={`media-upload-week-${index}`}
+                              onAddMedia={(mediaItem) => {
+                                const next = [...normalizedOverrides];
+                                const nextMedia = [...(next[index].media || []), mediaItem];
+                                next[index] = { ...next[index], media: nextMedia, use_base_media: false };
+                                onChange("multi_week_overrides", next);
+                              }}
+                              onRemoveMedia={(removeIndex) => {
+                                const next = [...normalizedOverrides];
+                                const nextMedia = (next[index].media || []).filter((_, i) => i !== removeIndex);
+                                next[index] = { ...next[index], media: nextMedia, use_base_media: false };
+                                onChange("multi_week_overrides", next);
+                              }}
+                              showAlert={() => {}}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+
+        </>
+      )}
 
       {postType === "One-Time Post" && (
         <>
@@ -627,6 +670,43 @@ export function ScheduleSection({
               </div>
             </div>
           </div>
+
+          {formData.post_date_from ? (
+            <div className="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+              <div className="text-xs font-semibold text-gray-700 mb-2">This week’s load (booked/limit)</div>
+              <div className="grid grid-cols-7 gap-1">
+                {getWeekDateKeys(formData.post_date_from).map((dateKey) => {
+                  const info = blockedDates?.[dateKey] || null;
+                  const bookedCountRaw = info?.bookedCount ?? info?.booked_count ?? info?.total_ads_on_date;
+                  const limitRaw = info?.limit ?? info?.max_ads_per_day;
+                  const bookedCount = Number.isFinite(Number(bookedCountRaw)) ? Number(bookedCountRaw) : null;
+                  const limit = Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : null;
+                  const isFull = Boolean(info?.is_full);
+
+                  return (
+                    <div
+                      key={dateKey}
+                      className={[
+                        "rounded-md px-2 py-1 text-center border",
+                        dateKey === formData.post_date_from ? "bg-white border-gray-900" : "bg-white border-gray-200",
+                        isFull ? "opacity-60" : "",
+                      ].join(" ")}
+                      title={isFull ? "Full" : "Available"}
+                    >
+                      <div className="text-[11px] text-gray-600">{weekdayLabels[new Date(`${dateKey}T00:00:00`).getDay()]}</div>
+                      <div className="text-xs font-semibold text-gray-900">{String(dateKey).slice(8, 10)}</div>
+                      <div className="text-[11px] text-gray-600">
+                        {bookedCount !== null && limit !== null ? `${bookedCount}/${limit}` : "—"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Pick a quieter day by choosing a date with a lower booked count.
+              </p>
+            </div>
+          ) : null}
         </>
       )}
 

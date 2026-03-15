@@ -65,6 +65,7 @@ import AdvertiserCreateAdSection from "@/components/AdvertiserCreateAdSection";
 import CalendarFilters from "@/components/CalendarFilters";
 import CalendarUpcomingSidebar from "@/components/CalendarUpcomingSidebar";
 import CreateAdAdvertiserField from "@/components/CreateAdAdvertiserField";
+import CreateMultiWeekSeries from "@/components/admin/CreateMultiWeekSeries";
 import InvoiceSortableHeader from "@/components/InvoiceSortableHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
@@ -296,6 +297,9 @@ const blankAd = {
   ad_text: "",
   media: [],
   notes: "",
+  multi_week_weeks: 4,
+  series_week_start: "",
+  multi_week_overrides: [],
 };
 
 const blankAdvertiser = {
@@ -1601,7 +1605,7 @@ function AdsTableRow({
   );
 }
 
-function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }) {
+function AdsPreviewModal({ ad, onClose, onEdit, onViewSeries, linkedInvoices, canEdit = true }) {
   if (!ad) {
     return null;
   }
@@ -1630,6 +1634,15 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
               <p className="text-sm text-gray-500 mt-1">{ad.advertiser || "Unknown advertiser"}</p>
             </div>
             <div className="flex items-center gap-2">
+              {ad.series_id ? (
+                <button
+                  onClick={() => onViewSeries?.(ad)}
+                  className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                  type="button"
+                >
+                  View series
+                </button>
+              ) : null}
               {canEdit ? (
                 <button
                   onClick={() => {
@@ -1684,6 +1697,19 @@ function AdsPreviewModal({ ad, onClose, onEdit, linkedInvoices, canEdit = true }
                 </label>
                 <p className="text-sm text-gray-900 font-medium">{ad.post_type || "-"}</p>
               </div>
+              {ad.series_id ? (
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
+                    Series
+                  </label>
+                  <p className="text-sm text-gray-900 font-medium">
+                    {String(ad.series_index || "").trim() && String(ad.series_total || "").trim()
+                      ? `Week ${ad.series_index} of ${ad.series_total}`
+                      : "Linked"}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1 break-all">{String(ad.series_id)}</p>
+                </div>
+              ) : null}
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1 block">
                   Placement
@@ -2039,6 +2065,9 @@ const normalizeCalendarPostType = (value) => {
 
 const normalizeCreateAdPostType = (value) => {
   const text = String(value || "").toLowerCase();
+  if (text.includes("multi")) {
+    return "Multi-week booking (TBD)";
+  }
   if (text.includes("daily")) {
     return "Daily Run";
   }
@@ -2686,6 +2715,7 @@ export default function AdsPage() {
     return sections.includes(value) ? value : "Dashboard";
   });
   const [view, setView] = useState("list");
+  const [createSeriesAdvertiserId, setCreateSeriesAdvertiserId] = useState("");
   const [adsViewMode, setAdsViewMode] = useState("grid");
   const [adsFilters, setAdsFilters] = useState({
     status: "All Ads",
@@ -3223,7 +3253,7 @@ export default function AdsPage() {
       return;
     }
 
-    if (isAdvertiser && (view === "createAd" || view === "newInvoice")) {
+    if (isAdvertiser && (view === "createAd" || view === "createSeries" || view === "newInvoice")) {
       setView("list");
       setAd(blankAd);
       setInvoice(createBlankInvoice());
@@ -4396,13 +4426,15 @@ export default function AdsPage() {
       const advertiser = String(item.advertiser || "").toLowerCase();
       const placement = String(item.placement || "").toLowerCase();
       const invoiceNumber = String(item.invoice_number || "").toLowerCase();
+      const seriesId = String(item.series_id || "").toLowerCase();
 
       if (
         query &&
         !adName.includes(query) &&
         !advertiser.includes(query) &&
         !placement.includes(query) &&
-        !invoiceNumber.includes(query)
+        !invoiceNumber.includes(query) &&
+        !seriesId.includes(query)
       ) {
         return false;
       }
@@ -8042,7 +8074,7 @@ export default function AdsPage() {
     setAd((current) => {
       const next = {
         ...current,
-        post_type: toCreateAdPostTypeValue(postType),
+        post_type: postType === "Multi-week booking (TBD)" ? "multi_week_tbd" : toCreateAdPostTypeValue(postType),
       };
 
       if (postType === "One-Time Post") {
@@ -8050,6 +8082,13 @@ export default function AdsPage() {
         next.post_date = next.post_date_from;
         next.post_date_to = "";
         next.custom_dates = [];
+      } else if (postType === "Multi-week booking (TBD)") {
+        next.post_date = "";
+        next.post_date_from = "";
+        next.post_date_to = "";
+        next.custom_dates = [];
+        next.post_time = "";
+        next.status = "Draft";
       } else if (postType === "Daily Run") {
         next.post_date = current.post_date || current.post_date_from || "";
         next.custom_dates = [];
@@ -8091,8 +8130,17 @@ export default function AdsPage() {
 
     try {
       const currentAd = createAdStateRef.current;
+      const currentPostType = normalizeCreateAdPostType(currentAd.post_type);
+      if (currentPostType === "Multi-week booking (TBD)") {
+        return {
+          available: true,
+          availabilityError: null,
+          fullyBookedDates: [],
+          data: null,
+        };
+      }
       const result = await checkAdAvailability({
-        postType: normalizeCreateAdPostType(currentAd.post_type),
+        postType: currentPostType,
         postDateFrom: currentAd.post_date_from || currentAd.post_date || "",
         postDateTo: currentAd.post_date_to || "",
         customDates: currentAd.custom_dates,
@@ -8269,6 +8317,75 @@ export default function AdsPage() {
         }
 
         const selectedPostType = normalizeCreateAdPostType(ad.post_type);
+        if (selectedPostType === "Multi-week booking (TBD)") {
+          const weeks = Number(ad.multi_week_weeks);
+          if (!Number.isFinite(weeks) || weeks < 2 || weeks > 12) {
+            throw new Error("Weeks must be between 2 and 12");
+          }
+          if (!String(ad.series_week_start || "").trim()) {
+            throw new Error("Week 1 start date is required");
+          }
+          if (!String(ad.product_id || "").trim()) {
+            throw new Error("Ad product is required");
+          }
+
+          const paymentMode =
+            ad.payment_mode ||
+            (String(ad.payment || "").toLowerCase() === "paid"
+              ? "Paid"
+              : ad.price
+                ? "Custom Amount"
+                : "TBD");
+
+          const createSeriesResponse = await fetchWithSessionAuth("/api/ads/create-series", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              advertiser_id: ad.advertiser_id,
+              product_id: ad.product_id,
+              placement: ad.placement || "",
+              payment: paymentMode === "Paid" ? "Paid" : "Unpaid",
+              status: "Draft",
+              weeks,
+              series_week_start: String(ad.series_week_start || "").slice(0, 10),
+              ad_name: ad.ad_name,
+              ad_text: ad.ad_text || null,
+              media: Array.isArray(ad.media) ? ad.media : [],
+              notes: ad.notes || null,
+              overrides: Array.isArray(ad.multi_week_overrides) ? ad.multi_week_overrides : [],
+            }),
+          });
+
+          if (!createSeriesResponse.ok) {
+            const data = await createSeriesResponse.json().catch(() => ({}));
+            throw new Error(data?.error || `Failed to create series (${createSeriesResponse.status})`);
+          }
+
+          const data = await createSeriesResponse.json();
+          const seriesId = String(data?.series_id || "").trim();
+
+          await refreshDbFromSupabase();
+          setView("list");
+          createAdStateRef.current = blankAd;
+          setAd(blankAd);
+          setCreateAdCustomDate("");
+          setCreateAdCustomTime("");
+          setCreateAdAvailabilityError(null);
+          setCreateAdFullyBookedDates([]);
+          closeAdvertiserCreate();
+          if (seriesId) {
+            setAdsFilters((current) => ({ ...current, search: seriesId }));
+            setAdsCurrentPage(1);
+          }
+
+          appToast.success({
+            title: "Multi-week booking created",
+            description: seriesId ? `Series ID: ${seriesId}` : "Created multi-week booking",
+          });
+
+          return;
+        }
+
         const customDates = normalizeCustomDatesForForm(ad.custom_dates, {
           fallbackTime: ad.post_time || "",
           fallbackReminder: "15-min",
@@ -9308,6 +9425,9 @@ export default function AdsPage() {
           ...current,
           advertiser_id: savedAdvertiser.id,
         }));
+      }
+      if (advertiserCreateSource === "createSeries" && savedAdvertiser?.id) {
+        setCreateSeriesAdvertiserId(savedAdvertiser.id);
       }
       closeAdvertiserCreate();
     } catch (error) {
@@ -11472,6 +11592,15 @@ export default function AdsPage() {
                 ad={adsPreviewAd}
                 onClose={() => setAdsPreviewAd(null)}
                 onEdit={openAdEditor}
+                onViewSeries={(selectedAd) => {
+                  const seriesId = String(selectedAd?.series_id || "").trim();
+                  if (!seriesId) {
+                    return;
+                  }
+                  setAdsPreviewAd(null);
+                  setAdsFilters((current) => ({ ...current, search: seriesId }));
+                  setAdsCurrentPage(1);
+                }}
                 linkedInvoices={linkedPreviewInvoices}
                 canEdit={canEditAds}
               />
@@ -11690,12 +11819,29 @@ export default function AdsPage() {
                           />
                         </div>
                       </div>
-                      <h1 className="text-3xl font-bold text-gray-900 mb-2">
-                        {ad.id ? "Edit ad" : "Create a new ad"}
-                      </h1>
-                      <p className="text-gray-600 text-sm">
-                        Fill out the form below to create your advertising content.
-                      </p>
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                            {ad.id ? "Edit ad" : "Create a new ad"}
+                          </h1>
+                          <p className="text-gray-600 text-sm">
+                            Fill out the form below to create your advertising content.
+                          </p>
+                        </div>
+                        {!ad.id ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCreateSeriesAdvertiserId(ad.advertiser_id || "");
+                              setView("createSeries");
+                            }}
+                            className="h-11 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all whitespace-nowrap"
+                            disabled={createAdSubmitting}
+                          >
+                            Multi-week booking
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
 
                     <form
@@ -11803,6 +11949,7 @@ export default function AdsPage() {
                       <PostTypeSection
                         selectedType={selectedCreateAdPostType}
                         onChange={handleCreateAdChange}
+                        includeMultiWeek={false}
                       />
 
                       <ScheduleSection
@@ -11835,6 +11982,185 @@ export default function AdsPage() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeSection === "Ads" && view === "createSeries" && canEditAds && (
+            <div className="flex-1 overflow-auto bg-gray-50 -m-8">
+              {advertiserCreateOpen && advertiserCreateSource === "createSeries" ? (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[80] p-4">
+                  <div className="bg-white rounded-2xl w-full max-w-xl shadow-2xl">
+                    <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+                      <div>
+                        <h2 className="text-xl font-semibold text-gray-900">Add Advertiser</h2>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Create the advertiser first, then continue creating the booking.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={closeAdvertiserCreate}
+                        className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+
+                    <div className="p-6 space-y-4">
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Advertiser Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.advertiser_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              advertiser_name: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter advertiser business name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Contact Name <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={advertiserCreateForm.contact_name}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              contact_name: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter primary contact name"
+                          className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Email
+                          </label>
+                          <input
+                            type="email"
+                            value={advertiserCreateForm.email}
+                            onChange={(event) =>
+                              setAdvertiserCreateForm((current) => ({
+                                ...current,
+                                email: event.target.value,
+                              }))
+                            }
+                            placeholder="contact@example.com"
+                            className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">
+                            Phone Number
+                          </label>
+                          <input
+                            type="tel"
+                            value={advertiserCreateForm.phone_number}
+                            onChange={(event) =>
+                              setAdvertiserCreateForm((current) => ({
+                                ...current,
+                                phone_number: formatUSPhoneNumber(event.target.value),
+                              }))
+                            }
+                            inputMode="tel"
+                            autoComplete="tel-national"
+                            maxLength={US_PHONE_INPUT_MAX_LENGTH}
+                            placeholder="(123) 456-7890"
+                            className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3">
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">
+                          Account Status
+                        </label>
+                        <select
+                          value={advertiserCreateForm.status}
+                          onChange={(event) =>
+                            setAdvertiserCreateForm((current) => ({
+                              ...current,
+                              status: event.target.value,
+                            }))
+                          }
+                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                          style={adsSelectStyle}
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="px-6 py-5 border-t border-gray-200 flex items-center justify-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => void saveNewAdvertiser("cancel")}
+                        className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
+                        disabled={advertiserCreateLoading}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveNewAdvertiser("save")}
+                        className="px-4 py-2 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={advertiserCreateLoading}
+                      >
+                        {advertiserCreateLoading ? "Saving..." : "Save Advertiser"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <CreateMultiWeekSeries
+                  advertisers={advertisers}
+                  products={products}
+                  fetchWithSessionAuth={fetchWithSessionAuth}
+                  advertiserId={createSeriesAdvertiserId}
+                  setAdvertiserId={setCreateSeriesAdvertiserId}
+                  onCreateNewAdvertiser={() => openAdvertiserCreate("createSeries")}
+                  initialValues={{
+                    advertiser_id: createSeriesAdvertiserId,
+                    product_id: ad.product_id || "",
+                    placement: ad.placement || "",
+                    payment: ad.payment || "Unpaid",
+                    status: "Draft",
+                    ad_name: ad.ad_name || "",
+                    ad_text: ad.ad_text || "",
+                    media: Array.isArray(ad.media) ? ad.media : [],
+                    notes: ad.notes || "",
+                  }}
+                  onCancel={() => setView("createAd")}
+                  onCreated={async ({ series_id }) => {
+                    await refreshDbFromSupabase();
+                    setView("list");
+                    setAd(blankAd);
+                    setCreateAdCustomDate("");
+                    setCreateAdCustomTime("");
+                    setCreateAdAvailabilityError(null);
+                    setCreateAdFullyBookedDates([]);
+                    setCreateSeriesAdvertiserId("");
+                    if (series_id) {
+                      setAdsFilters((current) => ({ ...current, search: String(series_id) }));
+                      setAdsCurrentPage(1);
+                    }
+                  }}
+                />
+              )}
             </div>
           )}
 

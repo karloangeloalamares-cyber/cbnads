@@ -1,4 +1,4 @@
-const postTypes = [
+const basePostTypes = [
   {
     value: "One-Time Post",
     title: "One-time post",
@@ -16,7 +16,14 @@ const postTypes = [
   },
 ];
 
-export function PostTypeSection({ selectedType, onChange }) {
+const multiWeekPostType = {
+  value: "Multi-week booking (TBD)",
+  title: "Multi-week booking (TBD)",
+  description: "Book multiple weeks now; schedule the exact day later.",
+};
+
+export function PostTypeSection({ selectedType, onChange, includeMultiWeek = true }) {
+  const postTypes = includeMultiWeek ? [...basePostTypes, multiWeekPostType] : basePostTypes;
   return (
     <div>
       <h3 className="text-sm font-semibold text-gray-900 mb-4">Post type</h3>

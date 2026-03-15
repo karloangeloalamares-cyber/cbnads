@@ -193,6 +193,17 @@ All future UI work by agents/LLMs in this repo must follow this rule for dropdow
 5. Close these overlays cleanly on outside click, `Escape`, and on window resize/scroll when appropriate.
 6. Treat this as a required design/system rule, not an optional enhancement.
 
+## Calendar + Schedule Consistency Rule (Critical)
+
+All date selection UI must use the app’s shared calendar UI + date-key conventions so it stays consistent with scheduling logic and availability checks.
+
+Non-negotiable:
+
+1. Do not use browser-native date inputs (`<input type="date">`) for scheduling-related fields.
+2. Reuse the shared calendar component used by schedules/availability (currently `AvailabilityDateField` in `anything/apps/web/src/components/SubmitAdForm/AvailabilityDateField.jsx`).
+3. Date values must remain in the app’s schedule format (`YYYY-MM-DD` date keys) and align with the same timezone assumptions used in `ScheduleSection`.
+4. If you add/modify any scheduling flow, verify it stays in sync with all other schedule pickers and availability enforcement paths (admin + public).
+
 ## Recent Fixes (March 5, 2026)
 
 1. Destructive actions in Ads UI now use app toasts (no browser `window.confirm` dialogs):
