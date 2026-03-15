@@ -22,7 +22,15 @@ const to24Hour = (h12str, period) => {
   return h === 12 ? 12 : h + 12;
 };
 
-export function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [], minTime = null }) {
+export function TimeSelect({
+  value,
+  onChange,
+  onBlur,
+  required,
+  blockedTimes = [],
+  minTime = null,
+  disabled = false,
+}) {
   // value is expected to be "HH:MM" (24-hour format)
   const currentHour24 = value ? parseInt(value.split(":")[0], 10) : null;
   const currentMinute = value ? value.split(":")[1] : "";
@@ -94,10 +102,11 @@ export function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [
     <div className="flex items-center gap-1 w-full">
       <select
         required={required}
+        disabled={disabled}
         value={displayHour}
         onChange={(e) => handleTimeChange("hour", e.target.value)}
         onBlur={onBlur}
-        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!displayHour ? "text-gray-400" : "text-gray-900"}`}
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center ${disabled ? "cursor-not-allowed text-gray-400" : "cursor-pointer"} ${!displayHour ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">HH</option>
         {HOURS.map((h) => {
@@ -112,10 +121,11 @@ export function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [
       <span className="text-sm text-gray-900 font-semibold">:</span>
       <select
         required={required}
+        disabled={disabled}
         value={currentMinute}
         onChange={(e) => handleTimeChange("minute", e.target.value)}
         onBlur={onBlur}
-        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ${!currentMinute ? "text-gray-400" : "text-gray-900"}`}
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center ${disabled ? "cursor-not-allowed text-gray-400" : "cursor-pointer"} ${!currentMinute ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">MM</option>
         {MINUTES.map((m) => {
@@ -131,10 +141,11 @@ export function TimeSelect({ value, onChange, onBlur, required, blockedTimes = [
       </select>
       <select
         required={required}
+        disabled={disabled}
         value={currentPeriod}
         onChange={(e) => handleTimeChange("period", e.target.value)}
         onBlur={onBlur}
-        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center cursor-pointer ml-1 ${!currentPeriod ? "text-gray-400" : "text-gray-900"}`}
+        className={`w-full text-sm bg-transparent focus:outline-none appearance-none text-center ml-1 ${disabled ? "cursor-not-allowed text-gray-400" : "cursor-pointer"} ${!currentPeriod ? "text-gray-400" : "text-gray-900"}`}
       >
         <option value="" disabled className="text-gray-400">--</option>
         {PERIODS.map((p) => {
@@ -296,7 +307,7 @@ export function ScheduleSection({
       return;
     }
 
-    const weeks = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+    const weeks = Math.min(12, Math.max(2, Number(formData.multi_week_weeks || 4) || 4));
     const overrides = Array.isArray(formData.multi_week_overrides)
       ? formData.multi_week_overrides
       : [];
@@ -308,6 +319,10 @@ export function ScheduleSection({
         ad_text: String(existing.ad_text || ""),
         use_base_media: existing.use_base_media !== false,
         media: Array.isArray(existing.media) ? existing.media : [],
+        schedule_tbd: Boolean(existing.schedule_tbd),
+        post_date_from: String(existing.post_date_from || ""),
+        post_time: String(existing.post_time || ""),
+        reminder_minutes: String(existing.reminder_minutes || "15-min"),
       };
     });
 
@@ -319,6 +334,10 @@ export function ScheduleSection({
         if (String(entry.ad_name || "") !== normalizedEntry.ad_name) return true;
         if (String(entry.ad_text || "") !== normalizedEntry.ad_text) return true;
         if ((entry.use_base_media !== false) !== normalizedEntry.use_base_media) return true;
+        if (Boolean(entry.schedule_tbd) !== normalizedEntry.schedule_tbd) return true;
+        if (String(entry.post_date_from || "") !== normalizedEntry.post_date_from) return true;
+        if (String(entry.post_time || "") !== normalizedEntry.post_time) return true;
+        if (String(entry.reminder_minutes || "15-min") !== normalizedEntry.reminder_minutes) return true;
         if (!Array.isArray(entry.media)) return true;
         return false;
       });
@@ -327,6 +346,28 @@ export function ScheduleSection({
       onChange("multi_week_overrides", normalized);
     }
   }, [formData.multi_week_overrides, formData.multi_week_weeks, onChange, postType]);
+
+  useEffect(() => {
+    if (postType !== "Multi-week booking (TBD)") {
+      return;
+    }
+
+    const overrides = Array.isArray(formData.multi_week_overrides) ? formData.multi_week_overrides : [];
+    const uniqueDates = Array.from(
+      new Set(
+        overrides
+          .filter((entry) => entry && typeof entry === "object" && !entry.schedule_tbd)
+          .map((entry) => String(entry.post_date_from || "").slice(0, 10))
+          .filter(Boolean),
+      ),
+    );
+
+    uniqueDates.forEach((dateKey) => {
+      if (!blockedTimesMap[dateKey]) {
+        void loadBlockedTimesForDate(dateKey);
+      }
+    });
+  }, [blockedTimesMap, formData.multi_week_overrides, loadBlockedTimesForDate, postType]);
 
   useEffect(() => {
     if (!formData.post_date_from) {
@@ -421,7 +462,7 @@ export function ScheduleSection({
       {postType === "Multi-week booking (TBD)" && (
         <>
           {(() => {
-            const weeksValue = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+            const weeksValue = Math.min(12, Math.max(2, Number(formData.multi_week_weeks || 4) || 4));
 
             return (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -431,17 +472,17 @@ export function ScheduleSection({
               </label>
               <input
                 type="number"
-                min={1}
+                min={2}
                 max={12}
                 value={weeksValue}
                 onChange={(e) => {
                   const next = Number(e.target.value);
-                  const clamped = Number.isFinite(next) ? Math.min(12, Math.max(1, Math.floor(next))) : 1;
+                  const clamped = Number.isFinite(next) ? Math.min(12, Math.max(2, Math.floor(next))) : 2;
                   onChange("multi_week_weeks", clamped);
                 }}
                 className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
               />
-              <p className="text-xs text-gray-500 mt-2">Creates one TBD ad per week (1–12).</p>
+              <p className="text-xs text-gray-500 mt-2">Creates one TBD ad per week (2–12).</p>
             </div>
 
             <AvailabilityDateField
@@ -470,7 +511,7 @@ export function ScheduleSection({
             </div>
 
             {(() => {
-              const weeks = Math.min(12, Math.max(1, Number(formData.multi_week_weeks || 4) || 4));
+              const weeks = Math.min(12, Math.max(2, Number(formData.multi_week_weeks || 4) || 4));
               const baseWeekStart = String(formData.series_week_start || "").slice(0, 10);
               const overrides = Array.isArray(formData.multi_week_overrides)
                 ? formData.multi_week_overrides
@@ -483,6 +524,10 @@ export function ScheduleSection({
                   ad_text: String(existing.ad_text || ""),
                   use_base_media: existing.use_base_media !== false,
                   media: Array.isArray(existing.media) ? existing.media : [],
+                  schedule_tbd: Boolean(existing.schedule_tbd),
+                  post_date_from: String(existing.post_date_from || ""),
+                  post_time: String(existing.post_time || ""),
+                  reminder_minutes: String(existing.reminder_minutes || "15-min"),
                 };
               });
 
@@ -507,7 +552,9 @@ export function ScheduleSection({
                             <div className="text-sm font-semibold text-gray-900">
                               Week {index + 1} <span className="text-gray-500 font-medium">• week of {label}</span>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">Schedule: TBD</div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              {entry.schedule_tbd ? "Schedule: TBD" : "Schedule: Set date and time for this week."}
+                            </div>
                           </div>
                         </div>
 
@@ -555,6 +602,109 @@ export function ScheduleSection({
                             <p className="text-xs text-gray-500 mt-2">
                               Unchecked = uses the base attachments. Checked = customize attachments for this week.
                             </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <h5 className="text-sm font-semibold text-gray-900">Schedule</h5>
+                            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(entry.schedule_tbd)}
+                                onChange={(e) => {
+                                  const next = [...normalizedOverrides];
+                                  next[index] = { ...next[index], schedule_tbd: e.target.checked };
+                                  onChange("multi_week_overrides", next);
+                                }}
+                              />
+                              TBD
+                            </label>
+                          </div>
+                          <p className="text-xs text-gray-500 mb-4">
+                            {entry.schedule_tbd
+                              ? "This week will be scheduled later."
+                              : "All times are in New York time (ET)"}
+                          </p>
+
+                          <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-y-3 gap-x-3">
+                            <AvailabilityDateField
+                              label="Post Date"
+                              required={!entry.schedule_tbd}
+                              value={entry.post_date_from}
+                              onChange={(value) => {
+                                const next = [...normalizedOverrides];
+                                next[index] = { ...next[index], post_date_from: value };
+                                onChange("multi_week_overrides", next);
+                                void loadBlockedTimesForDate(value);
+                              }}
+                              disabled={entry.schedule_tbd}
+                              minDate={getMinDate()}
+                              blockedDates={blockedDates}
+                              onLoadMonth={loadMonthAvailability}
+                              placeholder="Select date"
+                            />
+
+                            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${entry.schedule_tbd ? "bg-white border border-gray-200 opacity-60" : blockedDates[entry.post_date_from] ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
+                              <label className={`block text-xs font-semibold mb-1 ${blockedDates[entry.post_date_from] && !entry.schedule_tbd ? "text-red-700" : "text-gray-700"}`}>
+                                Post Time (ET) {!entry.schedule_tbd ? <span className="text-red-500">*</span> : null}
+                              </label>
+                              {entry.schedule_tbd ? (
+                                <p className="text-xs font-medium text-gray-500">Set to TBD for this week.</p>
+                              ) : blockedDates[entry.post_date_from] ? (
+                                <p className="text-xs font-medium text-red-600">
+                                  All slots are taken on that day - please choose a different date.
+                                </p>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-1 pr-6">
+                                    <TimeSelect
+                                      required={!entry.schedule_tbd}
+                                      value={timeForInput(entry.post_time)}
+                                      onChange={(value) => {
+                                        const next = [...normalizedOverrides];
+                                        next[index] = {
+                                          ...next[index],
+                                          post_time: value && value.length === 5 ? `${value}:00` : value,
+                                        };
+                                        onChange("multi_week_overrides", next);
+                                      }}
+                                      disabled={entry.schedule_tbd}
+                                      blockedTimes={blockedTimesMap[entry.post_date_from] || []}
+                                      minTime={entry.post_date_from === getTodayInAppTimeZone() ? getCurrentETTime() : null}
+                                    />
+                                  </div>
+                                  <Clock
+                                    size={16}
+                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+                                  />
+                                </>
+                              )}
+                            </div>
+
+                            <div className={`relative border rounded-lg bg-white px-4 pt-4 pb-3 transition-all ${entry.schedule_tbd ? "border-gray-200 opacity-60" : "border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
+                              <label className="block text-xs font-semibold text-gray-700 mb-1">Reminder</label>
+                              <div className="relative">
+                                <select
+                                  value={entry.reminder_minutes}
+                                  disabled={entry.schedule_tbd}
+                                  onChange={(e) => {
+                                    const next = [...normalizedOverrides];
+                                    next[index] = { ...next[index], reminder_minutes: e.target.value };
+                                    onChange("multi_week_overrides", next);
+                                  }}
+                                  className={`w-full text-sm bg-transparent focus:outline-none appearance-none pr-6 font-medium ${entry.schedule_tbd ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-900"}`}
+                                >
+                                  <option value="15-min">15 min before</option>
+                                  <option value="30-min">30 min before</option>
+                                  <option value="1-hour">1 hour before</option>
+                                  <option value="custom">Custom</option>
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center">
+                                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                                </div>
+                              </div>
+                            </div>
                           </div>
                         </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Eye, X } from "lucide-react";
 import { useSubmitAdForm } from "@/hooks/useSubmitAdForm";
 import { useModal } from "@/hooks/useModal";
@@ -13,9 +13,49 @@ import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { CreateAdvertiserAccountStep } from "@/components/SubmitAdForm/CreateAdvertiserAccountStep";
 import { VerifyAdvertiserEmailStep } from "@/components/SubmitAdForm/VerifyAdvertiserEmailStep";
 
+const clampWeeks = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 2;
+  return Math.min(12, Math.max(2, Math.floor(parsed)));
+};
+
+const addDaysToDateKey = (dateKey, days) => {
+  const normalized = String(dateKey || "").slice(0, 10);
+  if (!normalized) return "";
+  const parsed = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(parsed.valueOf())) return "";
+  parsed.setDate(parsed.getDate() + Number(days || 0));
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const resolveWeeklyPreview = (formData, weekIndex) => {
+  const overrides = Array.isArray(formData.multi_week_overrides) ? formData.multi_week_overrides : [];
+  const override = overrides[weekIndex] && typeof overrides[weekIndex] === "object" ? overrides[weekIndex] : {};
+  const baseName = String(formData.ad_name || "").trim();
+  const baseText = String(formData.ad_text || "").trim();
+  const baseMedia = Array.isArray(formData.media) ? formData.media : [];
+  const useBaseMedia = override.use_base_media !== false;
+  const scheduleTbd = Boolean(override.schedule_tbd);
+
+  return {
+    ...formData,
+    ad_name: String(override.ad_name || "").trim() || (baseName ? `${baseName} (Week ${weekIndex + 1})` : `Week ${weekIndex + 1}`),
+    ad_text: String(override.ad_text || "").trim() || baseText,
+    media: useBaseMedia ? baseMedia : Array.isArray(override.media) ? override.media : [],
+    post_date_from: scheduleTbd
+      ? ""
+      : String(override.post_date_from || "").trim() || addDaysToDateKey(formData.series_week_start, weekIndex * 7),
+    post_time: scheduleTbd ? "" : String(override.post_time || "").trim(),
+  };
+};
+
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
   const [showPreview, setShowPreview] = useState(false);
+  const [previewWeekIndex, setPreviewWeekIndex] = useState(0);
 
   const {
     formData,
@@ -67,7 +107,27 @@ export default function SubmitAdPage() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const previewData = phase === "form" ? formData : submittedData || formData;
+  useEffect(() => {
+    if (!showPreview || !isMultiWeekPreview) {
+      return;
+    }
+    setPreviewWeekIndex((current) => Math.min(previewWeekCount - 1, Math.max(0, current)));
+  }, [isMultiWeekPreview, previewWeekCount, showPreview]);
+
+  const previewSource = phase === "form" ? formData : submittedData || formData;
+  const isMultiWeekPreview = previewSource.post_type === "Multi-week booking (TBD)";
+  const previewWeekCount = useMemo(
+    () => (isMultiWeekPreview ? clampWeeks(previewSource.multi_week_weeks || 1) : 0),
+    [isMultiWeekPreview, previewSource.multi_week_weeks],
+  );
+  const previewData = useMemo(() => {
+    if (!isMultiWeekPreview) {
+      return previewSource;
+    }
+
+    const clampedIndex = Math.min(previewWeekCount - 1, Math.max(0, previewWeekIndex));
+    return resolveWeeklyPreview(previewSource, clampedIndex);
+  }, [isMultiWeekPreview, previewSource, previewWeekCount, previewWeekIndex]);
   const isSubmitDisabled = loading || !!pastTimeError;
 
   const honeypotRef = useRef(null);
@@ -215,7 +275,9 @@ export default function SubmitAdPage() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative ml-auto w-full max-w-[480px] h-full bg-[#F5F5F5] shadow-2xl flex flex-col overflow-y-auto">
             <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
-              <span className="text-sm font-semibold text-gray-900">Ad Preview</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {isMultiWeekPreview ? `Ad Preview - Week ${previewWeekIndex + 1}` : "Ad Preview"}
+              </span>
               <button
                 type="button"
                 onClick={() => setShowPreview(false)}
@@ -225,6 +287,24 @@ export default function SubmitAdPage() {
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-6">
+              {isMultiWeekPreview ? (
+                <div className="mb-5 flex flex-wrap gap-2">
+                  {Array.from({ length: previewWeekCount }).map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setPreviewWeekIndex(index)}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                        previewWeekIndex === index
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      {`Week ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <AdPreview formData={previewData} />
             </div>
           </div>

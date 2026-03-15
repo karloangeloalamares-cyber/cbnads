@@ -262,6 +262,29 @@ export function useSubmitAdForm() {
 
   const validateDateTime = (currentFormData) => {
     if (currentFormData.post_type === "Multi-week booking (TBD)") {
+      const overrides = Array.isArray(currentFormData.multi_week_overrides)
+        ? currentFormData.multi_week_overrides
+        : [];
+
+      const invalidWeekIndex = overrides.findIndex((entry) => {
+        if (!entry || typeof entry !== "object" || entry.schedule_tbd) {
+          return false;
+        }
+        const weekDate = String(entry.post_date_from || "").trim();
+        const weekTime = String(entry.post_time || "").trim();
+        if (!weekDate || !weekTime) {
+          return false;
+        }
+        return isPastDateTimeInAppTimeZone(weekDate, weekTime);
+      });
+
+      if (invalidWeekIndex >= 0) {
+        showSubmitError(`Week ${invalidWeekIndex + 1} has a past date/time.`);
+        setPastTimeError("One or more week schedules are in the past. Please choose a future time.");
+        return false;
+      }
+
+      setPastTimeError(null);
       return true;
     }
 
@@ -369,6 +392,19 @@ export function useSubmitAdForm() {
           showSubmitError("Please select the Week 1 start date.");
           return;
         }
+        const overrides = Array.isArray(currentFormData.multi_week_overrides)
+          ? currentFormData.multi_week_overrides
+          : [];
+        const missingScheduleWeekIndex = overrides.findIndex((entry) => {
+          if (!entry || typeof entry !== "object" || entry.schedule_tbd) {
+            return false;
+          }
+          return !String(entry.post_date_from || "").trim() || !String(entry.post_time || "").trim();
+        });
+        if (missingScheduleWeekIndex >= 0) {
+          showSubmitError(`Week ${missingScheduleWeekIndex + 1} needs a date/time or must be marked TBD.`);
+          return;
+        }
       } else {
         const availability = await checkAdAvailability({
           postType: currentFormData.post_type,
@@ -407,7 +443,13 @@ export function useSubmitAdForm() {
                   weeks: Number(currentFormData.multi_week_weeks),
                   series_week_start: String(currentFormData.series_week_start || "").slice(0, 10),
                   overrides: Array.isArray(currentFormData.multi_week_overrides)
-                    ? currentFormData.multi_week_overrides
+                    ? currentFormData.multi_week_overrides.map((entry) => ({
+                        ...entry,
+                        post_time:
+                          entry?.post_time && String(entry.post_time).length === 5
+                            ? `${entry.post_time}:00`
+                            : entry?.post_time || "",
+                      }))
                     : [],
                 },
               }

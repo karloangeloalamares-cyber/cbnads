@@ -111,7 +111,7 @@ export async function POST(request) {
       );
     }
 
-    const normalizedWeeks = clampWeeks(weeks, { min: 1, max: 12, fallback: 4 });
+    const normalizedWeeks = clampWeeks(weeks, { min: 2, max: 12, fallback: 4 });
     const normalizedWeekStart = normalizeDateKeyStrict(series_week_start);
     if (!normalizedWeekStart) {
       return Response.json({ error: "series_week_start is required" }, { status: 400 });
@@ -146,21 +146,27 @@ export async function POST(request) {
       }
 
       const missingDateIndex = weeks_data.findIndex(
-        (item) => !item || typeof item !== "object" || !normalizeDateKeyStrict(item.post_date_from),
+        (item) =>
+          !item ||
+          typeof item !== "object" ||
+          (!Boolean(item.schedule_tbd) && !normalizeDateKeyStrict(item.post_date_from)),
       );
       if (missingDateIndex >= 0) {
         return Response.json(
-          { error: `Week ${missingDateIndex + 1} is missing post_date_from` },
+          { error: `Week ${missingDateIndex + 1} is missing post_date_from or must be marked TBD` },
           { status: 400 },
         );
       }
 
       const missingTimeIndex = weeks_data.findIndex(
-        (item) => !item || typeof item !== "object" || !normalizeTime(item.post_time),
+        (item) =>
+          !item ||
+          typeof item !== "object" ||
+          (!Boolean(item.schedule_tbd) && !normalizeTime(item.post_time)),
       );
       if (missingTimeIndex >= 0) {
         return Response.json(
-          { error: `Week ${missingTimeIndex + 1} is missing post_time` },
+          { error: `Week ${missingTimeIndex + 1} is missing post_time or must be marked TBD` },
           { status: 400 },
         );
       }
@@ -229,6 +235,9 @@ export async function POST(request) {
     if (hasWeeksData) {
       for (let idx = 0; idx < weekInfos.length; idx += 1) {
         const item = weeks_data[idx] && typeof weeks_data[idx] === "object" ? weeks_data[idx] : {};
+        if (Boolean(item.schedule_tbd)) {
+          continue;
+        }
         const postDate = normalizeDateKeyStrict(item.post_date_from);
         const postTime = normalizeTime(item.post_time);
 
@@ -274,6 +283,7 @@ export async function POST(request) {
         const weekMedia = Array.isArray(item.media) ? item.media : [];
         const weekText = String(item.ad_text || "").trim() || null;
         const weekNotes = String(item.notes || "").trim();
+        const scheduleTbd = Boolean(item.schedule_tbd);
         const postDate = normalizeDateKeyStrict(item.post_date_from);
         const postTime = normalizeTime(item.post_time);
         const reminderMinutes = parseReminderMinutes(item.reminder_minutes, 15);
@@ -288,9 +298,9 @@ export async function POST(request) {
           status: resolvedStatus,
           post_type: "one_time",
           placement: resolvedPlacement,
-          schedule: postDate,
-          post_date: postDate,
-          post_date_from: postDate,
+          schedule: scheduleTbd ? null : postDate,
+          post_date: scheduleTbd ? null : postDate,
+          post_date_from: scheduleTbd ? null : postDate,
           post_date_to: null,
           custom_dates: [],
           payment: resolvedPayment,
@@ -299,7 +309,7 @@ export async function POST(request) {
           price: savedPrice,
           media: weekMedia,
           ad_text: weekText,
-          post_time: postTime,
+          post_time: scheduleTbd ? null : postTime,
           scheduled_timezone: APP_TIME_ZONE,
           reminder_minutes: reminderMinutes,
           notes: finalNotes || null,

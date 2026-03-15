@@ -268,7 +268,7 @@ export async function createPendingAdSubmission({
   };
 
   if (isMultiWeek) {
-    const weeks = clampWeeks(multi_week.weeks, { min: 1, max: 12, fallback: 4 });
+    const weeks = clampWeeks(multi_week.weeks, { min: 2, max: 12, fallback: 4 });
     const seriesWeekStart = normalizeDateKeyStrict(multi_week.series_week_start);
     if (!seriesWeekStart) {
       return { error: "Week 1 start date is required", status: 400 };
@@ -321,6 +321,19 @@ export async function createPendingAdSubmission({
       media: sanitizeMediaArray(media),
     };
 
+    const invalidScheduleIndex = overrides.findIndex((item) => {
+      if (!item || typeof item !== "object" || item.schedule_tbd) {
+        return false;
+      }
+      return !normalizeDateKeyStrict(item.post_date_from) || !String(item.post_time || "").trim();
+    });
+    if (invalidScheduleIndex >= 0) {
+      return {
+        error: `Week ${invalidScheduleIndex + 1} needs a date/time or must be marked TBD`,
+        status: 400,
+      };
+    }
+
     const pendingPayloads = weekStarts.map((weekInfo, idx) => {
       const override = overrides[idx] && typeof overrides[idx] === "object" ? overrides[idx] : {};
       const overrideProductId = String(override.product_id || "").trim();
@@ -333,6 +346,10 @@ export async function createPendingAdSubmission({
       const overridePlacement = String(override.placement || "").trim();
       const resolvedPlacement = String(overridePlacement || productRow.placement || basePlacement || "").trim();
       const savedPrice = Number(productRow.price || 0) || 0;
+      const scheduleTbd = Boolean(override.schedule_tbd);
+      const postDate = normalizeDateKeyStrict(override.post_date_from);
+      const postTime = scheduleTbd ? null : String(override.post_time || "").trim() || null;
+      const reminderMinutes = parseReminderMinutes(override.reminder_minutes, reminderMinutesValue);
 
       const creative = resolveWeeklyCreative({
         base: baseCreative,
@@ -358,12 +375,12 @@ export async function createPendingAdSubmission({
         phone: normalizedPhoneNumber || null,
         ad_name: creative.ad_name,
         post_type: "one_time",
-        post_date: null,
-        post_date_from: null,
+        post_date: scheduleTbd ? null : postDate,
+        post_date_from: scheduleTbd ? null : postDate,
         post_date_to: null,
         custom_dates: [],
-        post_time: null,
-        reminder_minutes: reminderMinutesValue,
+        post_time: scheduleTbd ? null : postTime,
+        reminder_minutes: reminderMinutes,
         ad_text: creative.ad_text,
         media: creative.media,
         placement: resolvedPlacement || null,
@@ -381,6 +398,29 @@ export async function createPendingAdSubmission({
         series_week_start: weekInfo.series_week_start,
       };
     });
+
+    for (let idx = 0; idx < pendingPayloads.length; idx += 1) {
+      const payload = pendingPayloads[idx];
+      if (!payload.post_date_from || !payload.post_time) {
+        continue;
+      }
+
+      const availability = await checkSingleDateAvailability({
+        supabase,
+        date: payload.post_date_from,
+        postType: "one_time",
+        postTime: payload.post_time,
+      });
+
+      if (!availability.available) {
+        return {
+          error: availability.is_day_full
+            ? `Week ${idx + 1}: ad limit reached for this date. Please choose another date or mark it TBD.`
+            : `Week ${idx + 1}: this time slot is already booked. Please choose a different time or mark it TBD.`,
+          status: 400,
+        };
+      }
+    }
 
     const insertedPendingAds = await insertPendingAds(supabase, pendingPayloads);
     const firstPendingAd = insertedPendingAds[0] || null;
@@ -429,7 +469,7 @@ export async function createPendingAdSubmission({
     <div class="content">
       <h2>Thank You for Your Multi-week Booking Request</h2>
       <p>Dear ${escaped.contact_name},</p>
-      <p>We have received your request. Your weekly dates are currently <strong>TBD</strong> and will be scheduled after review.</p>
+      <p>We have received your request. Each week can be scheduled now or left <strong>TBD</strong> for later scheduling after review.</p>
 
       <div class="info-block">
         <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiser_name}</div>
@@ -439,7 +479,7 @@ export async function createPendingAdSubmission({
         <div class="info-row"><span class="label">Weeks:</span> ${escaped.weeks}</div>
         <div class="info-row"><span class="label">Week 1 starts:</span> ${escaped.series_week_start}</div>
         ${selectedProduct ? `<div class="info-row"><span class="label">Product:</span> ${escaped.product_name}</div>` : ""}
-        ${resolvedPlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+        ${basePlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
         ${selectedProduct ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.price} per scheduled post</div>` : ""}
       </div>
 
@@ -485,7 +525,7 @@ export async function createPendingAdSubmission({
     <div class="content">
       <div class="alert">
         <strong>New Multi-week Booking Request (Pending)</strong><br>
-        ${escapeHtml(advertiser_name)} requested ${escapeHtml(String(weeks))} weeks (dates TBD).
+        ${escapeHtml(advertiser_name)} requested ${escapeHtml(String(weeks))} weeks.
       </div>
 
       <div class="info-section">
@@ -505,7 +545,7 @@ export async function createPendingAdSubmission({
           <div class="info-row"><span class="label">Weeks:</span> ${escaped.weeks}</div>
           <div class="info-row"><span class="label">Week 1 starts:</span> ${escaped.series_week_start}</div>
           ${selectedProduct ? `<div class="info-row"><span class="label">Product:</span> ${escaped.product_name}</div>` : ""}
-          ${resolvedPlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+          ${basePlacement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
           ${selectedProduct ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.price} per scheduled post</div>` : ""}
         </div>
       </div>
@@ -558,7 +598,7 @@ export async function createPendingAdSubmission({
       `<b>Campaign:</b> ${escapeHtml(ad_name)}`,
       `<b>Weeks:</b> ${escapeHtml(String(weeks))}`,
       `<b>Week 1 starts:</b> ${escapeHtml(seriesWeekStart)}`,
-      resolvedPlacement ? `<b>Placement:</b> ${escapeHtml(resolvedPlacement)}` : "",
+      basePlacement ? `<b>Placement:</b> ${escapeHtml(basePlacement)}` : "",
       selectedProduct ? `<b>Product:</b> ${escapeHtml(selectedProduct.product_name)}` : "",
       `<b>Series ID:</b> ${escapeHtml(seriesId)}`,
       reviewSubmissionUrl ? `<b>Review:</b> ${escapeHtml(reviewSubmissionUrl)}` : "",

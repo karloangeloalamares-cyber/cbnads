@@ -57,6 +57,7 @@ export function AvailabilityDateField({
   placeholder,
   helperText,
   variant = "default",
+  disabled = false,
 }) {
   const containerClasses =
     variant === "subtle"
@@ -81,6 +82,12 @@ export function AvailabilityDateField({
     setVisibleMonth(parseDate(value) || getTodayDateInAppTimeZone());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleMonth]);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     if (!open) {
@@ -127,10 +134,11 @@ export function AvailabilityDateField({
 
         <button
           type="button"
+          disabled={disabled}
           onClick={() => setOpen((current) => !current)}
-          className="w-full flex items-center justify-between gap-3 text-left text-sm text-gray-900"
+          className={`w-full flex items-center justify-between gap-3 text-left text-sm ${disabled ? "text-gray-400 cursor-not-allowed" : "text-gray-900"}`}
         >
-          <span className={value ? "text-gray-900" : "text-gray-400"}>
+          <span className={disabled ? "text-gray-400" : value ? "text-gray-900" : "text-gray-400"}>
             {value ? formatDateLong(value) : placeholder || "Select date"}
           </span>
           <CalendarDays size={16} className="text-gray-400" />

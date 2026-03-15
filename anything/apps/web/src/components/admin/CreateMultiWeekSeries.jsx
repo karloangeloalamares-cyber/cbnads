@@ -13,7 +13,7 @@ import { Clock, ChevronDown } from "lucide-react";
 const clampWeeks = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 4;
-  return Math.min(12, Math.max(1, Math.floor(parsed)));
+  return Math.min(12, Math.max(2, Math.floor(parsed)));
 };
 
 const addDaysToDateKey = (dateKey, days) => {
@@ -60,6 +60,7 @@ const emptyOverride = () => ({
   ad_name: "",
   ad_text: "",
   media: [],
+  schedule_tbd: false,
   post_date_from: "",
   post_time: "",
   reminder_minutes: "15-min",
@@ -117,6 +118,7 @@ export default function CreateMultiWeekSeries({
               ad_name: String(existing.ad_name || ""),
               ad_text: String(existing.ad_text || ""),
               media: Array.isArray(existing.media) ? existing.media : [],
+              schedule_tbd: Boolean(existing.schedule_tbd),
               post_date_from: String(existing.post_date_from || ""),
               post_time: String(existing.post_time || ""),
               reminder_minutes: String(existing.reminder_minutes || "15-min"),
@@ -220,6 +222,7 @@ export default function CreateMultiWeekSeries({
       ad_name: String(initialValues.ad_name || ""),
       ad_text: String(initialValues.ad_text || ""),
       media: Array.isArray(initialValues.media) ? initialValues.media : [],
+      schedule_tbd: false,
       post_date_from: "",
       post_time: "",
       reminder_minutes: "15-min",
@@ -283,8 +286,8 @@ export default function CreateMultiWeekSeries({
       ad_name: String(week?.ad_name || "").trim(),
       ad_text: String(week?.ad_text || "").trim(),
       media: Array.isArray(week?.media) ? week.media : [],
-      post_date_from: String(week?.post_date_from || weekStart || ""),
-      post_time: String(week?.post_time || ""),
+      post_date_from: week?.schedule_tbd ? "" : String(week?.post_date_from || weekStart || ""),
+      post_time: week?.schedule_tbd ? "" : String(week?.post_time || ""),
     };
   };
 
@@ -306,13 +309,13 @@ export default function CreateMultiWeekSeries({
       (item) =>
         !String(item?.ad_name || "").trim() ||
         !String(item?.product_id || "").trim() ||
-        !String(item?.post_date_from || "").trim() ||
-        !String(item?.post_time || "").trim(),
+        (!item?.schedule_tbd &&
+          (!String(item?.post_date_from || "").trim() || !String(item?.post_time || "").trim())),
     );
     if (missingWeekIndex >= 0) {
       appToast.error({
         title: "Missing week details",
-        description: `Week ${missingWeekIndex + 1} requires product, ad name, date, and time.`,
+        description: `Week ${missingWeekIndex + 1} requires product, ad name, and either a schedule or TBD.`,
       });
       return;
     }
@@ -359,9 +362,9 @@ export default function CreateMultiWeekSeries({
         <div className="max-w-4xl mx-auto">
           <div className="flex items-start justify-between gap-4 mb-6">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">Create multi-week booking (TBD)</h1>
+              <h1 className="text-3xl font-bold text-gray-900">Create multi-week booking</h1>
               <p className="text-gray-600 text-sm mt-2">
-                Creates one draft ad per week with no scheduled date/time yet.
+                Create one ad per week. Set a schedule now or mark any week as TBD.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -391,13 +394,13 @@ export default function CreateMultiWeekSeries({
               <label className="block text-xs font-semibold text-gray-700 mb-1">Weeks</label>
               <input
                 type="number"
-                min={1}
+                min={2}
                 max={12}
                 value={normalizedWeeks}
                 onChange={(e) => setWeeks(e.target.value)}
                 className="w-full text-sm text-gray-900 bg-transparent focus:outline-none"
               />
-              <p className="text-xs text-gray-500 mt-2">1-12 weeks.</p>
+              <p className="text-xs text-gray-500 mt-2">2-12 weeks.</p>
             </div>
             <AvailabilityDateField
               label="Week 1 start (week of)"
@@ -554,13 +557,31 @@ export default function CreateMultiWeekSeries({
                 </div>
 
                 <div className="mt-4">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-2">Schedule</h4>
-                  <p className="text-xs text-gray-500 mb-4">All times are in New York time (ET)</p>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-semibold text-gray-900">Schedule</h4>
+                    <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(entry.schedule_tbd)}
+                        onChange={(e) => {
+                          const next = [...weekAds];
+                          next[index] = { ...next[index], schedule_tbd: e.target.checked };
+                          setWeekAds(next);
+                        }}
+                      />
+                      TBD
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-4">
+                    {entry.schedule_tbd
+                      ? "This week will be scheduled later."
+                      : "All times are in New York time (ET)"}
+                  </p>
 
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_200px_160px] lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-y-3 gap-x-3">
                     <AvailabilityDateField
                       label="Post Date"
-                      required
+                      required={!entry.schedule_tbd}
                       value={entry.post_date_from}
                       onChange={(value) => {
                         const next = [...weekAds];
@@ -568,6 +589,7 @@ export default function CreateMultiWeekSeries({
                         setWeekAds(next);
                         void loadBlockedTimesForDate(value);
                       }}
+                      disabled={entry.schedule_tbd}
                       minDate={getTodayInAppTimeZone()}
                       blockedDates={monthAvailability}
                       onLoadMonth={loadMonthAvailability}
@@ -580,9 +602,11 @@ export default function CreateMultiWeekSeries({
                       <label
                         className={`block text-xs font-semibold mb-1 ${monthAvailability[entry.post_date_from]?.is_full ? "text-red-700" : "text-gray-700"}`}
                       >
-                        Post Time (ET) <span className="text-red-500">*</span>
+                        Post Time (ET) {!entry.schedule_tbd ? <span className="text-red-500">*</span> : null}
                       </label>
-                      {monthAvailability[entry.post_date_from]?.is_full ? (
+                      {entry.schedule_tbd ? (
+                        <p className="text-xs font-medium text-gray-500">Set to TBD for this week.</p>
+                      ) : monthAvailability[entry.post_date_from]?.is_full ? (
                         <p className="text-xs font-medium text-red-600">
                           All slots are taken on that day - please choose a different date.
                         </p>
@@ -590,7 +614,7 @@ export default function CreateMultiWeekSeries({
                         <>
                           <div className="flex items-center gap-1 pr-6">
                             <TimeSelect
-                              required
+                              required={!entry.schedule_tbd}
                               value={timeForInput(entry.post_time)}
                               onChange={(value) => {
                                 const next = [...weekAds];
@@ -600,6 +624,7 @@ export default function CreateMultiWeekSeries({
                                 };
                                 setWeekAds(next);
                               }}
+                              disabled={entry.schedule_tbd}
                               blockedTimes={blockedTimesMap[entry.post_date_from] || []}
                               minTime={entry.post_date_from === getTodayInAppTimeZone() ? getCurrentETTime() : null}
                             />
@@ -612,17 +637,18 @@ export default function CreateMultiWeekSeries({
                       )}
                     </div>
 
-                    <div className="relative border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                    <div className={`relative border rounded-lg bg-white px-4 pt-4 pb-3 transition-all ${entry.schedule_tbd ? "border-gray-200 opacity-60" : "border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
                       <label className="block text-xs font-semibold text-gray-700 mb-1">Reminder</label>
                       <div className="relative">
                         <select
                           value={entry.reminder_minutes}
+                          disabled={entry.schedule_tbd}
                           onChange={(e) => {
                             const next = [...weekAds];
                             next[index] = { ...next[index], reminder_minutes: e.target.value };
                             setWeekAds(next);
                           }}
-                          className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer pr-6 font-medium"
+                          className={`w-full text-sm bg-transparent focus:outline-none appearance-none pr-6 font-medium ${entry.schedule_tbd ? "cursor-not-allowed text-gray-400" : "cursor-pointer text-gray-900"}`}
                         >
                           <option value="15-min">15 min before</option>
                           <option value="30-min">30 min before</option>
