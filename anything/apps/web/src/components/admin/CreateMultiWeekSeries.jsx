@@ -51,6 +51,7 @@ const timeForInput = (timeStr) => {
 };
 
 const toMonthKey = (dateKey) => String(dateKey || "").slice(0, 7);
+const isDateFullyBooked = (blockedInfo) => Boolean(blockedInfo?.is_full || blockedInfo?.blocked);
 
 const emptyOverride = () => ({
   product_id: "",
@@ -603,16 +604,16 @@ export default function CreateMultiWeekSeries({
                     />
 
                     <div
-                      className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${monthAvailability[entry.post_date_from]?.is_full ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}
+                      className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${isDateFullyBooked(monthAvailability[entry.post_date_from]) ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}
                     >
                       <label
-                        className={`block text-xs font-semibold mb-1 ${monthAvailability[entry.post_date_from]?.is_full ? "text-red-700" : "text-gray-700"}`}
+                        className={`block text-xs font-semibold mb-1 ${isDateFullyBooked(monthAvailability[entry.post_date_from]) ? "text-red-700" : "text-gray-700"}`}
                       >
                         Post Time (ET) {!entry.schedule_tbd ? <span className="text-red-500">*</span> : null}
                       </label>
                       {entry.schedule_tbd ? (
                         <p className="text-xs font-medium text-gray-500">Set to TBD for this week.</p>
-                      ) : monthAvailability[entry.post_date_from]?.is_full ? (
+                      ) : isDateFullyBooked(monthAvailability[entry.post_date_from]) ? (
                         <p className="text-xs font-medium text-red-600">
                           All slots are taken on that day - please choose a different date.
                         </p>

@@ -72,12 +72,27 @@ export function TimeSelect({
     return false;
   };
 
+  const isTimePastForPeriod = (h12str, minuteValue, period) => {
+    if (!minTime24) return false;
+    if (!h12str || !period) return false;
+    const h24 = to24Hour(h12str, period);
+    const minute = parseInt(String(minuteValue || "00"), 10);
+    return h24 * 60 + minute < minTime24.hour * 60 + minTime24.minute;
+  };
+
   // Is a 12-hour display hour option in the past, given the current period selection?
   const isHourPast = (h12str) => {
-    if (!minTime24 || !currentPeriod) return false;
-    const h24 = to24Hour(h12str, currentPeriod);
-    // Disable if even the last minute (55) of this hour is before minTime
-    return h24 * 60 + 55 < minTime24.hour * 60 + minTime24.minute;
+    if (!minTime24) return false;
+    if (currentPeriod) {
+      const h24 = to24Hour(h12str, currentPeriod);
+      return h24 * 60 + 55 < minTime24.hour * 60 + minTime24.minute;
+    }
+
+    return PERIODS.every((period) => {
+      if (isPeriodPast(period)) return true;
+      const h24 = to24Hour(h12str, period);
+      return h24 * 60 + 55 < minTime24.hour * 60 + minTime24.minute;
+    });
   };
 
   // Is a specific minute past, given the currently selected hour?
@@ -88,12 +103,44 @@ export function TimeSelect({
     return false;
   };
 
+  const resolveNextPeriod = (hour12Value, minuteValue, preferredPeriod) => {
+    const normalizedHour = String(hour12Value || "");
+    const normalizedMinute = String(minuteValue || "00");
+    if (!normalizedHour) {
+      return preferredPeriod || currentPeriod || "";
+    }
+
+    const candidates = [];
+    if (preferredPeriod) {
+      candidates.push(preferredPeriod);
+    }
+    if (currentPeriod && !candidates.includes(currentPeriod)) {
+      candidates.push(currentPeriod);
+    }
+    PERIODS.forEach((period) => {
+      if (!candidates.includes(period)) {
+        candidates.push(period);
+      }
+    });
+
+    return (
+      candidates.find((period) => {
+        if (isPeriodPast(period)) return false;
+        return !isTimePastForPeriod(normalizedHour, normalizedMinute, period);
+      }) ||
+      preferredPeriod ||
+      currentPeriod ||
+      "AM"
+    );
+  };
+
   const handleTimeChange = (type, val) => {
     let newHour12 = type === "hour" ? val : displayHour;
     let newMinute = type === "minute" ? val : (currentMinute || "00");
-    let newPeriod = type === "period" ? val : (currentPeriod || "AM");
+    let newPeriod = type === "period" ? val : currentPeriod;
 
     if (!newHour12) newHour12 = "12";
+    newPeriod = resolveNextPeriod(newHour12, newMinute, newPeriod);
 
     let newHour24 = parseInt(newHour12, 10);
     if (newPeriod === "PM" && newHour24 !== 12) newHour24 += 12;
@@ -209,6 +256,8 @@ const timeForInput = (timeStr) => {
 
 const toMonthKey = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const isDateFullyBooked = (blockedInfo) => Boolean(blockedInfo?.is_full || blockedInfo?.blocked);
 
 export function ScheduleSection({
   postType,
@@ -727,13 +776,13 @@ export function ScheduleSection({
                               placeholder="Select date"
                             />
 
-                            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${entry.schedule_tbd ? "bg-white border border-gray-200 opacity-60" : blockedDates[entry.post_date_from] ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
-                              <label className={`block text-xs font-semibold mb-1 ${blockedDates[entry.post_date_from] && !entry.schedule_tbd ? "text-red-700" : "text-gray-700"}`}>
+                            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${entry.schedule_tbd ? "bg-white border border-gray-200 opacity-60" : isDateFullyBooked(blockedDates[entry.post_date_from]) ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
+                              <label className={`block text-xs font-semibold mb-1 ${isDateFullyBooked(blockedDates[entry.post_date_from]) && !entry.schedule_tbd ? "text-red-700" : "text-gray-700"}`}>
                                 Post Time (ET) {!entry.schedule_tbd ? <span className="text-red-500">*</span> : null}
                               </label>
                               {entry.schedule_tbd ? (
                                 <p className="text-xs font-medium text-gray-500">Set to TBD for this week.</p>
-                              ) : blockedDates[entry.post_date_from] ? (
+                              ) : isDateFullyBooked(blockedDates[entry.post_date_from]) ? (
                                 <p className="text-xs font-medium text-red-600">
                                   All slots are taken on that day - please choose a different date.
                                 </p>
@@ -857,11 +906,11 @@ export function ScheduleSection({
               placeholder="Select date"
             />
 
-            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${blockedDates[formData.post_date_from] ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
-              <label className={`block text-xs font-semibold mb-1 ${blockedDates[formData.post_date_from] ? "text-red-700" : "text-gray-700"}`}>
+            <div className={`relative rounded-lg px-4 pt-4 pb-3 transition-all ${isDateFullyBooked(blockedDates[formData.post_date_from]) ? "bg-red-50 border border-red-200" : "bg-white border border-gray-200 hover:border-gray-300 focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0"}`}>
+              <label className={`block text-xs font-semibold mb-1 ${isDateFullyBooked(blockedDates[formData.post_date_from]) ? "text-red-700" : "text-gray-700"}`}>
                 Post Time (ET) <span className="text-red-500">*</span>
               </label>
-              {blockedDates[formData.post_date_from] ? (
+              {isDateFullyBooked(blockedDates[formData.post_date_from]) ? (
                 <p className="text-xs font-medium text-red-600">All slots are taken on that day — please choose a different date.</p>
               ) : (
                 <>
@@ -1037,7 +1086,7 @@ export function ScheduleSection({
                 ? entry.time || entry.post_time || fallbackTime
                 : fallbackTime;
             const reminderStr = typeof entry === "object" && entry !== null ? (entry.reminder || "15-min") : "15-min";
-            const isDateFull = Boolean(dateStr && blockedDates[dateStr]);
+            const isDateFull = Boolean(dateStr && isDateFullyBooked(blockedDates[dateStr]));
 
             return (
               <div

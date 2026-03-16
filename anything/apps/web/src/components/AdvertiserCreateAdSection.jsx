@@ -9,6 +9,7 @@ import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
+import { AvailabilityDateField } from "@/components/SubmitAdForm/AvailabilityDateField";
 import {
   checkAdAvailability,
   checkMultiWeekOverridesAvailability,
@@ -600,12 +601,18 @@ export default function AdvertiserCreateAdSection({
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
                         Week 1 Start
                       </div>
-                      <input
-                        type="date"
-                        value={formData.series_week_start || ""}
-                        onChange={(event) => handleChange("series_week_start", event.target.value)}
-                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
-                      />
+                      <div className="mt-2">
+                        <AvailabilityDateField
+                          label="Week 1 start"
+                          value={formData.series_week_start || ""}
+                          onChange={(value) => handleChange("series_week_start", value)}
+                          blockedDates={{}}
+                          onLoadMonth={null}
+                          placeholder="Select week start"
+                          variant="subtle"
+                          hideLabel
+                        />
+                      </div>
                       <p className="mt-2 text-xs text-gray-500">This anchors the sequence for the rest of the series.</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">

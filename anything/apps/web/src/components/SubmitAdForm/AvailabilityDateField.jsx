@@ -58,6 +58,7 @@ export function AvailabilityDateField({
   helperText,
   variant = "default",
   disabled = false,
+  hideLabel = false,
 }) {
   const containerClasses =
     variant === "subtle"
@@ -127,10 +128,12 @@ export function AvailabilityDateField({
   return (
     <div className="relative" ref={fieldRef}>
       <div className={containerClasses}>
-        <label className="block text-xs font-semibold text-gray-700 mb-1">
-          {label}
-          {required ? <span className="text-red-500"> *</span> : null}
-        </label>
+        {!hideLabel ? (
+          <label className="block text-xs font-semibold text-gray-700 mb-1">
+            {label}
+            {required ? <span className="text-red-500"> *</span> : null}
+          </label>
+        ) : null}
 
         <button
           type="button"
