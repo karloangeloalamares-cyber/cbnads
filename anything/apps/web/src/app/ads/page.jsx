@@ -11754,11 +11754,7 @@ export default function AdsPage() {
                     <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm pb-4 pt-6 -mt-6 mb-8 flex items-center justify-between gap-4 border-b border-gray-100/50">
                       <button
                         type="button"
-                        onClick={() =>
-                          navigateBackWithFallback({
-                            fallback: closeCreateAd,
-                          })
-                        }
+                        onClick={closeCreateAd}
                         disabled={createAdSubmitting}
                         className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -12177,11 +12173,7 @@ export default function AdsPage() {
                     <div className="max-w-[1200px] mx-auto flex items-center justify-between relative">
                       <button
                         type="button"
-                        onClick={() =>
-                          navigateBackWithFallback({
-                            fallback: () => saveNewAdvertiser("cancel"),
-                          })
-                        }
+                        onClick={() => saveNewAdvertiser("cancel")}
                         className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
                       >
                         <ArrowLeft size={18} />

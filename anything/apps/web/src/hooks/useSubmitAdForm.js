@@ -361,6 +361,17 @@ export function useSubmitAdForm() {
       ad_name: String(domFormData?.get("ad_name") ?? formDataRef.current.ad_name ?? ""),
       ad_text: String(domFormData?.get("ad_text") ?? formDataRef.current.ad_text ?? ""),
     };
+    if (currentFormData.post_type === "Multi-week booking (TBD)") {
+      const firstWeekAdName = (Array.isArray(currentFormData.multi_week_overrides)
+        ? currentFormData.multi_week_overrides
+        : []
+      )
+        .map((entry) => String(entry?.ad_name || "").trim())
+        .find(Boolean);
+
+      currentFormData.ad_name =
+        String(currentFormData.ad_name || "").trim() || firstWeekAdName || "Multi-week booking";
+    }
     formDataRef.current = currentFormData;
 
     try {

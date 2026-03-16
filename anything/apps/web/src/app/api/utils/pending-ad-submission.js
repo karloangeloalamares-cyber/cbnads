@@ -190,9 +190,17 @@ export async function createPendingAdSubmission({
   const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
   const normalizedCustomDates = readCustomDates(custom_dates);
   const normalizedProductId = String(product_id || "").trim();
+  const resolvedAdName =
+    String(ad_name || "").trim() ||
+    (Array.isArray(multi_week?.overrides)
+      ? multi_week.overrides
+          .map((item) => String(item?.ad_name || "").trim())
+          .find(Boolean) || ""
+      : "") ||
+    (multi_week && typeof multi_week === "object" ? "Multi-week booking" : "");
   let selectedProduct = null;
 
-  if (!advertiser_name || !contact_name || !normalizedEmail || !ad_name || !post_type) {
+  if (!advertiser_name || !contact_name || !normalizedEmail || !resolvedAdName || !post_type) {
     return {
       error: "Missing required fields",
       status: 400,
@@ -339,7 +347,7 @@ export async function createPendingAdSubmission({
     const reminderMinutesValue = parseReminderMinutes(reminder_minutes, 15);
 
     const baseCreative = {
-      ad_name,
+      ad_name: resolvedAdName,
       ad_text,
       media: sanitizeMediaArray(media),
     };
@@ -457,7 +465,7 @@ export async function createPendingAdSubmission({
       contact_name: escapeHtml(contact_name),
       email: escapeHtml(normalizedEmail),
       phone_number: escapeHtml(normalizedPhoneNumber),
-      ad_name: escapeHtml(ad_name),
+      ad_name: escapeHtml(resolvedAdName),
       post_type: escapeHtml("Multi-week booking (TBD)"),
       placement: escapeHtml(basePlacement),
       product_name: escapeHtml(baseProductRow?.product_name || ""),
@@ -467,7 +475,7 @@ export async function createPendingAdSubmission({
       notes: escapeHtml(notes),
     };
 
-    const safeSubjectAdName = String(ad_name || "").replace(/[\r\n]+/g, " ").trim();
+    const safeSubjectAdName = String(resolvedAdName || "").replace(/[\r\n]+/g, " ").trim();
     const safeSubjectAdvertiserName = String(advertiser_name || "").replace(/[\r\n]+/g, " ").trim();
     const reviewSubmissionUrl = buildReviewSubmissionUrl(request);
 
@@ -622,7 +630,7 @@ export async function createPendingAdSubmission({
       "",
       `<b>Advertiser:</b> ${escapeHtml(advertiser_name)}`,
       `<b>Contact:</b> ${escapeHtml(contact_name)} (${escapeHtml(normalizedEmail)})`,
-      `<b>Campaign:</b> ${escapeHtml(ad_name)}`,
+      `<b>Campaign:</b> ${escapeHtml(resolvedAdName)}`,
       `<b>Weeks:</b> ${escapeHtml(String(weeks))}`,
       `<b>Week 1 starts:</b> ${escapeHtml(seriesWeekStart)}`,
       basePlacement ? `<b>Placement:</b> ${escapeHtml(basePlacement)}` : "",
@@ -648,7 +656,7 @@ export async function createPendingAdSubmission({
             to: adminWhatsApp,
             adId: firstPendingAd.id,
             advertiserName: advertiser_name,
-            adName: ad_name,
+            adName: resolvedAdName,
           });
         }
       } catch (waError) {
@@ -732,7 +740,7 @@ export async function createPendingAdSubmission({
     contact_name: escapeHtml(contact_name),
     email: escapeHtml(normalizedEmail),
     phone_number: escapeHtml(normalizedPhoneNumber),
-    ad_name: escapeHtml(ad_name),
+    ad_name: escapeHtml(resolvedAdName),
     post_type: escapeHtml(post_type),
     placement: escapeHtml(resolvedPlacement),
     product_name: escapeHtml(selectedProduct?.product_name || ""),
@@ -745,7 +753,7 @@ export async function createPendingAdSubmission({
     notes: escapeHtml(notes),
   };
 
-  const safeSubjectAdName = String(ad_name || "").replace(/[\r\n]+/g, " ").trim();
+  const safeSubjectAdName = String(resolvedAdName || "").replace(/[\r\n]+/g, " ").trim();
   const safeSubjectAdvertiserName = String(advertiser_name || "")
     .replace(/[\r\n]+/g, " ")
     .trim();
@@ -777,7 +785,7 @@ export async function createPendingAdSubmission({
     email: normalizedEmail,
     phone_number: normalizedPhoneNumber || null,
     phone: normalizedPhoneNumber || null,
-    ad_name,
+    ad_name: resolvedAdName,
     post_type: normalizedPostType,
     post_date: post_date_from || null,
     post_date_from: post_date_from || null,
@@ -1035,7 +1043,7 @@ export async function createPendingAdSubmission({
            to: adminWhatsApp,
            adId: insertedPendingAd.id,
            advertiserName: advertiser_name,
-           adName: ad_name
+           adName: resolvedAdName
          });
       }
     } catch (waError) {

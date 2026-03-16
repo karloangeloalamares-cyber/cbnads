@@ -358,6 +358,44 @@ describe("createPendingAdSubmission", () => {
     });
   });
 
+  it("derives the multi-week campaign name from the first week when the base ad name is hidden", async () => {
+    const { client, insertCalls } = buildMockSupabase();
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      requireProductForMultiWeek: false,
+      submission: buildSubmission({
+        ad_name: "",
+        post_type: "Multi-week booking (TBD)",
+        multi_week: {
+          weeks: 2,
+          series_week_start: "2026-03-15",
+          overrides: [
+            {
+              ad_name: "Week 1 Launch",
+              post_date_from: "2026-03-15",
+              post_time: "09:00",
+            },
+            {
+              ad_name: "Week 2 Follow-up",
+              schedule_tbd: true,
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(result.pendingAds).toHaveLength(2);
+    expect(insertCalls).toHaveLength(1);
+    expect(insertCalls[0][0]).toMatchObject({
+      ad_name: "Week 1 Launch",
+    });
+    expect(insertCalls[0][1]).toMatchObject({
+      ad_name: "Week 2 Follow-up",
+    });
+  });
+
   it("ignores stale multi-week product ids when product assignment is deferred", async () => {
     const { client, insertCalls } = buildMockSupabase();
 
