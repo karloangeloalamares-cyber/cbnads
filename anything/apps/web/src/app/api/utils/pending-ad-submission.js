@@ -162,6 +162,7 @@ export async function createPendingAdSubmission({
   submission = {},
   supabase = db(),
   requirePhoneNumber = true,
+  requireProductForMultiWeek = true,
 }) {
   const {
     advertiser_id,
@@ -268,6 +269,13 @@ export async function createPendingAdSubmission({
   };
 
   if (isMultiWeek) {
+    if (requireProductForMultiWeek && !normalizedProductId) {
+      return {
+        error: "Select a base product for this multi-week booking",
+        status: 400,
+      };
+    }
+
     const weeks = clampWeeks(multi_week.weeks, { min: 2, max: 12, fallback: 4 });
     const seriesWeekStart = normalizeDateKeyStrict(multi_week.series_week_start);
     if (!seriesWeekStart) {
@@ -309,6 +317,12 @@ export async function createPendingAdSubmission({
     }
 
     const baseProductRow = normalizedProductId ? productsById.get(String(normalizedProductId)) : null;
+    if (normalizedProductId && !baseProductRow) {
+      return {
+        error: "Selected base product was not found",
+        status: 400,
+      };
+    }
     const basePlacement = String(baseProductRow?.placement || placement || "").trim();
     const basePrice = Number(baseProductRow?.price || 0) || 0;
     const savedPriceText = baseProductRow ? formatCurrency(basePrice) : "";
@@ -339,13 +353,13 @@ export async function createPendingAdSubmission({
       const overrideProductId = String(override.product_id || "").trim();
       const chosenProductId = overrideProductId || normalizedProductId;
       const productRow = chosenProductId ? productsById.get(String(chosenProductId)) : null;
-      if (!productRow) {
+      if (chosenProductId && !productRow) {
         throw new Error(`Product not found for week ${weekInfo.series_index}`);
       }
 
       const overridePlacement = String(override.placement || "").trim();
-      const resolvedPlacement = String(overridePlacement || productRow.placement || basePlacement || "").trim();
-      const savedPrice = Number(productRow.price || 0) || 0;
+      const resolvedPlacement = String(overridePlacement || productRow?.placement || basePlacement || "").trim();
+      const savedPrice = Number(productRow?.price || 0) || 0;
       const scheduleTbd = Boolean(override.schedule_tbd);
       const postDate = normalizeDateKeyStrict(override.post_date_from);
       const postTime = scheduleTbd ? null : String(override.post_time || "").trim() || null;
@@ -384,7 +398,7 @@ export async function createPendingAdSubmission({
         ad_text: creative.ad_text,
         media: creative.media,
         placement: resolvedPlacement || null,
-        product_id: String(productRow.id || "") || null,
+        product_id: productRow ? String(productRow.id || "") || null : null,
         product_name: productRow?.product_name || null,
         price: savedPrice,
         notes: finalNotes || null,

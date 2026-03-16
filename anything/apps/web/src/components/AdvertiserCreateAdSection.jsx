@@ -8,14 +8,21 @@ import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
+import { ProductSelectionSection } from "@/components/SubmitAdForm/ProductSelectionSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import {
   checkAdAvailability,
+  checkMultiWeekOverridesAvailability,
   normalizeCustomDateEntries,
 } from "@/lib/adAvailabilityClient";
 import { formatUSPhoneNumber } from "@/lib/phone";
 import { isPastDateTimeInAppTimeZone } from "@/lib/timezone";
 import { appToast } from "@/lib/toast";
+import {
+  clampWeeks,
+  getEstimatedOccurrenceCount,
+  resolveAdvertiserMultiWeekPreview,
+} from "@/lib/multiWeekBooking";
 
 const blankSubmissionForm = {
   advertiser_name: "",
@@ -23,6 +30,7 @@ const blankSubmissionForm = {
   email: "",
   phone_number: "",
   ad_name: "",
+  product_id: "",
   post_type: "One-Time Post",
   post_date_from: "",
   post_date_to: "",
@@ -33,6 +41,9 @@ const blankSubmissionForm = {
   media: [],
   placement: "",
   notes: "",
+  multi_week_weeks: 4,
+  series_week_start: "",
+  multi_week_overrides: [],
 };
 
 const isFormBlank = (formData) =>
@@ -67,6 +78,7 @@ const buildInitialFormData = ({ advertiser, user }) => ({
 
 export default function AdvertiserCreateAdSection({
   advertiser = null,
+  products = [],
   user = null,
   fetchWithSessionAuth,
   onBack,
@@ -82,6 +94,8 @@ export default function AdvertiserCreateAdSection({
   const [customTime, setCustomTime] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [previewWeekIndex, setPreviewWeekIndex] = useState(0);
+  const [showMultiWeekWorkspace, setShowMultiWeekWorkspace] = useState(false);
   const [availabilityError, setAvailabilityError] = useState(null);
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
@@ -92,13 +106,40 @@ export default function AdvertiserCreateAdSection({
   const identityReady =
     String(initialForm.advertiser_name || "").trim() &&
     String(initialForm.email || "").trim();
+  const isMultiWeekPreview = formData.post_type === "Multi-week booking (TBD)";
+  const previewWeekCount = useMemo(
+    () => (isMultiWeekPreview ? clampWeeks(formData.multi_week_weeks || 4, 4) : 0),
+    [formData.multi_week_weeks, isMultiWeekPreview],
+  );
   const previewData = useMemo(
-    () => ({
-      ...formData,
-      media: Array.isArray(formData.media) ? formData.media : [],
-    }),
+    () => (
+      isMultiWeekPreview
+        ? resolveAdvertiserMultiWeekPreview(
+            {
+              ...formData,
+              media: Array.isArray(formData.media) ? formData.media : [],
+            },
+            Math.min(previewWeekCount - 1, Math.max(0, previewWeekIndex)),
+          )
+        : {
+            ...formData,
+            media: Array.isArray(formData.media) ? formData.media : [],
+          }
+    ),
+    [formData, isMultiWeekPreview, previewWeekCount, previewWeekIndex],
+  );
+  const occurrenceCount = useMemo(
+    () => getEstimatedOccurrenceCount(formData),
     [formData],
   );
+  const isDedicatedMultiWeek = showMultiWeekWorkspace;
+
+  useEffect(() => {
+    if (!showPreview || !isMultiWeekPreview) {
+      return;
+    }
+    setPreviewWeekIndex((current) => Math.min(previewWeekCount - 1, Math.max(0, current)));
+  }, [isMultiWeekPreview, previewWeekCount, showPreview]);
 
   useEffect(() => {
     formDataRef.current = formData;
@@ -259,6 +300,13 @@ export default function AdvertiserCreateAdSection({
       return false;
     }
 
+    if (!String(current.product_id || "").trim()) {
+      appToast.error({
+        title: "Select a product option before submitting.",
+      });
+      return false;
+    }
+
     if (pastTimeError) {
       appToast.error({
         title: "Invalid post time",
@@ -304,6 +352,78 @@ export default function AdvertiserCreateAdSection({
         title: "Add at least one custom date before submitting.",
       });
       return false;
+    }
+
+    if (current.post_type === "Multi-week booking (TBD)") {
+      const weeks = clampWeeks(current.multi_week_weeks || 4, 4);
+      if (Number(current.multi_week_weeks) !== weeks) {
+        appToast.error({
+          title: "Weeks must be between 2 and 12.",
+        });
+        return false;
+      }
+
+      if (!String(current.series_week_start || "").trim()) {
+        appToast.error({
+          title: "Select the Week 1 start date before submitting.",
+        });
+        return false;
+      }
+
+      const overrides = Array.isArray(current.multi_week_overrides)
+        ? current.multi_week_overrides
+        : [];
+      const productsById = new Map(
+        (Array.isArray(products) ? products : []).map((item) => [String(item?.id || ""), item]),
+      );
+
+      for (let index = 0; index < overrides.length; index += 1) {
+        const entry = overrides[index];
+        if (!entry || typeof entry !== "object") {
+          continue;
+        }
+
+        const overrideProductId = String(entry.product_id || "").trim();
+        if (overrideProductId && !productsById.has(overrideProductId)) {
+          appToast.error({
+            title: `Week ${index + 1} uses an unavailable product option.`,
+          });
+          return false;
+        }
+
+        if (entry.schedule_tbd) {
+          continue;
+        }
+
+        const weekDate = String(entry.post_date_from || "").trim();
+        const weekTime = String(entry.post_time || "").trim();
+        if (!weekDate || !weekTime) {
+          appToast.error({
+            title: `Week ${index + 1} needs a date/time or must be marked TBD.`,
+          });
+          return false;
+        }
+
+        if (isPastDateTimeInAppTimeZone(weekDate, weekTime)) {
+          appToast.error({
+            title: `Week ${index + 1} is scheduled in the past.`,
+          });
+          return false;
+        }
+      }
+
+      const weeklyAvailability = await checkMultiWeekOverridesAvailability({
+        overrides,
+      });
+      if (!weeklyAvailability.available) {
+        setFullyBookedDates(weeklyAvailability.fullyBookedDates || []);
+        appToast.error({
+          title: `Week ${weeklyAvailability.weekIndex + 1}: ${weeklyAvailability.availabilityError || "Selected date is unavailable."}`,
+        });
+        return false;
+      }
+
+      return true;
     }
 
     if (fullyBookedDates.length > 0) {
@@ -357,6 +477,23 @@ export default function AdvertiserCreateAdSection({
           ...current,
           post_time: postTimeWithSeconds,
           custom_dates: current.custom_dates,
+          ...(current.post_type === "Multi-week booking (TBD)"
+            ? {
+                multi_week: {
+                  weeks: clampWeeks(current.multi_week_weeks || 4, 4),
+                  series_week_start: String(current.series_week_start || "").slice(0, 10),
+                  overrides: Array.isArray(current.multi_week_overrides)
+                    ? current.multi_week_overrides.map((entry) => ({
+                        ...entry,
+                        post_time:
+                          entry?.post_time && String(entry.post_time).length === 5
+                            ? `${entry.post_time}:00`
+                            : entry?.post_time || "",
+                      }))
+                    : [],
+                },
+              }
+            : {}),
         }),
       });
 
@@ -393,10 +530,10 @@ export default function AdvertiserCreateAdSection({
 
   return (
     <>
-      <div className="min-h-screen bg-white">
+      <div className={`min-h-screen ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
         <div className="flex max-w-none mx-auto">
-          <div className="flex-1 bg-white px-5 py-8 sm:px-6 sm:py-10 xl:p-12">
-            <div className="max-w-[680px] mx-auto mb-6 flex items-center justify-between">
+          <div className={`flex-1 px-5 py-8 sm:px-6 sm:py-10 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
+            <div className={`${isDedicatedMultiWeek ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
               <button
                 type="button"
                 onClick={exitCreateFlow}
@@ -407,18 +544,100 @@ export default function AdvertiserCreateAdSection({
                 Back
               </button>
 
-              <button
-                type="button"
-                onClick={() => setShowPreview(true)}
-                className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400"
-              >
-                <Eye size={15} />
-                Preview
-              </button>
+              <div className="flex items-center gap-2">
+                {!showMultiWeekWorkspace ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleChange("post_type", "Multi-week booking (TBD)");
+                      setShowMultiWeekWorkspace(true);
+                    }}
+                    className="h-10 px-4 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all"
+                  >
+                    Multi-week booking
+                  </button>
+                ) : null}
+                {!isDedicatedMultiWeek ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowPreview(true)}
+                    className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400"
+                  >
+                    <Eye size={15} />
+                    Preview
+                  </button>
+                ) : null}
+              </div>
             </div>
 
-            <div className="max-w-[680px] mx-auto">
-              <FormHeader />
+            <div className={isDedicatedMultiWeek ? "max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
+              <div className={isDedicatedMultiWeek ? "min-w-0" : ""}>
+              {isDedicatedMultiWeek ? (
+                <div className="mb-8 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-7">
+                  <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="max-w-2xl">
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">
+                        Series Request
+                      </p>
+                      <h1 className="text-3xl font-bold text-gray-900 mb-2">Create multi-week booking</h1>
+                      <p className="text-sm leading-6 text-gray-600">
+                        Build one ad request per week, keep the base product and content in sync, and only override the weeks that need different timing or creative.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 self-start">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowMultiWeekWorkspace(false);
+                          handleChange("post_type", "One-Time Post");
+                        }}
+                        className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        form="advertiser-create-ad-form"
+                        disabled={submitDisabled}
+                        className="px-4 py-2 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {loading ? "Submitting..." : "Submit booking"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-6 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                        Weeks
+                      </div>
+                      <div className="mt-1 text-lg font-semibold text-gray-900">
+                        {clampWeeks(formData.multi_week_weeks || 4)}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Create 2 to 12 linked weekly requests.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                        Week 1 Start
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                        {formData.series_week_start || "Select week start"}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">This anchors the sequence for the rest of the series.</p>
+                    </div>
+                    <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                        Product
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-gray-900">
+                        {products.find((item) => String(item?.id) === String(formData.product_id))?.product_name || "Choose a base product"}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">Each week can inherit this or override it.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <FormHeader />
+              )}
 
               {!identityReady ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 mb-8">
@@ -427,7 +646,11 @@ export default function AdvertiserCreateAdSection({
                 </div>
               ) : null}
 
-              <form onSubmit={handleSubmit} className="space-y-8">
+              <form
+                id="advertiser-create-ad-form"
+                onSubmit={handleSubmit}
+                className={isDedicatedMultiWeek ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
+              >
                 <AdvertiserInfoSection
                   formData={formData}
                   onChange={handleChange}
@@ -447,10 +670,28 @@ export default function AdvertiserCreateAdSection({
                   onRemoveMedia={removeMedia}
                 />
 
-                <PostTypeSection selectedType={formData.post_type} onChange={handleChange} />
+                <ProductSelectionSection
+                  products={products}
+                  selectedProductId={formData.product_id}
+                  loading={false}
+                  error=""
+                  occurrenceCount={occurrenceCount}
+                  onSelectProduct={(product) => {
+                    handleChange("product_id", String(product?.id || ""));
+                    handleChange("placement", String(product?.placement || ""));
+                  }}
+                />
+
+                {!isDedicatedMultiWeek ? (
+                  <PostTypeSection
+                    selectedType={formData.post_type}
+                    onChange={handleChange}
+                    includeMultiWeek={false}
+                  />
+                ) : null}
 
                 <ScheduleSection
-                  postType={formData.post_type}
+                  postType={isDedicatedMultiWeek ? "Multi-week booking (TBD)" : formData.post_type}
                   formData={formData}
                   onChange={handleChange}
                   customDate={customDate}
@@ -465,20 +706,60 @@ export default function AdvertiserCreateAdSection({
                   availabilityError={availabilityError}
                   pastTimeError={pastTimeError}
                   fullyBookedDates={fullyBookedDates}
+                  products={products}
                 />
 
                 <NotesSection notes={formData.notes} onChange={handleChange} />
 
-                <div className="pt-6 border-t">
-                  <button
-                    type="submit"
-                    disabled={submitDisabled}
-                    className="w-full bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
-                  >
-                    {loading ? "Submitting..." : "Submit Ad Request"}
-                  </button>
-                </div>
+                {!isDedicatedMultiWeek ? (
+                  <div className="pt-6 border-t">
+                    <button
+                      type="submit"
+                      disabled={submitDisabled}
+                      className="w-full bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
+                    >
+                      {loading ? "Submitting..." : "Submit Ad Request"}
+                    </button>
+                  </div>
+                ) : null}
               </form>
+              </div>
+              {isDedicatedMultiWeek ? (
+                <div className="hidden lg:flex sticky top-8 min-h-[720px] rounded-[32px] border border-gray-200 bg-white p-5 shadow-sm xl:p-6">
+                  <div className="flex w-full flex-col rounded-[26px] bg-[#F7F4EE] px-5 py-5">
+                    <div className="mb-5">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                        Live Preview
+                      </div>
+                      <div className="mt-2 text-sm font-semibold text-gray-900">
+                        {`Week ${previewWeekIndex + 1}`}
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-gray-600">
+                        Switch weeks to review copy, media, and schedule overrides before you submit the full series.
+                      </p>
+                    </div>
+                    <div className="mb-5 grid grid-cols-2 gap-2">
+                      {Array.from({ length: previewWeekCount }).map((_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => setPreviewWeekIndex(index)}
+                          className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                            previewWeekIndex === index
+                              ? "border-gray-900 bg-gray-900 text-white"
+                              : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
+                          }`}
+                        >
+                          {`Week ${index + 1}`}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex-1 rounded-[28px] bg-white px-3 py-5 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+                      <AdPreview formData={previewData} />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -496,7 +777,9 @@ export default function AdvertiserCreateAdSection({
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
           <div className="relative ml-auto w-full max-w-[480px] h-full bg-[#F5F5F5] shadow-2xl flex flex-col overflow-y-auto">
             <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
-              <span className="text-sm font-semibold text-gray-900">Ad Preview</span>
+              <span className="text-sm font-semibold text-gray-900">
+                {isMultiWeekPreview ? `Ad Preview - Week ${previewWeekIndex + 1}` : "Ad Preview"}
+              </span>
               <button
                 type="button"
                 onClick={() => setShowPreview(false)}
@@ -506,6 +789,24 @@ export default function AdvertiserCreateAdSection({
               </button>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-6">
+              {isMultiWeekPreview ? (
+                <div className="mb-5 flex flex-wrap gap-2">
+                  {Array.from({ length: previewWeekCount }).map((_, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() => setPreviewWeekIndex(index)}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                        previewWeekIndex === index
+                          ? "border-gray-900 bg-gray-900 text-white"
+                          : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                      }`}
+                    >
+                      {`Week ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <AdPreview formData={previewData} />
             </div>
           </div>

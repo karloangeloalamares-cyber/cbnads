@@ -6,8 +6,8 @@ import * as route_3 from "../src/app/api/admin/fix-all-spending/route.js";
 import * as route_4 from "../src/app/api/admin/members/route.js";
 import * as route_5 from "../src/app/api/admin/notification-preferences/route.js";
 import * as route_6 from "../src/app/api/admin/send-reminders/route.js";
-import * as route_7 from "../src/app/api/admin/send-test-whatsapp/route.js";
-import * as route_8 from "../src/app/api/admin/send-test-email/route.js";
+import * as route_7 from "../src/app/api/admin/send-test-email/route.js";
+import * as route_8 from "../src/app/api/admin/send-test-whatsapp/route.js";
 import * as route_9 from "../src/app/api/admin/settings/route.js";
 import * as route_10 from "../src/app/api/admin/sync-advertiser-spending/route.js";
 import * as route_11 from "../src/app/api/ads/archive/route.js";
@@ -52,21 +52,21 @@ import * as route_49 from "../src/app/api/admin/invoices/send-low-credit-reminde
 import * as route_50 from "../src/app/api/admin/invoices/send-payment-received/route.js";
 import * as route_51 from "../src/app/api/admin/members/[id]/route.js";
 import * as route_52 from "../src/app/api/admin/pending-ads/approve/route.js";
-import * as route_53 from "../src/app/api/admin/pending-ads/cleanup/route.js";
-import * as route_54 from "../src/app/api/admin/pending-ads/list/route.js";
-import * as route_55 from "../src/app/api/admin/pending-ads/mark-read/route.js";
-import * as route_56 from "../src/app/api/admin/pending-ads/reject/route.js";
-import * as route_57 from "../src/app/api/admin/pending-ads/unread-count/route.js";
-import * as route_58 from "../src/app/api/admin/pending-ads/[id]/route.js";
+import * as route_53 from "../src/app/api/admin/pending-ads/reject/route.js";
+import * as route_54 from "../src/app/api/admin/pending-ads/mark-read/route.js";
+import * as route_55 from "../src/app/api/admin/pending-ads/[id]/route.js";
+import * as route_56 from "../src/app/api/admin/pending-ads/unread-count/route.js";
+import * as route_57 from "../src/app/api/admin/pending-ads/list/route.js";
+import * as route_58 from "../src/app/api/admin/pending-ads/cleanup/route.js";
 import * as route_59 from "../src/app/api/admin/telegram/send/route.js";
 import * as route_60 from "../src/app/api/admin/telegram/verify/route.js";
 import * as route_61 from "../src/app/api/ads/[id]/invoices/route.js";
 import * as route_62 from "../src/app/api/public/submit-ad/account/route.js";
 import * as route_63 from "../src/app/api/public/submit-ad/google-account/route.js";
-import * as route_64 from "../src/app/api/public/submit-ad/resend-verification/route.js";
-import * as route_65 from "../src/app/api/public/submit-ad/verify-account/route.js";
-import * as route_66 from "../src/app/api/reconciliation/cases/review/route.js";
-import * as route_67 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_64 from "../src/app/api/public/submit-ad/verify-account/route.js";
+import * as route_65 from "../src/app/api/public/submit-ad/resend-verification/route.js";
+import * as route_66 from "../src/app/api/submissions/[id]/convert/route.js";
+import * as route_67 from "../src/app/api/reconciliation/cases/review/route.js";
 import * as route_68 from "../src/app/api/admin/advertisers/[id]/credits/route.js";
 import { handleRouteRequest } from "../vercel-api/adapter.js";
 
@@ -74,36 +74,36 @@ const routes = [
   { regex: new RegExp("^/api/admin/advertisers/(?<id>[^/]+)/credits$"), module: route_68 },
   { regex: new RegExp("^/api/admin/invoices/send\\-low\\-credit\\-reminder$"), module: route_49 },
   { regex: new RegExp("^/api/admin/invoices/send\\-payment\\-received$"), module: route_50 },
-  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_64 },
+  { regex: new RegExp("^/api/public/submit\\-ad/resend\\-verification$"), module: route_65 },
   { regex: new RegExp("^/api/admin/advertisers/ensure\\-account$"), module: route_47 },
   { regex: new RegExp("^/api/public/submit\\-ad/google\\-account$"), module: route_63 },
-  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_65 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_57 },
+  { regex: new RegExp("^/api/public/submit\\-ad/verify\\-account$"), module: route_64 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/unread\\-count$"), module: route_56 },
   { regex: new RegExp("^/api/admin/ads/send\\-approval\\-email$"), module: route_46 },
   { regex: new RegExp("^/api/admin/invoices/apply\\-credits$"), module: route_48 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_55 },
-  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_66 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/mark\\-read$"), module: route_54 },
+  { regex: new RegExp("^/api/reconciliation/cases/review$"), module: route_67 },
   { regex: new RegExp("^/api/admin/ads/internal\\-notify$"), module: route_45 },
   { regex: new RegExp("^/api/admin/pending\\-ads/approve$"), module: route_52 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_53 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_56 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/cleanup$"), module: route_58 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/reject$"), module: route_53 },
   { regex: new RegExp("^/api/public/submit\\-ad/account$"), module: route_62 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/list$"), module: route_54 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/list$"), module: route_57 },
   { regex: new RegExp("^/api/admin/telegram/verify$"), module: route_60 },
   { regex: new RegExp("^/api/admin/telegram/send$"), module: route_59 },
-  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_67 },
-  { regex: new RegExp("^/api/admin/pending\\-ads/(?<id>[^/]+)$"), module: route_58 },
+  { regex: new RegExp("^/api/submissions/(?<id>[^/]+)/convert$"), module: route_66 },
+  { regex: new RegExp("^/api/admin/pending\\-ads/(?<id>[^/]+)$"), module: route_55 },
   { regex: new RegExp("^/api/admin/members/(?<id>[^/]+)$"), module: route_51 },
   { regex: new RegExp("^/api/ads/(?<id>[^/]+)/invoices$"), module: route_61 },
   { regex: new RegExp("^/api/admin/notification\\-preferences$"), module: route_5 },
   { regex: new RegExp("^/api/admin/sync\\-advertiser\\-spending$"), module: route_10 },
   { regex: new RegExp("^/api/invoices/generate\\-recurring$"), module: route_32 },
   { regex: new RegExp("^/api/invoices/validate\\-amounts$"), module: route_33 },
-  { regex: new RegExp("^/api/admin/send\\-test\\-whatsapp$"), module: route_7 },
+  { regex: new RegExp("^/api/admin/send\\-test\\-whatsapp$"), module: route_8 },
   { regex: new RegExp("^/api/invoices/create\\-from\\-ads$"), module: route_31 },
   { regex: new RegExp("^/api/admin/fix\\-all\\-spending$"), module: route_3 },
   { regex: new RegExp("^/api/ads/availability\\-batch$"), module: route_13 },
-  { regex: new RegExp("^/api/admin/send\\-test\\-email$"), module: route_8 },
+  { regex: new RegExp("^/api/admin/send\\-test\\-email$"), module: route_7 },
   { regex: new RegExp("^/api/auth/expo\\-web\\-success$"), module: route_26 },
   { regex: new RegExp("^/api/invoices/batch\\-create$"), module: route_29 },
   { regex: new RegExp("^/api/admin/send\\-reminders$"), module: route_6 },

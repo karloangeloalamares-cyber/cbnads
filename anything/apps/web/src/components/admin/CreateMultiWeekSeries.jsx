@@ -65,6 +65,7 @@ const emptyOverride = () => ({
   post_time: "",
   reminder_minutes: "15-min",
 });
+const TBD_TOOLTIP_TEXT = "Schedule later";
 
 export default function CreateMultiWeekSeries({
   advertisers,
@@ -559,7 +560,10 @@ export default function CreateMultiWeekSeries({
                 <div className="mt-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <h4 className="text-sm font-semibold text-gray-900">Schedule</h4>
-                    <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                    <label
+                      className="flex items-center gap-2 text-sm text-gray-700 select-none"
+                      title={TBD_TOOLTIP_TEXT}
+                    >
                       <input
                         type="checkbox"
                         checked={Boolean(entry.schedule_tbd)}
@@ -568,6 +572,8 @@ export default function CreateMultiWeekSeries({
                           next[index] = { ...next[index], schedule_tbd: e.target.checked };
                           setWeekAds(next);
                         }}
+                        title={TBD_TOOLTIP_TEXT}
+                        aria-label={`${TBD_TOOLTIP_TEXT} Toggle TBD for week ${index + 1}.`}
                       />
                       TBD
                     </label>

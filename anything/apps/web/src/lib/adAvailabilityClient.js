@@ -176,6 +176,45 @@ export const checkAdAvailability = async ({
   };
 };
 
+export const checkMultiWeekOverridesAvailability = async ({ overrides = [] } = {}) => {
+  const normalizedOverrides = Array.isArray(overrides) ? overrides : [];
+
+  for (let index = 0; index < normalizedOverrides.length; index += 1) {
+    const entry = normalizedOverrides[index];
+    if (!entry || typeof entry !== "object" || entry.schedule_tbd) {
+      continue;
+    }
+
+    const postDateFrom = String(entry.post_date_from || "").slice(0, 10);
+    const postTime = String(entry.post_time || "").trim();
+    if (!postDateFrom || !postTime) {
+      continue;
+    }
+
+    const availability = await checkAdAvailability({
+      postType: "One-Time Post",
+      postDateFrom,
+      postTime,
+    });
+
+    if (!availability.available) {
+      return {
+        available: false,
+        weekIndex: index,
+        availabilityError: availability.availabilityError,
+        fullyBookedDates: availability.fullyBookedDates || [],
+      };
+    }
+  }
+
+  return {
+    available: true,
+    weekIndex: -1,
+    availabilityError: null,
+    fullyBookedDates: [],
+  };
+};
+
 export const fetchDateBlockedTimes = async ({ date, excludeAdId }) => {
   if (!date) return [];
   try {

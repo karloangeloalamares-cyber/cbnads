@@ -7,6 +7,10 @@ import {
   getTodayDateInAppTimeZone,
   getTodayInAppTimeZone,
 } from "@/lib/timezone";
+import {
+  addDaysToDateKey,
+  normalizeAdvertiserMultiWeekOverrides,
+} from "@/lib/multiWeekBooking";
 import { MediaUploadSection } from "./MediaUploadSection";
 import { AdTextEditor } from "./AdTextEditor";
 import { AvailabilityDateField } from "./AvailabilityDateField";
@@ -14,6 +18,7 @@ import { AvailabilityDateField } from "./AvailabilityDateField";
 const HOURS = Array.from({ length: 12 }).map((_, i) => String(i === 0 ? 12 : i));
 const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, "0"));
 const PERIODS = ["AM", "PM"];
+const TBD_TOOLTIP_TEXT = "Schedule later";
 
 // Convert a 12-hour display value + period to 24-hour integer
 const to24Hour = (h12str, period) => {
@@ -222,7 +227,10 @@ export function ScheduleSection({
   pastTimeError,
   fullyBookedDates,
   excludeAdId,
+  products = [],
+  variant = "default",
 }) {
+  const isPublicReviewMultiWeek = variant === "public-review-multi-week";
   const hasBookedDates = fullyBookedDates && fullyBookedDates.length > 0;
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [monthAvailability, setMonthAvailability] = useState({});
@@ -312,25 +320,15 @@ export function ScheduleSection({
       ? formData.multi_week_overrides
       : [];
 
-    const normalized = Array.from({ length: weeks }).map((_, index) => {
-      const existing = overrides[index] && typeof overrides[index] === "object" ? overrides[index] : {};
-      return {
-        ad_name: String(existing.ad_name || ""),
-        ad_text: String(existing.ad_text || ""),
-        use_base_media: existing.use_base_media !== false,
-        media: Array.isArray(existing.media) ? existing.media : [],
-        schedule_tbd: Boolean(existing.schedule_tbd),
-        post_date_from: String(existing.post_date_from || ""),
-        post_time: String(existing.post_time || ""),
-        reminder_minutes: String(existing.reminder_minutes || "15-min"),
-      };
-    });
+    const normalized = normalizeAdvertiserMultiWeekOverrides(overrides, weeks);
 
     const needsUpdate =
       overrides.length !== weeks ||
       overrides.some((entry, index) => {
         const normalizedEntry = normalized[index];
         if (!entry || typeof entry !== "object") return true;
+        if (String(entry.product_id || "") !== normalizedEntry.product_id) return true;
+        if (String(entry.placement || "") !== normalizedEntry.placement) return true;
         if (String(entry.ad_name || "") !== normalizedEntry.ad_name) return true;
         if (String(entry.ad_text || "") !== normalizedEntry.ad_text) return true;
         if ((entry.use_base_media !== false) !== normalizedEntry.use_base_media) return true;
@@ -441,6 +439,16 @@ export function ScheduleSection({
   }, [availabilityError, hasBookedDates]);
 
   const blockedDates = monthAvailability || {};
+  const placementOptions = useMemo(() => {
+    const options = new Set(["WhatsApp", "Website"]);
+    (Array.isArray(products) ? products : []).forEach((item) => {
+      const placement = String(item?.placement || "").trim();
+      if (placement) {
+        options.add(placement);
+      }
+    });
+    return [...options];
+  }, [products]);
 
   const availabilityChecking = checkingAvailability || calendarLoading;
 
@@ -454,14 +462,18 @@ export function ScheduleSection({
 
   return (
     <div>
-      <h3 className="text-sm font-semibold text-gray-900 mb-4">Schedule</h3>
-      <p className="text-xs text-gray-500 mb-4">
-        All times are in New York time (ET)
-      </p>
+      {!isPublicReviewMultiWeek ? (
+        <>
+          <h3 className="text-sm font-semibold text-gray-900 mb-4">Schedule</h3>
+          <p className="text-xs text-gray-500 mb-4">
+            All times are in New York time (ET)
+          </p>
+        </>
+      ) : null}
 
       {postType === "Multi-week booking (TBD)" && (
         <>
-          {(() => {
+          {!isPublicReviewMultiWeek ? (() => {
             const weeksValue = Math.min(12, Math.max(2, Number(formData.multi_week_weeks || 4) || 4));
 
             return (
@@ -498,17 +510,19 @@ export function ScheduleSection({
             />
           </div>
             );
-          })()}
+          })() : null}
 
-          <div className="mt-5 border border-gray-200 rounded-xl bg-white p-4">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div>
-                <h4 className="text-sm font-semibold text-gray-900">Per-week overrides</h4>
-                <p className="text-xs text-gray-500">
-                  Each week inherits the base ad. Leave overrides blank to reuse it.
-                </p>
+          <div className={`${isPublicReviewMultiWeek ? "" : "mt-5"} border border-gray-200 rounded-xl bg-white p-4`}>
+            {!isPublicReviewMultiWeek ? (
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-900">Per-week overrides</h4>
+                  <p className="text-xs text-gray-500">
+                    Each week inherits the base ad. Leave overrides blank to reuse it.
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : null}
 
             {(() => {
               const weeks = Math.min(12, Math.max(2, Number(formData.multi_week_weeks || 4) || 4));
@@ -520,6 +534,8 @@ export function ScheduleSection({
               const normalizedOverrides = Array.from({ length: weeks }).map((_, index) => {
                 const existing = overrides[index] && typeof overrides[index] === "object" ? overrides[index] : {};
                 return {
+                  product_id: String(existing.product_id || ""),
+                  placement: String(existing.placement || ""),
                   ad_name: String(existing.ad_name || ""),
                   ad_text: String(existing.ad_text || ""),
                   use_base_media: existing.use_base_media !== false,
@@ -531,18 +547,17 @@ export function ScheduleSection({
                 };
               });
 
-              const computeWeekStart = (startKey, index) => {
-                const parsed = parseDate(startKey);
-                if (!parsed) return "";
-                const d = new Date(parsed);
-                d.setDate(d.getDate() + index * 7);
-                return formatDateKeyFromDate(d);
-              };
+              const computeWeekStart = (startKey, index) => addDaysToDateKey(startKey, index * 7);
 
               return (
                 <div className="space-y-4">
                   {normalizedOverrides.map((entry, index) => {
                     const weekStartKey = baseWeekStart ? computeWeekStart(baseWeekStart, index) : "";
+                    const selectedProduct =
+                      (Array.isArray(products) ? products : []).find(
+                        (item) => String(item?.id || "") === String(entry.product_id || ""),
+                      ) || null;
+                    const currentPlacement = String(entry.placement || selectedProduct?.placement || "");
                     const label = weekStartKey ? formatDateLong(weekStartKey) : "—";
 
                     return (
@@ -559,9 +574,67 @@ export function ScheduleSection({
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {!isPublicReviewMultiWeek ? (
+                            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                Product Override
+                              </label>
+                              <select
+                                value={entry.product_id}
+                                onChange={(e) => {
+                                  const next = [...normalizedOverrides];
+                                  const nextProductId = e.target.value;
+                                  const nextProduct =
+                                    (Array.isArray(products) ? products : []).find(
+                                      (item) => String(item?.id || "") === String(nextProductId),
+                                    ) || null;
+                                  next[index] = {
+                                    ...next[index],
+                                    product_id: nextProductId,
+                                    placement: String(nextProduct?.placement || next[index].placement || ""),
+                                  };
+                                  onChange("multi_week_overrides", next);
+                                }}
+                                className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                              >
+                                <option value="">Use base product</option>
+                                {(Array.isArray(products) ? products : []).map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.product_name} - {item.placement || "N/A"} - ${Number(item.price || 0).toFixed(2)}
+                                  </option>
+                                ))}
+                              </select>
+                              <p className="text-xs text-gray-500 mt-2">
+                                Leave blank to use the base product selection for this week.
+                              </p>
+                            </div>
+                          ) : null}
+
+                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                            <label className="block text-xs font-semibold text-gray-700 mb-1">
+                              Placement
+                            </label>
+                            <select
+                              value={currentPlacement}
+                              onChange={(e) => {
+                                const next = [...normalizedOverrides];
+                                next[index] = { ...next[index], placement: e.target.value };
+                                onChange("multi_week_overrides", next);
+                              }}
+                              className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                            >
+                              <option value="">Use product placement</option>
+                              {placementOptions.map((placement) => (
+                                <option key={placement} value={placement}>
+                                  {placement}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
                           <div className="border border-gray-200 rounded-lg bg-white px-3 pt-3 pb-2.5">
                             <label className="block text-xs font-semibold text-gray-700 mb-1">
-                              Override Ad Name (optional)
+                              {isPublicReviewMultiWeek ? "Ad Name" : "Override Ad Name (optional)"}
                             </label>
                             <input
                               type="text"
@@ -571,7 +644,7 @@ export function ScheduleSection({
                                 next[index] = { ...next[index], ad_name: e.target.value };
                                 onChange("multi_week_overrides", next);
                               }}
-                              placeholder="Leave blank to use base"
+                              placeholder={isPublicReviewMultiWeek ? "Enter ad name" : "Leave blank to use base"}
                               className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
                             />
                           </div>
@@ -597,10 +670,12 @@ export function ScheduleSection({
                                   onChange("multi_week_overrides", next);
                                 }}
                               />
-                              Use different attachments this week
+                              {isPublicReviewMultiWeek ? "Add attachments for this week" : "Use different attachments this week"}
                             </label>
                             <p className="text-xs text-gray-500 mt-2">
-                              Unchecked = uses the base attachments. Checked = customize attachments for this week.
+                              {isPublicReviewMultiWeek
+                                ? "Leave unchecked if you do not need attachments for this week."
+                                : "Unchecked = uses the base attachments. Checked = customize attachments for this week."}
                             </p>
                           </div>
                         </div>
@@ -608,7 +683,10 @@ export function ScheduleSection({
                         <div className="mt-3">
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <h5 className="text-sm font-semibold text-gray-900">Schedule</h5>
-                            <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
+                            <label
+                              className="flex items-center gap-2 text-sm text-gray-700 select-none"
+                              title={TBD_TOOLTIP_TEXT}
+                            >
                               <input
                                 type="checkbox"
                                 checked={Boolean(entry.schedule_tbd)}
@@ -617,6 +695,8 @@ export function ScheduleSection({
                                   next[index] = { ...next[index], schedule_tbd: e.target.checked };
                                   onChange("multi_week_overrides", next);
                                 }}
+                                title={TBD_TOOLTIP_TEXT}
+                                aria-label={`${TBD_TOOLTIP_TEXT} Toggle TBD for week ${index + 1}.`}
                               />
                               TBD
                             </label>
@@ -710,7 +790,7 @@ export function ScheduleSection({
 
                         <div className="mt-3">
                           <AdTextEditor
-                            label="Ad Text"
+                            label={isPublicReviewMultiWeek ? "Ad Text" : "Ad Text"}
                             name={`multi_week_overrides_${index}_ad_text`}
                             value={entry.ad_text}
                             onChange={(nextText) => {
@@ -719,9 +799,11 @@ export function ScheduleSection({
                               onChange("multi_week_overrides", next);
                             }}
                           />
-                          <p className="text-xs text-gray-500 mt-2">
-                            Leave blank to use the base ad text.
-                          </p>
+                          {!isPublicReviewMultiWeek ? (
+                            <p className="text-xs text-gray-500 mt-2">
+                              Leave blank to use the base ad text.
+                            </p>
+                          ) : null}
                         </div>
 
                         {!entry.use_base_media ? (
@@ -1113,7 +1195,7 @@ export function ScheduleSection({
           <button
             type="button"
             onClick={() => {
-              loadedMonthsRef.current.delete(toMonthKey(currentMonthRef.current));
+              loadingMonthsRef.current.delete(toMonthKey(currentMonthRef.current));
               setMonthAvailabilityError("");
               void loadMonthAvailability(currentMonthRef.current);
             }}

@@ -204,6 +204,25 @@ Non-negotiable:
 3. Date values must remain in the app’s schedule format (`YYYY-MM-DD` date keys) and align with the same timezone assumptions used in `ScheduleSection`.
 4. If you add/modify any scheduling flow, verify it stays in sync with all other schedule pickers and availability enforcement paths (admin + public).
 
+## Submit Form Layout Rule
+
+All future work on `submit-ad` style entry forms should preserve the current desktop layout pattern unless the user explicitly asks for a different UX.
+
+Required default:
+
+1. On large screens, use a two-column layout:
+   - left column for the form
+   - right column for a persistent mobile ad preview rail
+2. Do not hide the preview behind a button on desktop when the page has enough width for the split layout.
+3. Keep the preview modal/button path for smaller screens, but desktop should prefer the always-visible preview rail.
+4. Reuse the current visual language from `anything/apps/web/src/app/submit-ad/page.jsx`:
+   - rounded card shell
+   - sticky right preview rail
+   - preview shown inside a phone-style/mobile mock frame area
+5. For normal single-form submit flows, do not add week-switcher controls in the preview rail.
+6. Reserve week preview switchers only for dedicated multi-week workspace views where multiple weekly previews are actually needed.
+7. When updating these pages, favor this split-layout pattern over reverting to a narrow single-column form on desktop.
+
 ## Recent Fixes (March 5, 2026)
 
 1. Destructive actions in Ads UI now use app toasts (no browser `window.confirm` dialogs):

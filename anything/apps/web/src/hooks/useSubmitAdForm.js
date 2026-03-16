@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   checkAdAvailability,
+  checkMultiWeekOverridesAvailability,
   normalizeCustomDateEntries,
 } from "@/lib/adAvailabilityClient";
 import {
@@ -13,6 +14,7 @@ import {
   isCompleteUSPhoneNumber,
 } from "@/lib/phone";
 import { appToast } from "@/lib/toast";
+import { clampWeeks } from "@/lib/multiWeekBooking";
 import { useAccountSetup } from "./useAccountSetup";
 
 const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
@@ -24,6 +26,7 @@ const initialFormData = {
   email: "",
   phone_number: "",
   ad_name: "",
+  product_id: "",
   post_type: "One-Time Post",
   post_date_from: "",
   post_date_to: "",
@@ -383,8 +386,8 @@ export function useSubmitAdForm() {
 
       const isMultiWeek = currentFormData.post_type === "Multi-week booking (TBD)";
       if (isMultiWeek) {
-        const weeks = Number(currentFormData.multi_week_weeks);
-        if (!Number.isFinite(weeks) || weeks < 2 || weeks > 12) {
+        const weeks = clampWeeks(currentFormData.multi_week_weeks, 4);
+        if (Number(currentFormData.multi_week_weeks) !== weeks) {
           showSubmitError("Weeks must be between 2 and 12.");
           return;
         }
@@ -403,6 +406,17 @@ export function useSubmitAdForm() {
         });
         if (missingScheduleWeekIndex >= 0) {
           showSubmitError(`Week ${missingScheduleWeekIndex + 1} needs a date/time or must be marked TBD.`);
+          return;
+        }
+
+        const weeklyAvailability = await checkMultiWeekOverridesAvailability({
+          overrides,
+        });
+        if (!weeklyAvailability.available) {
+          setFullyBookedDates(weeklyAvailability.fullyBookedDates || []);
+          showSubmitError(
+            `Week ${weeklyAvailability.weekIndex + 1}: ${weeklyAvailability.availabilityError || "Selected date is unavailable."}`,
+          );
           return;
         }
       } else {

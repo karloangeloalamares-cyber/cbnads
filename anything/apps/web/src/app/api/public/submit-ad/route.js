@@ -113,6 +113,7 @@ export async function POST(request) {
       const result = await createPendingAdSubmission({
         request,
         submission: body,
+        requireProductForMultiWeek: false,
       });
 
       if (result?.error) {
