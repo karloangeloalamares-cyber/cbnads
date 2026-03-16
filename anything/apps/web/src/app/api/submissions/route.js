@@ -260,6 +260,7 @@ export async function POST(request) {
     const result = await createPendingAdSubmission({
       request,
       supabase,
+      requireProductForMultiWeek: false,
       submission: {
         ...body,
         product_id: normalizedProductId || null,

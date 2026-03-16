@@ -8,7 +8,6 @@ import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
-import { ProductSelectionSection } from "@/components/SubmitAdForm/ProductSelectionSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
 import {
   checkAdAvailability,
@@ -21,7 +20,6 @@ import { appToast } from "@/lib/toast";
 import { navigateBackWithFallback } from "@/lib/navigation";
 import {
   clampWeeks,
-  getEstimatedOccurrenceCount,
   resolveAdvertiserMultiWeekPreview,
 } from "@/lib/multiWeekBooking";
 
@@ -129,11 +127,8 @@ export default function AdvertiserCreateAdSection({
     ),
     [formData, isMultiWeekPreview, previewWeekCount, previewWeekIndex],
   );
-  const occurrenceCount = useMemo(
-    () => getEstimatedOccurrenceCount(formData),
-    [formData],
-  );
   const isDedicatedMultiWeek = showMultiWeekWorkspace;
+  const useSplitLayout = true;
 
   useEffect(() => {
     if (!showPreview || !isMultiWeekPreview) {
@@ -297,13 +292,6 @@ export default function AdvertiserCreateAdSection({
       appToast.error({
         title: "Complete all required fields before submitting.",
         description: `Missing: ${missingRequiredFields.join(", ")}`,
-      });
-      return false;
-    }
-
-    if (!String(current.product_id || "").trim()) {
-      appToast.error({
-        title: "Select a product option before submitting.",
       });
       return false;
     }
@@ -534,7 +522,7 @@ export default function AdvertiserCreateAdSection({
       <div className={`min-h-screen ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
         <div className="flex max-w-none mx-auto">
           <div className={`flex-1 px-5 py-8 sm:px-6 sm:py-10 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
-            <div className={`${isDedicatedMultiWeek ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
+            <div className={`${useSplitLayout ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
               <button
                 type="button"
                 onClick={exitCreateFlow}
@@ -546,23 +534,11 @@ export default function AdvertiserCreateAdSection({
               </button>
 
               <div className="flex items-center gap-2">
-                {!showMultiWeekWorkspace ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleChange("post_type", "Multi-week booking (TBD)");
-                      setShowMultiWeekWorkspace(true);
-                    }}
-                    className="h-10 px-4 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all"
-                  >
-                    Multi-week booking
-                  </button>
-                ) : null}
                 {!isDedicatedMultiWeek ? (
                   <button
                     type="button"
                     onClick={() => setShowPreview(true)}
-                    className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400"
+                    className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400 lg:hidden"
                   >
                     <Eye size={15} />
                     Preview
@@ -571,8 +547,8 @@ export default function AdvertiserCreateAdSection({
               </div>
             </div>
 
-            <div className={isDedicatedMultiWeek ? "max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
-              <div className={isDedicatedMultiWeek ? "min-w-0" : ""}>
+            <div className={useSplitLayout ? "max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
+              <div className={useSplitLayout ? "min-w-0" : ""}>
               {isDedicatedMultiWeek ? (
                 <div className="mb-8 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-7">
                   <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -582,7 +558,7 @@ export default function AdvertiserCreateAdSection({
                       </p>
                       <h1 className="text-3xl font-bold text-gray-900 mb-2">Create multi-week booking</h1>
                       <p className="text-sm leading-6 text-gray-600">
-                        Build one ad request per week, keep the base product and content in sync, and only override the weeks that need different timing or creative.
+                        Build one ad request per week, set the week count and anchor date here, then submit the series for admin review. Product and pricing can be attached later during approval.
                       </p>
                     </div>
                     <div className="flex items-center gap-2 self-start">
@@ -611,33 +587,57 @@ export default function AdvertiserCreateAdSection({
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
                         Weeks
                       </div>
-                      <div className="mt-1 text-lg font-semibold text-gray-900">
-                        {clampWeeks(formData.multi_week_weeks || 4)}
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">Create 2 to 12 linked weekly requests.</p>
+                      <input
+                        type="number"
+                        min={2}
+                        max={12}
+                        value={formData.multi_week_weeks || 4}
+                        onChange={(event) => handleChange("multi_week_weeks", event.target.value)}
+                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-base font-semibold text-gray-900 outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
+                      />
+                      <p className="mt-2 text-xs text-gray-500">Choose between 2 and 12 linked weekly requests.</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
                         Week 1 Start
                       </div>
-                      <div className="mt-1 text-sm font-semibold text-gray-900">
-                        {formData.series_week_start || "Select week start"}
-                      </div>
-                      <p className="mt-1 text-xs text-gray-500">This anchors the sequence for the rest of the series.</p>
+                      <input
+                        type="date"
+                        value={formData.series_week_start || ""}
+                        onChange={(event) => handleChange("series_week_start", event.target.value)}
+                        className="mt-2 h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-900 outline-none transition focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
+                      />
+                      <p className="mt-2 text-xs text-gray-500">This anchors the sequence for the rest of the series.</p>
                     </div>
                     <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] px-4 py-3">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
-                        Product
+                        Review Flow
                       </div>
                       <div className="mt-1 text-sm font-semibold text-gray-900">
-                        {products.find((item) => String(item?.id) === String(formData.product_id))?.product_name || "Choose a base product"}
+                        Admin assigns product later
                       </div>
-                      <p className="mt-1 text-xs text-gray-500">Each week can inherit this or override it.</p>
+                      <p className="mt-2 text-xs text-gray-500">Use this form for schedule and creative only. Product and pricing are attached during review.</p>
                     </div>
                   </div>
                 </div>
               ) : (
-                <FormHeader />
+                <div className="mb-8 flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <FormHeader />
+                  </div>
+                  <div className="hidden lg:flex shrink-0 pt-16">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleChange("post_type", "Multi-week booking (TBD)");
+                        setShowMultiWeekWorkspace(true);
+                      }}
+                      className="h-10 px-4 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all"
+                    >
+                      Multi-week booking
+                    </button>
+                  </div>
+                </div>
               )}
 
               {!identityReady ? (
@@ -650,7 +650,7 @@ export default function AdvertiserCreateAdSection({
               <form
                 id="advertiser-create-ad-form"
                 onSubmit={handleSubmit}
-                className={isDedicatedMultiWeek ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
+                className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
               >
                 <AdvertiserInfoSection
                   formData={formData}
@@ -669,18 +669,6 @@ export default function AdvertiserCreateAdSection({
                   onChange={handleChange}
                   onAddMedia={addMedia}
                   onRemoveMedia={removeMedia}
-                />
-
-                <ProductSelectionSection
-                  products={products}
-                  selectedProductId={formData.product_id}
-                  loading={false}
-                  error=""
-                  occurrenceCount={occurrenceCount}
-                  onSelectProduct={(product) => {
-                    handleChange("product_id", String(product?.id || ""));
-                    handleChange("placement", String(product?.placement || ""));
-                  }}
                 />
 
                 {!isDedicatedMultiWeek ? (
@@ -725,36 +713,46 @@ export default function AdvertiserCreateAdSection({
                 ) : null}
               </form>
               </div>
-              {isDedicatedMultiWeek ? (
+              {useSplitLayout ? (
                 <div className="hidden lg:flex sticky top-8 min-h-[720px] rounded-[32px] border border-gray-200 bg-white p-5 shadow-sm xl:p-6">
                   <div className="flex w-full flex-col rounded-[26px] bg-[#F7F4EE] px-5 py-5">
                     <div className="mb-5">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
                         Live Preview
                       </div>
-                      <div className="mt-2 text-sm font-semibold text-gray-900">
-                        {`Week ${previewWeekIndex + 1}`}
-                      </div>
+                      {isDedicatedMultiWeek ? (
+                        <div className="mt-2 text-sm font-semibold text-gray-900">
+                          {`Week ${previewWeekIndex + 1}`}
+                        </div>
+                      ) : (
+                        <div className="mt-2 text-sm font-semibold text-gray-900">
+                          Main create-ad preview
+                        </div>
+                      )}
                       <p className="mt-1 text-xs leading-5 text-gray-600">
-                        Switch weeks to review copy, media, and schedule overrides before you submit the full series.
+                        {isDedicatedMultiWeek
+                          ? "Switch weeks to review copy, media, and schedule overrides before you submit the full series."
+                          : "Your mobile ad preview updates as you fill in the form."}
                       </p>
                     </div>
-                    <div className="mb-5 grid grid-cols-2 gap-2">
-                      {Array.from({ length: previewWeekCount }).map((_, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          onClick={() => setPreviewWeekIndex(index)}
-                          className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                            previewWeekIndex === index
-                              ? "border-gray-900 bg-gray-900 text-white"
-                              : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
-                          }`}
-                        >
-                          {`Week ${index + 1}`}
-                        </button>
-                      ))}
-                    </div>
+                    {isDedicatedMultiWeek ? (
+                      <div className="mb-5 grid grid-cols-2 gap-2">
+                        {Array.from({ length: previewWeekCount }).map((_, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => setPreviewWeekIndex(index)}
+                            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                              previewWeekIndex === index
+                                ? "border-gray-900 bg-gray-900 text-white"
+                                : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
+                            }`}
+                          >
+                            {`Week ${index + 1}`}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className="flex-1 rounded-[28px] bg-white px-3 py-5 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
                       <AdPreview formData={previewData} />
                     </div>
