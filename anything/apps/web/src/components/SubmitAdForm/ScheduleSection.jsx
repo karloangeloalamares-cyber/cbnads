@@ -610,27 +610,29 @@ export function ScheduleSection({
                             </div>
                           ) : null}
 
-                          <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
-                            <label className="block text-xs font-semibold text-gray-700 mb-1">
-                              Placement
-                            </label>
-                            <select
-                              value={currentPlacement}
-                              onChange={(e) => {
-                                const next = [...normalizedOverrides];
-                                next[index] = { ...next[index], placement: e.target.value };
-                                onChange("multi_week_overrides", next);
-                              }}
-                              className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
-                            >
-                              <option value="">Use product placement</option>
-                              {placementOptions.map((placement) => (
-                                <option key={placement} value={placement}>
-                                  {placement}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          {!isPublicReviewMultiWeek ? (
+                            <div className="border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 hover:border-gray-300 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0">
+                              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                                Placement
+                              </label>
+                              <select
+                                value={currentPlacement}
+                                onChange={(e) => {
+                                  const next = [...normalizedOverrides];
+                                  next[index] = { ...next[index], placement: e.target.value };
+                                  onChange("multi_week_overrides", next);
+                                }}
+                                className="w-full text-sm text-gray-900 bg-transparent focus:outline-none appearance-none cursor-pointer"
+                              >
+                                <option value="">Use product placement</option>
+                                {placementOptions.map((placement) => (
+                                  <option key={placement} value={placement}>
+                                    {placement}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : null}
 
                           <div className="border border-gray-200 rounded-lg bg-white px-3 pt-3 pb-2.5">
                             <label className="block text-xs font-semibold text-gray-700 mb-1">

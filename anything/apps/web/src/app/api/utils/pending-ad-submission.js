@@ -226,7 +226,9 @@ export async function createPendingAdSubmission({
     };
   }
 
-  if (normalizedProductId) {
+  const shouldResolveTopLevelProduct = normalizedProductId && (!isMultiWeek || requireProductForMultiWeek);
+
+  if (shouldResolveTopLevelProduct) {
     const { data: productRow, error: productError } = await supabase
       .from(table("products"))
       .select("id, product_name, placement, price")
@@ -286,16 +288,20 @@ export async function createPendingAdSubmission({
     const seriesId = String(multi_week.series_id || "").trim() || createSeriesId();
     const weekStarts = buildSeriesWeekStarts({ seriesWeekStart, weeks });
 
-    const overrideProductIds = overrides
-      .map((item) => (item && typeof item === "object" ? String(item.product_id || "").trim() : ""))
-      .filter(Boolean);
+    const overrideProductIds = requireProductForMultiWeek
+      ? overrides
+          .map((item) => (item && typeof item === "object" ? String(item.product_id || "").trim() : ""))
+          .filter(Boolean)
+      : [];
 
     const productsById = new Map();
     if (selectedProduct?.id) {
       productsById.set(String(selectedProduct.id), selectedProduct);
     }
 
-    const neededProductIds = Array.from(new Set([normalizedProductId, ...overrideProductIds]))
+    const neededProductIds = Array.from(
+      new Set(requireProductForMultiWeek ? [normalizedProductId, ...overrideProductIds] : []),
+    )
       .filter(Boolean)
       .filter((id) => !productsById.has(String(id)));
 
@@ -316,8 +322,11 @@ export async function createPendingAdSubmission({
       });
     }
 
-    const baseProductRow = normalizedProductId ? productsById.get(String(normalizedProductId)) : null;
-    if (normalizedProductId && !baseProductRow) {
+    const baseProductRow =
+      requireProductForMultiWeek && normalizedProductId
+        ? productsById.get(String(normalizedProductId))
+        : null;
+    if (requireProductForMultiWeek && normalizedProductId && !baseProductRow) {
       return {
         error: "Selected base product was not found",
         status: 400,
@@ -350,8 +359,12 @@ export async function createPendingAdSubmission({
 
     const pendingPayloads = weekStarts.map((weekInfo, idx) => {
       const override = overrides[idx] && typeof overrides[idx] === "object" ? overrides[idx] : {};
-      const overrideProductId = String(override.product_id || "").trim();
-      const chosenProductId = overrideProductId || normalizedProductId;
+      const overrideProductId = requireProductForMultiWeek
+        ? String(override.product_id || "").trim()
+        : "";
+      const chosenProductId = requireProductForMultiWeek
+        ? overrideProductId || normalizedProductId
+        : "";
       const productRow = chosenProductId ? productsById.get(String(chosenProductId)) : null;
       if (chosenProductId && !productRow) {
         throw new Error(`Product not found for week ${weekInfo.series_index}`);

@@ -362,22 +362,11 @@ export default function AdvertiserCreateAdSection({
       const overrides = Array.isArray(current.multi_week_overrides)
         ? current.multi_week_overrides
         : [];
-      const productsById = new Map(
-        (Array.isArray(products) ? products : []).map((item) => [String(item?.id || ""), item]),
-      );
 
       for (let index = 0; index < overrides.length; index += 1) {
         const entry = overrides[index];
         if (!entry || typeof entry !== "object") {
           continue;
-        }
-
-        const overrideProductId = String(entry.product_id || "").trim();
-        if (overrideProductId && !productsById.has(overrideProductId)) {
-          appToast.error({
-            title: `Week ${index + 1} uses an unavailable product option.`,
-          });
-          return false;
         }
 
         if (entry.schedule_tbd) {
@@ -457,6 +446,22 @@ export default function AdvertiserCreateAdSection({
           ? `${current.post_time}:00`
           : current.post_time;
 
+      const sanitizedMultiWeekOverrides = Array.isArray(current.multi_week_overrides)
+        ? current.multi_week_overrides.map((entry) => ({
+            ad_name: String(entry?.ad_name || ""),
+            ad_text: String(entry?.ad_text || ""),
+            use_base_media: entry?.use_base_media !== false,
+            media: Array.isArray(entry?.media) ? entry.media : [],
+            schedule_tbd: Boolean(entry?.schedule_tbd),
+            post_date_from: String(entry?.post_date_from || "").slice(0, 10),
+            post_time:
+              entry?.post_time && String(entry.post_time).length === 5
+                ? `${entry.post_time}:00`
+                : entry?.post_time || "",
+            reminder_minutes: String(entry?.reminder_minutes || "15-min"),
+          }))
+        : [];
+
       const response = await submitWithAuth("/api/submissions", {
         method: "POST",
         headers: {
@@ -464,6 +469,8 @@ export default function AdvertiserCreateAdSection({
         },
         body: JSON.stringify({
           ...current,
+          product_id: null,
+          placement: "",
           post_time: postTimeWithSeconds,
           custom_dates: current.custom_dates,
           ...(current.post_type === "Multi-week booking (TBD)"
@@ -471,15 +478,7 @@ export default function AdvertiserCreateAdSection({
                 multi_week: {
                   weeks: clampWeeks(current.multi_week_weeks || 4, 4),
                   series_week_start: String(current.series_week_start || "").slice(0, 10),
-                  overrides: Array.isArray(current.multi_week_overrides)
-                    ? current.multi_week_overrides.map((entry) => ({
-                        ...entry,
-                        post_time:
-                          entry?.post_time && String(entry.post_time).length === 5
-                            ? `${entry.post_time}:00`
-                            : entry?.post_time || "",
-                      }))
-                    : [],
+                  overrides: sanitizedMultiWeekOverrides,
                 },
               }
             : {}),
@@ -696,6 +695,7 @@ export default function AdvertiserCreateAdSection({
                   pastTimeError={pastTimeError}
                   fullyBookedDates={fullyBookedDates}
                   products={products}
+                  variant={isDedicatedMultiWeek ? "public-review-multi-week" : "default"}
                 />
 
                 <NotesSection notes={formData.notes} onChange={handleChange} />

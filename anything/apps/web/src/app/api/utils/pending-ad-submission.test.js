@@ -357,4 +357,49 @@ describe("createPendingAdSubmission", () => {
       post_time: null,
     });
   });
+
+  it("ignores stale multi-week product ids when product assignment is deferred", async () => {
+    const { client, insertCalls } = buildMockSupabase();
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      requireProductForMultiWeek: false,
+      submission: buildSubmission({
+        product_id: "missing-base-product",
+        post_type: "Multi-week booking (TBD)",
+        multi_week: {
+          weeks: 2,
+          series_week_start: "2026-03-15",
+          overrides: [
+            {
+              product_id: "missing-week-product",
+              placement: "WhatsApp",
+              post_date_from: "2026-03-15",
+              post_time: "09:00",
+            },
+            {
+              placement: "Website",
+              schedule_tbd: true,
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(result.pendingAds).toHaveLength(2);
+    expect(insertCalls).toHaveLength(1);
+    expect(insertCalls[0][0]).toMatchObject({
+      product_id: null,
+      product_name: null,
+      price: 0,
+      placement: "WhatsApp",
+    });
+    expect(insertCalls[0][1]).toMatchObject({
+      product_id: null,
+      product_name: null,
+      price: 0,
+      placement: "Website",
+    });
+  });
 });
