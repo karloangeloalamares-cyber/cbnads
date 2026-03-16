@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ArrowLeft } from "lucide-react";
 import { appToast } from "@/lib/toast";
+import { navigateBackWithFallback } from "@/lib/navigation";
 import {
   formatUSPhoneNumber,
   isCompleteUSPhoneNumber,
@@ -85,7 +86,7 @@ export default function NewAdvertiserForm({ onCancel, onSuccess }) {
         <div className="max-w-[1200px] mx-auto flex items-center justify-between relative">
           {/* Back button */}
           <button
-            onClick={onCancel}
+            onClick={() => navigateBackWithFallback({ fallback: onCancel })}
             className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
           >
             <ArrowLeft size={18} />

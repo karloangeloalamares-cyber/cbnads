@@ -18,6 +18,7 @@ import {
 import { formatUSPhoneNumber } from "@/lib/phone";
 import { isPastDateTimeInAppTimeZone } from "@/lib/timezone";
 import { appToast } from "@/lib/toast";
+import { navigateBackWithFallback } from "@/lib/navigation";
 import {
   clampWeeks,
   getEstimatedOccurrenceCount,
@@ -523,7 +524,7 @@ export default function AdvertiserCreateAdSection({
       return;
     }
     resetForm();
-    onBack?.();
+    navigateBackWithFallback({ fallback: onBack });
   };
 
   const submitDisabled = loading || checkingAvailability || !identityReady;

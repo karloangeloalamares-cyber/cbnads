@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getSignedInUser } from "@/lib/localAuth";
 import { ensureDb, getReconciliationReport, subscribeDb } from "@/lib/localDb";
+import { navigateBackWithFallback } from "@/lib/navigation";
 
 export default function ReconciliationPage() {
   const [report, setReport] = useState(() => getReconciliationReport());
@@ -52,9 +53,13 @@ export default function ReconciliationPage() {
       <div className="mx-auto max-w-5xl space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Reconciliation</h1>
-          <a href="/ads?section=invoices" className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-100">
+          <button
+            type="button"
+            onClick={() => navigateBackWithFallback({ fallbackPath: "/ads?section=invoices" })}
+            className="rounded-lg border px-3 py-2 text-sm hover:bg-gray-100"
+          >
             Back to Invoices
-          </a>
+          </button>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">

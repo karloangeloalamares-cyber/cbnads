@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { ChevronLeft } from "lucide-react";
 import { useInvoiceForm } from "@/hooks/useInvoiceForm";
 import { useNewAdvertiser } from "@/hooks/useNewAdvertiser";
+import { navigateBackWithFallback } from "@/lib/navigation";
 import { TopNavBar } from "./NewInvoiceForm/TopNavBar";
 import { AdvertiserSelector } from "./NewInvoiceForm/AdvertiserSelector";
 import { NewAdvertiserForm } from "./NewInvoiceForm/NewAdvertiserForm";
@@ -118,7 +119,7 @@ export default function NewInvoiceForm({ onCancel, onSuccess }) {
             {/* Left Column - Form */}
             <div>
               <button
-                onClick={onCancel}
+                onClick={() => navigateBackWithFallback({ fallback: onCancel })}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all mb-6"
               >
                 <ChevronLeft size={16} />

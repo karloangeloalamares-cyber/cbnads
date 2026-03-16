@@ -7,6 +7,7 @@ import {
   INVOICE_COMPANY_EMAIL,
   INVOICE_COMPANY_NAME,
 } from "@/lib/invoiceCompany";
+import { navigateBackWithFallback } from "@/lib/navigation";
 import { appToast } from "@/lib/toast";
 import { getTodayInAppTimeZone } from "@/lib/timezone";
 
@@ -419,7 +420,7 @@ export default function BillingForm({
           {/* Left Column - Edit Invoice Form */}
           <div>
             <button
-              onClick={onBack}
+              onClick={() => navigateBackWithFallback({ fallback: onBack })}
               className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all mb-6"
             >
               <ChevronLeft size={16} />

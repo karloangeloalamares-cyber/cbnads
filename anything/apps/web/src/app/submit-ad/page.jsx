@@ -16,6 +16,7 @@ import {
   clampWeeks,
   resolveAdvertiserMultiWeekPreview,
 } from "@/lib/multiWeekBooking";
+import { navigateBackWithFallback } from "@/lib/navigation";
 
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
@@ -110,6 +111,16 @@ export default function SubmitAdPage() {
     handleSubmit(e);
   };
 
+  const handlePageBack = () => {
+    if (isDedicatedMultiWeek) {
+      setShowMultiWeekWorkspace(false);
+      handleChange("post_type", "One-Time Post");
+      return;
+    }
+
+    navigateBackWithFallback({ fallbackPath: "/" });
+  };
+
   return (
     <>
       {modalState.type === "alert" && (
@@ -123,27 +134,16 @@ export default function SubmitAdPage() {
         <div className="flex max-w-none mx-auto">
           <div className={`flex-1 px-5 py-8 sm:px-6 sm:py-10 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
             <div className={`${useSplitLayout ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
-              <a
-                href="/"
+              <button
+                type="button"
+                onClick={handlePageBack}
                 className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
               >
                 <ArrowLeft size={18} />
                 Back
-              </a>
+              </button>
               {phase === "form" && (
                 <div className="flex items-center gap-2">
-                  {!showMultiWeekWorkspace ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleChange("post_type", "Multi-week booking (TBD)");
-                        setShowMultiWeekWorkspace(true);
-                      }}
-                      className="h-10 px-4 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all"
-                    >
-                      Multi-week booking
-                    </button>
-                  ) : null}
                   {!isDedicatedMultiWeek ? (
                     <button
                       type="button"
@@ -256,7 +256,23 @@ export default function SubmitAdPage() {
                     </div>
                   </div>
                 ) : (
-                  <FormHeader />
+                  <div className="mb-8 flex items-start justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <FormHeader />
+                    </div>
+                    <div className="hidden lg:flex shrink-0 pt-16">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleChange("post_type", "Multi-week booking (TBD)");
+                          setShowMultiWeekWorkspace(true);
+                        }}
+                        className="h-10 px-4 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-all"
+                      >
+                        Multi-week booking
+                      </button>
+                    </div>
+                  </div>
                 )}
 
                 <form
