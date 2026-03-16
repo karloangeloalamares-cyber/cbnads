@@ -537,6 +537,18 @@ export default function AdvertiserCreateAdSection({
                 {!isDedicatedMultiWeek ? (
                   <button
                     type="button"
+                    onClick={() => {
+                      handleChange("post_type", "Multi-week booking (TBD)");
+                      setShowMultiWeekWorkspace(true);
+                    }}
+                    className="text-sm text-gray-700 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400 hover:bg-gray-50 lg:hidden"
+                  >
+                    Multi-week booking
+                  </button>
+                ) : null}
+                {!isDedicatedMultiWeek ? (
+                  <button
+                    type="button"
                     onClick={() => setShowPreview(true)}
                     className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400 lg:hidden"
                   >
