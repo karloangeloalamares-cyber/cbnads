@@ -143,6 +143,8 @@ const normalizePostType = (value) => normalizePostTypeValue(value);
 
 const toMoney = (value) => numberOrZero(value).toFixed(2);
 
+const roundCurrencyValue = (value) => Math.round(numberOrZero(value) * 100) / 100;
+
 const toArray = (value) => (Array.isArray(value) ? value : []);
 const WHATSAPP_E164_LIKE_REGEX = /^\+?\d{8,15}$/;
 const normalizeWhatsAppPhoneE164 = (value) => {
@@ -405,6 +407,51 @@ const buildDerivedInvoiceItemsForAd = ({ adItem, invoiceId, existingItems = [], 
     amount: unitPrice,
     created_at: existingByIndex[index]?.created_at || now,
   }));
+};
+
+const rebalanceInvoiceItemsToSubtotal = (items, targetSubtotal) => {
+  const sourceItems = toArray(items);
+  if (sourceItems.length === 0) {
+    return [];
+  }
+
+  const normalizedTarget = Math.max(roundCurrencyValue(targetSubtotal), 0);
+  if (normalizedTarget <= 0) {
+    return sourceItems.map((item) => ({
+      ...item,
+      quantity: Math.max(1, Number(item?.quantity) || 1),
+      unit_price: toMoney(0),
+      amount: toMoney(0),
+    }));
+  }
+
+  const currentSubtotal = sourceItems.reduce(
+    (sum, item) => sum + numberOrZero(item?.amount ?? item?.unit_price),
+    0,
+  );
+  let distributed = 0;
+
+  return sourceItems.map((item, index) => {
+    const quantity = Math.max(1, Number(item?.quantity) || 1);
+    let nextAmount = 0;
+
+    if (index === sourceItems.length - 1) {
+      nextAmount = roundCurrencyValue(Math.max(normalizedTarget - distributed, 0));
+    } else if (currentSubtotal > 0) {
+      const baseAmount = numberOrZero(item?.amount ?? item?.unit_price);
+      nextAmount = roundCurrencyValue((baseAmount / currentSubtotal) * normalizedTarget);
+    } else {
+      nextAmount = roundCurrencyValue(normalizedTarget / sourceItems.length);
+    }
+
+    distributed = roundCurrencyValue(distributed + nextAmount);
+    return {
+      ...item,
+      quantity,
+      unit_price: toMoney(roundCurrencyValue(nextAmount / quantity)),
+      amount: toMoney(nextAmount),
+    };
+  });
 };
 
 const buildSubmissionReviewNotes = ({ reasons = [], note = '' } = {}) => {
@@ -2572,12 +2619,30 @@ export const upsertInvoice = async (input) => {
         now,
       }),
     );
-    const items = Array.isArray(input.items) && input.items.length > 0 ? input.items : derivedItems;
-    const explicitAmount = toMoney(input.total ?? input.amount);
-    const derivedSubtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
-    const subtotal = items.length > 0 ? derivedSubtotal : explicitAmount;
+    let items = Array.isArray(input.items) && input.items.length > 0 ? input.items : derivedItems;
+    const explicitAmountValue = numberOrZero(input.total ?? input.amount);
     const discount = toMoney(input.discount);
     const tax = toMoney(input.tax);
+    if (items.length > 0 && explicitAmountValue > 0) {
+      const currentSubtotal = items.reduce(
+        (sum, item) => sum + numberOrZero(item.amount ?? item.unit_price),
+        0,
+      );
+      const currentTotal =
+        currentSubtotal - numberOrZero(discount) + numberOrZero(tax);
+      const targetSubtotal = Math.max(
+        0,
+        explicitAmountValue + numberOrZero(discount) - numberOrZero(tax),
+      );
+
+      if (currentSubtotal <= 0 || Math.abs(currentTotal - explicitAmountValue) > 0.009) {
+        items = rebalanceInvoiceItemsToSubtotal(items, targetSubtotal);
+      }
+    }
+
+    const explicitAmount = toMoney(explicitAmountValue);
+    const derivedSubtotal = items.reduce((sum, item) => sum + numberOrZero(item.amount), 0);
+    const subtotal = items.length > 0 ? derivedSubtotal : explicitAmount;
     const total = toMoney(subtotal - numberOrZero(discount) + numberOrZero(tax));
     const hasLinkedAds = adIds.length > 0;
     const hasItems = items.length > 0;

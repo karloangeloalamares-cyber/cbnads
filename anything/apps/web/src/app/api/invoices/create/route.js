@@ -1,6 +1,10 @@
 import { db, toNumber } from "../../utils/supabase-db.js";
 import { requirePermission } from "../../utils/auth-check.js";
 import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../utils/invoice-atomic.js";
+import {
+  rebalanceInvoiceLineItemsToSubtotal,
+  sumInvoiceItemAmounts,
+} from "../../utils/invoice-helpers.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
@@ -25,6 +29,7 @@ export async function POST(request) {
       tax = 0,
       notes,
       items = [],
+      amount,
     } = body;
 
     if (!advertiser_name) {
@@ -41,8 +46,6 @@ export async function POST(request) {
       );
     }
 
-    const subtotal = items.reduce((sum, item) => sum + toNumber(item.amount, 0), 0);
-    const total = subtotal - toNumber(discount, 0) + toNumber(tax, 0);
     const nowIso = new Date().toISOString();
     const normalizedStatus = String(status || "Pending").trim() || "Pending";
     const normalizedDiscount = toNumber(discount, 0);
@@ -60,7 +63,7 @@ export async function POST(request) {
       scope: "invoice-create",
     });
 
-    const invoiceItemsPayload = items.map((item) => {
+    let invoiceItemsPayload = items.map((item) => {
       const quantity = toNumber(item.quantity, 1) || 1;
       const unitPrice = toNumber(item.unit_price, 0);
       const amount = toNumber(item.amount, quantity * unitPrice);
@@ -74,6 +77,23 @@ export async function POST(request) {
         created_at: nowIso,
       };
     });
+
+    const explicitTotal = Number(body?.total ?? amount);
+    if (invoiceItemsPayload.length > 0 && Number.isFinite(explicitTotal) && explicitTotal > 0) {
+      const currentSubtotal = sumInvoiceItemAmounts(invoiceItemsPayload);
+      const currentTotal = currentSubtotal - normalizedDiscount + normalizedTax;
+      const targetSubtotal = Math.max(0, explicitTotal + normalizedDiscount - normalizedTax);
+
+      if (currentSubtotal <= 0 || Math.abs(currentTotal - explicitTotal) > 0.009) {
+        invoiceItemsPayload = rebalanceInvoiceLineItemsToSubtotal(
+          invoiceItemsPayload,
+          targetSubtotal,
+        );
+      }
+    }
+
+    const subtotal = sumInvoiceItemAmounts(invoiceItemsPayload);
+    const total = subtotal - normalizedDiscount + normalizedTax;
 
     const invoiceResult = await createInvoiceAtomic({
       supabase,

@@ -119,11 +119,17 @@ const resolveApprovalPricing = async ({ supabase, pendingAd }) => {
   );
 
   const invoiceMultiplier = Math.max(1, extractAdScheduleDateKeys(pendingAd).length);
+  const invoiceAmount = unitAmount * invoiceMultiplier;
+  if (invoiceAmount <= 0) {
+    throw new Error(
+      "The pending ad does not have a billable amount. Set a product or price before approval.",
+    );
+  }
 
   return {
     resolvedProduct,
     unitAmount,
-    invoiceAmount: unitAmount * invoiceMultiplier,
+    invoiceAmount,
   };
 };
 
@@ -659,6 +665,10 @@ export async function POST(request) {
     const slotError = getSlotCapacityErrorPayload(error);
     if (slotError) {
       return Response.json(slotError.body, { status: slotError.status });
+    }
+
+    if (/does not have a billable amount/i.test(String(error?.message || ""))) {
+      return Response.json({ error: error.message }, { status: 409 });
     }
 
     console.error("Error approving ad:", error);

@@ -9,6 +9,10 @@ import {
   resolveAdvertiserScope,
 } from "../utils/auth-check.js";
 import { recalculateAdvertiserSpend } from "../utils/recalculate-advertiser-spend.js";
+import {
+  rebalanceInvoiceLineItemsToSubtotal,
+  sumInvoiceItemAmounts,
+} from "../utils/invoice-helpers.js";
 import { can } from "../../../lib/permissions.js";
 import { getTodayInAppTimeZone } from "../../../lib/timezone.js";
 
@@ -193,11 +197,13 @@ export async function PUT(request) {
       notes,
       items,
       amount_paid,
+      amount,
+      total,
     } = body;
 
     const { data: currentInvoice, error: currentInvoiceError } = await supabase
       .from(table("invoices"))
-      .select("id, advertiser_id, status, total, amount_paid")
+      .select("id, advertiser_id, status, total, amount_paid, discount, tax")
       .eq("id", id)
       .maybeSingle();
     if (currentInvoiceError) throw currentInvoiceError;
@@ -205,14 +211,52 @@ export async function PUT(request) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    let computedTotal = toNumber(currentInvoice.total, 0);
-    if (Array.isArray(items) && items.length > 0) {
-      const subtotal = items.reduce((sum, item) => sum + toNumber(item.amount, 0), 0);
-      computedTotal = subtotal - toNumber(discount, 0) + toNumber(tax, 0);
-    }
+    const normalizedDiscount =
+      discount !== undefined ? toNumber(discount, 0) : toNumber(currentInvoice.discount, 0);
+    const normalizedTax =
+      tax !== undefined ? toNumber(tax, 0) : toNumber(currentInvoice.tax, 0);
 
     const nextAmountPaid =
       amount_paid !== undefined ? toNumber(amount_paid, 0) : toNumber(currentInvoice.amount_paid, 0);
+
+    let normalizedItems = Array.isArray(items)
+      ? items.map((item) => {
+          const quantity = toNumber(item?.quantity, 1) || 1;
+          const unitPrice = toNumber(item?.unit_price, 0);
+          const amount = toNumber(item?.amount, quantity * unitPrice);
+          return {
+            ad_id: item?.ad_id || null,
+            product_id: item?.product_id || null,
+            description: item?.description || "",
+            quantity,
+            unit_price: unitPrice,
+            amount,
+          };
+        })
+      : [];
+
+    let computedTotal = toNumber(currentInvoice.total, 0);
+    const explicitTotal = Number(total ?? amount);
+    if (normalizedItems.length > 0) {
+      const currentSubtotal = sumInvoiceItemAmounts(normalizedItems);
+      const currentTotal = currentSubtotal - normalizedDiscount + normalizedTax;
+      const targetSubtotal =
+        Number.isFinite(explicitTotal) && explicitTotal > 0
+          ? Math.max(0, explicitTotal + normalizedDiscount - normalizedTax)
+          : currentSubtotal;
+
+      if (
+        Number.isFinite(explicitTotal) &&
+        explicitTotal > 0 &&
+        (currentSubtotal <= 0 || Math.abs(currentTotal - explicitTotal) > 0.009)
+      ) {
+        normalizedItems = rebalanceInvoiceLineItemsToSubtotal(normalizedItems, targetSubtotal);
+      }
+
+      computedTotal =
+        sumInvoiceItemAmounts(normalizedItems) - normalizedDiscount + normalizedTax;
+    }
+
     const nextStatus =
       status !== undefined
         ? status
@@ -233,25 +277,9 @@ export async function PUT(request) {
     if (contact_name !== undefined) patch.contact_name = contact_name;
     if (contact_email !== undefined) patch.contact_email = contact_email;
     if (bill_to !== undefined) patch.bill_to = bill_to;
-    if (discount !== undefined) patch.discount = toNumber(discount, 0);
-    if (tax !== undefined) patch.tax = toNumber(tax, 0);
+    if (discount !== undefined) patch.discount = normalizedDiscount;
+    if (tax !== undefined) patch.tax = normalizedTax;
     if (notes !== undefined) patch.notes = notes;
-
-    const normalizedItems = Array.isArray(items)
-      ? items.map((item) => {
-          const quantity = toNumber(item?.quantity, 1) || 1;
-          const unitPrice = toNumber(item?.unit_price, 0);
-          const amount = toNumber(item?.amount, quantity * unitPrice);
-          return {
-            ad_id: item?.ad_id || null,
-            product_id: item?.product_id || null,
-            description: item?.description || "",
-            quantity,
-            unit_price: unitPrice,
-            amount,
-          };
-        })
-      : [];
 
     const { data: updateResultRows, error: updateResultError } = await supabase.rpc(
       "cbnads_web_update_invoice_atomic",

@@ -168,6 +168,53 @@ export function sumInvoiceItemAmounts(items) {
   );
 }
 
+const roundCurrencyValue = (value) => {
+  const parsed = toNumber(value, 0);
+  return Math.round(parsed * 100) / 100;
+};
+
+export function rebalanceInvoiceLineItemsToSubtotal(items, targetSubtotal) {
+  const sourceItems = Array.isArray(items) ? items : [];
+  if (sourceItems.length === 0) {
+    return [];
+  }
+
+  const normalizedTarget = Math.max(roundCurrencyValue(targetSubtotal), 0);
+  if (normalizedTarget <= 0) {
+    return sourceItems.map((item) => ({
+      ...item,
+      quantity: Math.max(1, toNumber(item?.quantity, 1) || 1),
+      unit_price: 0,
+      amount: 0,
+    }));
+  }
+
+  const currentSubtotal = sumInvoiceItemAmounts(sourceItems);
+  let distributed = 0;
+
+  return sourceItems.map((item, index) => {
+    const quantity = Math.max(1, toNumber(item?.quantity, 1) || 1);
+    let nextAmount = 0;
+
+    if (index === sourceItems.length - 1) {
+      nextAmount = roundCurrencyValue(Math.max(normalizedTarget - distributed, 0));
+    } else if (currentSubtotal > 0) {
+      const baseAmount = toNumber(item?.amount ?? item?.unit_price, 0);
+      nextAmount = roundCurrencyValue((baseAmount / currentSubtotal) * normalizedTarget);
+    } else {
+      nextAmount = roundCurrencyValue(normalizedTarget / sourceItems.length);
+    }
+
+    distributed = roundCurrencyValue(distributed + nextAmount);
+    return {
+      ...item,
+      quantity,
+      unit_price: roundCurrencyValue(nextAmount / quantity),
+      amount: nextAmount,
+    };
+  });
+}
+
 const DEFAULT_INVOICE_PREFIX = "INV";
 const SUFFIX_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const SUFFIX_LENGTH = 4;

@@ -94,6 +94,9 @@ const syncInvoiceLineItemsForAd = async ({ supabase, ad, invoiceId }) => {
 
   const nowIso = new Date().toISOString();
   const unitAmount = Math.max(0, adAmount(ad));
+  if (unitAmount <= 0) {
+    return;
+  }
   const lineItems = buildInvoiceLineItemsForAd({
     ad,
     unitAmount,

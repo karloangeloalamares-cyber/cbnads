@@ -4,6 +4,7 @@ import { sendEmail } from "../../../utils/send-email.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-dashboard-url.js";
 import {
+  adAmount,
   buildInvoiceLineItemsForAd,
   fallbackInvoiceNumber,
   sumInvoiceItemAmounts,
@@ -172,7 +173,7 @@ const fetchInvoiceByAdArrayLink = async (supabase, adId) => {
 
 const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
   const nowIso = new Date().toISOString();
-  const unitAmount = Math.max(0, Number(ad?.price || 0) || 0);
+  const unitAmount = Math.max(0, adAmount(ad));
   const derivedInvoiceItems = buildInvoiceLineItemsForAd({
     ad,
     unitAmount,
@@ -182,6 +183,11 @@ const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
     createdAt: nowIso,
   });
   const invoiceAmount = sumInvoiceItemAmounts(derivedInvoiceItems);
+  if (invoiceAmount <= 0) {
+    throw new Error(
+      "The linked ad does not have a billable amount. Set a product or price before sending payment instructions.",
+    );
+  }
   const invoiceResult = await createInvoiceAtomic({
     supabase,
     invoice: {
@@ -562,6 +568,9 @@ export async function POST(request) {
       notice_type: "ready_for_payment",
     });
   } catch (error) {
+    if (/does not have a billable amount/i.test(String(error?.message || ""))) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
     console.error("[admin/ads/send-approval-email] Failed:", error);
     return Response.json(
       { error: "Internal Server Error" },
