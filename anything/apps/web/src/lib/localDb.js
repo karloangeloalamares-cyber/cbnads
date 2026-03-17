@@ -431,7 +431,17 @@ const isMissingRelationError = (error) => {
 const isMissingColumnError = (error) => {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
-  return code === '42703' || /column .* does not exist/i.test(message);
+  const details = String(error?.details || '');
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    /column .* does not exist/i.test(message) ||
+    /could not find the .* column/i.test(message) ||
+    /schema cache/i.test(message) ||
+    /column .* does not exist/i.test(details) ||
+    /could not find the .* column/i.test(details) ||
+    /schema cache/i.test(details)
+  );
 };
 
 const isUniqueConstraintError = (error) => {
@@ -465,6 +475,77 @@ const throwIfSupabaseError = (label, error) => {
     return;
   }
   throw new Error(`${label}: ${error.message || 'Unknown Supabase error'}`);
+};
+
+const unsupportedColumnsByTable = new Map();
+
+const getKnownUnsupportedColumns = (table) => unsupportedColumnsByTable.get(String(table || '')) || new Set();
+
+const rememberUnsupportedColumns = (table, columns) => {
+  const tableKey = String(table || '');
+  if (!tableKey || !Array.isArray(columns) || columns.length === 0) {
+    return;
+  }
+
+  const next = new Set(getKnownUnsupportedColumns(tableKey));
+  columns.forEach((column) => {
+    const normalized = String(column || '').trim();
+    if (normalized) {
+      next.add(normalized);
+    }
+  });
+  unsupportedColumnsByTable.set(tableKey, next);
+};
+
+const stripUnsupportedColumns = (rows, columns) => {
+  const unsupported = Array.isArray(columns)
+    ? columns.map((column) => String(column || '').trim()).filter(Boolean)
+    : [];
+  if (unsupported.length === 0) {
+    return toArray(rows);
+  }
+
+  return toArray(rows).map((row) => {
+    if (!row || typeof row !== 'object') {
+      return row;
+    }
+
+    const nextRow = { ...row };
+    unsupported.forEach((column) => {
+      delete nextRow[column];
+    });
+    return nextRow;
+  });
+};
+
+const extractMissingColumnsFromError = (error) => {
+  if (!isMissingColumnError(error)) {
+    return [];
+  }
+
+  const chunks = [
+    String(error?.message || ''),
+    String(error?.details || ''),
+    String(error?.hint || ''),
+  ].filter(Boolean);
+  const columns = new Set();
+  const patterns = [
+    /column ['"]?([a-zA-Z0-9_]+)['"]?/gi,
+    /could not find the ['"]([a-zA-Z0-9_]+)['"] column/gi,
+  ];
+
+  for (const chunk of chunks) {
+    for (const pattern of patterns) {
+      for (const match of chunk.matchAll(pattern)) {
+        const column = String(match?.[1] || '').trim();
+        if (column) {
+          columns.add(column);
+        }
+      }
+    }
+  }
+
+  return [...columns];
 };
 
 const normalizeRole = (value) => String(value || '').trim().toLowerCase();
@@ -1576,6 +1657,7 @@ const syncIdTable = async (
   } = {},
 ) => {
   const table = tableName(baseName);
+  const knownUnsupportedColumns = [...getKnownUnsupportedColumns(table)];
   const previousById = new Map(
     toArray(previousRows)
       .filter((row) => row && row.id)
@@ -1596,7 +1678,23 @@ const syncIdTable = async (
   }
 
   if (upsertRows.length > 0) {
-    const upsertResult = await supabase.from(table).upsert(upsertRows, { onConflict: 'id' });
+    let sanitizedUpsertRows = stripUnsupportedColumns(upsertRows, knownUnsupportedColumns);
+    let upsertResult = await supabase.from(table).upsert(sanitizedUpsertRows, { onConflict: 'id' });
+    let retryCount = 0;
+    while (upsertResult.error && isMissingColumnError(upsertResult.error) && retryCount < 8) {
+      const missingColumns = extractMissingColumnsFromError(upsertResult.error);
+      if (missingColumns.length === 0) {
+        break;
+      }
+
+      rememberUnsupportedColumns(table, missingColumns);
+      sanitizedUpsertRows = stripUnsupportedColumns(sanitizedUpsertRows, missingColumns);
+      upsertResult = await supabase.from(table).upsert(sanitizedUpsertRows, {
+        onConflict: 'id',
+      });
+      retryCount += 1;
+    }
+
     if (upsertResult.error) {
       if (optional && isOptionalSyncError(upsertResult.error)) {
         return;

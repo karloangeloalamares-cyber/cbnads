@@ -6,6 +6,8 @@ This document describes how Sola Payments is set up in the app today, what is st
 
 Implemented:
 - Public Sola webhook endpoint at `/api/webhook/sola`
+- Hosted invoice checkout route at `/api/invoices/sola-checkout`
+- Billing UI action `Pay with Sola` for eligible unpaid invoices
 - Webhook signature validation using a Sola webhook PIN
 - Invoice lookup from Sola callback fields
 - Invoice payment status sync into `invoices`
@@ -13,15 +15,17 @@ Implemented:
 - Existing "payment received" email and internal notification flow reuse
 
 Not implemented yet:
-- Outbound transaction creation to Sola from the invoice/payment UI
-- Hosted payment flow or embedded checkout flow
 - Raw Sola callback persistence in a dedicated payment transaction table
+- Partial-payment-safe transaction deduplication for repeated webhook callbacks
 
 ## Files
 
 - Webhook route: `src/app/api/webhook/sola/route.js`
+- Hosted checkout route: `src/app/api/invoices/sola-checkout/route.js`
+- Hosted checkout helper: `src/app/api/utils/sola-checkout.js`
 - Shared payment notification helper: `src/app/api/utils/payment-received-notifications.js`
 - Existing manual notification endpoint: `src/app/api/admin/invoices/send-payment-received/route.js`
+- Billing UI: `src/app/ads/page.jsx`
 - App env values: `.env.local`
 
 ## Environment variables
@@ -30,25 +34,66 @@ Current placeholders in `.env.local`:
 
 ```env
 # Sola Payments
-# Webhook URL to configure in Sola: https://cbnads.com/api/webhook/sola
+# Webhook URL to configure in Sola: https://www.cbnads.com/api/webhook/sola
+# Hosted checkout URL from Sola PaymentSITE
 SOLA_PAYMENTS_WEBHOOK_PIN="replace-with-your-sola-webhook-pin"
+SOLA_PAYMENTS_DEBUG_WEBHOOK="false"
 SOLA_PAYMENTS_API_KEY="replace-with-your-sola-api-key"
 SOLA_PAYMENTS_API_URL="https://secure.solapayments.com/api/transaction"
+SOLA_PAYMENTS_SITE_URL="https://secure.cardknox.com/replace-with-your-paymentsite-name"
 SOLA_PAYMENTS_SOFTWARE_NAME="CBN Ads"
 SOLA_PAYMENTS_SOFTWARE_VERSION="1.0.0"
 ```
 
 Notes:
 - `SOLA_PAYMENTS_WEBHOOK_PIN` is used now by the webhook.
-- `SOLA_PAYMENTS_API_KEY` is reserved for the outbound transaction step.
-- `SOLA_PAYMENTS_API_URL` should stay on the Sola transaction endpoint unless the client gives a different environment URL.
+- `SOLA_PAYMENTS_DEBUG_WEBHOOK` should only be enabled temporarily while capturing a real webhook sample.
+- `SOLA_PAYMENTS_SITE_URL` is required for the live `Pay with Sola` button. This is the merchant-specific hosted `PaymentSITE` URL, not the API endpoint.
+- `SOLA_PAYMENTS_API_KEY` is not used by the current hosted checkout flow. Keep it for future direct API/reporting work.
+- `SOLA_PAYMENTS_API_URL` remains the transaction API endpoint for future direct server-side operations.
+
+## Hosted checkout behavior
+
+The app now uses Sola `PaymentSITE` for the real invoice payment flow.
+
+Flow:
+
+1. An unpaid invoice is opened in Billing.
+2. The user clicks `Pay with Sola`.
+3. The app calls `/api/invoices/sola-checkout`.
+4. The server validates invoice access and outstanding balance.
+5. The server builds a hosted `PaymentSITE` URL with invoice metadata.
+6. The browser opens Sola's hosted payment page.
+7. Sola sends the final payment status back through `/api/webhook/sola`.
+
+Fields currently sent to `PaymentSITE`:
+
+- `xAmount`: current outstanding balance
+- `xInvoice`: invoice number
+- `xCustom01`: invoice id
+- `xCustom02`: advertiser id
+- `xEmail`: invoice contact email when available
+- `xDescription`: invoice label
+- `xComments`: CBN Ads invoice note
+- `xRedirectURL`: return to Billing after an approved payment
+- `xRedirectURL_NotApproved`: return to Billing after a declined/cancelled payment
+- `xSoftwareName`
+- `xSoftwareVersion`
+
+Current guardrails:
+
+- invoices already marked `Paid` are blocked
+- invoices paid via credits are blocked
+- invoices with an existing partial payment are blocked for now
+
+That last restriction is deliberate: until we persist and deduplicate transaction refs, partial-payment accumulation would be easy to misstate if Sola retries a callback.
 
 ## Webhook behavior
 
 Sola posts `application/x-www-form-urlencoded` payloads to:
 
 ```txt
-https://cbnads.com/api/webhook/sola
+https://www.cbnads.com/api/webhook/sola
 ```
 
 The route currently does this:
@@ -76,7 +121,7 @@ Matching strategy:
 - First try `invoice_number`
 - Then try invoice `id`
 
-Recommended outbound mapping when we build the payment request:
+Current outbound mapping in the hosted checkout route:
 
 - `xInvoice`: invoice number
 - `xCustom01`: invoice id
@@ -132,41 +177,33 @@ When Sola reports a successful payment:
 
 ## Remaining implementation plan
 
-The next step after the client sends the webhook PIN is outbound payment initiation.
+Next likely improvements:
 
-Planned approach:
-
-1. Add a server-side Sola payment helper that posts to `SOLA_PAYMENTS_API_URL`.
-2. Send invoice metadata in the transaction request:
-   - `xInvoice`
-   - `xCustom01`
-   - `xCustom02`
-   - `xAmount`
-3. Decide whether the user pays through:
-   - a hosted payment link returned by Sola
-   - or a direct server-side charge flow
-4. Add an invoice UI action such as "Pay with card".
-5. Add test cases for:
+1. Capture and store real Sola transaction refs in a dedicated payment/event table.
+2. Use that transaction log to make partial payments and duplicate webhook retries fully safe.
+3. Add a Billing return-state toast after `PaymentSITE` redirects back into `/ads`.
+4. Optionally add Sola payment links into invoice reminder emails.
+5. Add tests for:
    - approved webhook
-   - partial payment
    - unknown invoice
    - invalid signature
    - duplicate paid callback
+   - partial payment once transaction logging exists
 
 ## Testing checklist
 
-When the client provides the webhook PIN:
+For a live end-to-end test:
 
 1. Set `SOLA_PAYMENTS_WEBHOOK_PIN` in `.env.local` and the deployment environment.
-2. Configure Sola webhook URL as `https://cbnads.com/api/webhook/sola`.
-3. Create a test invoice in the app.
-4. Send a Sola test transaction with:
-   - `xInvoice` = invoice number
-   - `xCustom01` = invoice id
-5. Confirm the invoice becomes paid.
-6. Confirm linked ads become paid.
-7. Confirm advertiser/internal notifications send once.
-8. Retry the same webhook and confirm it does not resend duplicate payment notifications.
+2. Set `SOLA_PAYMENTS_SITE_URL` to the merchant's real hosted `PaymentSITE` URL.
+3. Configure Sola webhook URL as `https://www.cbnads.com/api/webhook/sola`.
+4. Create a test invoice in the app with no partial payment recorded.
+5. Open that invoice and click `Pay with Sola`.
+6. Complete the hosted payment on Sola.
+7. Confirm the invoice becomes paid.
+8. Confirm linked ads become paid.
+9. Confirm advertiser/internal notifications send once.
+10. Retry the same webhook and confirm it does not resend duplicate payment notifications.
 
 ## Source references
 
@@ -175,3 +212,4 @@ Official docs used for this integration plan:
 - Transaction API: https://docs.solapayments.com/api/transaction
 - Webhooks: https://docs.solapayments.com/api/webhooks
 - Response parameters: https://docs.solapayments.com/api/response-parameters
+- Hosted websites / PaymentSITE: https://docs.solapayments.com/products/websites

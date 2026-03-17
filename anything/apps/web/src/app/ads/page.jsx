@@ -2009,6 +2009,26 @@ const getInvoiceOutstanding = (invoice) => {
   return total;
 };
 
+const hasInvoicePartialPayment = (invoice) => {
+  const total = Number(invoice?.total ?? invoice?.amount ?? 0) || 0;
+  const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
+  const status = String(invoice?.status || "").toLowerCase();
+
+  if (status === "paid" || total <= 0) {
+    return false;
+  }
+
+  return amountPaid > 0 && amountPaid < total;
+};
+
+const canPayInvoiceWithSola = (invoice) =>
+  Boolean(
+    invoice &&
+      !isInvoicePaidViaCredits(invoice) &&
+      getInvoiceOutstanding(invoice) > 0 &&
+      !hasInvoicePartialPayment(invoice),
+  );
+
 function StatCard({ label, value }) {
   return (
     <div className="rounded-xl border bg-white p-4">
@@ -5764,6 +5784,102 @@ export default function AdsPage() {
             ? error.message
             : "Failed to send payment received notifications.",
       };
+    }
+  };
+
+  const createSolaInvoiceCheckout = async ({ invoiceId }) => {
+    if (!hasSupabaseConfig) {
+      return { skipped: true };
+    }
+
+    const normalizedInvoiceId = String(invoiceId || "").trim();
+    if (!normalizedInvoiceId) {
+      return { skipped: true };
+    }
+
+    try {
+      const response = await fetchWithSessionAuth("/api/invoices/sola-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          invoice_id: normalizedInvoiceId,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return {
+          skipped: false,
+          error: data?.error || "Failed to prepare Sola checkout.",
+          reason: data?.reason || "",
+        };
+      }
+
+      return data || { skipped: false };
+    } catch (error) {
+      return {
+        skipped: false,
+        error: error instanceof Error ? error.message : "Failed to prepare Sola checkout.",
+      };
+    }
+  };
+
+  const launchSolaInvoiceCheckout = async (item) => {
+    const normalizedInvoiceId = String(item?.id || "").trim();
+    if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
+      return;
+    }
+
+    const toastId = getInvoiceActionToastId("sola-checkout", normalizedInvoiceId);
+    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
+    setPendingInvoiceActionIds((current) =>
+      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
+    );
+    setOpenInvoiceMenuId(null);
+    appToast.info({
+      id: toastId,
+      title: "Opening Sola checkout...",
+      description: "Please wait while we prepare the hosted payment page.",
+      duration: Infinity,
+    });
+
+    try {
+      const result = await createSolaInvoiceCheckout({ invoiceId: normalizedInvoiceId });
+      if (!result?.checkout_url) {
+        const description =
+          result?.reason === "partial_payment_not_supported"
+            ? "This invoice already has a partial payment. Finish that balance manually for now."
+            : result?.reason === "checkout_not_configured"
+              ? "Add SOLA_PAYMENTS_SITE_URL in Vercel before using live Sola checkout."
+              : result?.error || "Could not prepare the Sola hosted payment page.";
+        appToast.warning({
+          title: "Sola checkout unavailable.",
+          description,
+        });
+        return;
+      }
+
+      if (typeof window !== "undefined") {
+        const popup = window.open(result.checkout_url, "_blank", "noopener,noreferrer");
+        if (!popup) {
+          window.location.assign(result.checkout_url);
+        }
+      }
+
+      appToast.success({
+        title: "Sola checkout opened.",
+        description: `Invoice #${item?.invoice_number || normalizedInvoiceId} was sent to Sola for ${formatCurrency(
+          result?.outstanding_amount ?? getInvoiceOutstanding(item),
+        )}.`,
+      });
+    } finally {
+      appToast.dismiss(toastId);
+      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
+      setPendingInvoiceActionIds((current) =>
+        current.filter((id) => id !== normalizedInvoiceId),
+      );
     }
   };
 
@@ -13576,6 +13692,19 @@ export default function AdsPage() {
                                           </button>
                                           {status !== "Paid" ? (
                                             <>
+                                              {canPayInvoiceWithSola(item) ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    void launchSolaInvoiceCheckout(item);
+                                                  }}
+                                                  disabled={isInvoiceActionPending(item.id)}
+                                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                  <DollarSign size={16} className="text-gray-400" />
+                                                  Pay with Sola
+                                                </button>
+                                              ) : null}
                                               <button
                                                 type="button"
                                                 onClick={() => {
@@ -13797,6 +13926,19 @@ export default function AdsPage() {
                         </div>
 
                         <div className="flex items-center gap-3 mt-6 pt-6 border-t border-gray-200">
+                          {canPayInvoiceWithSola(invoicePreviewModal) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void launchSolaInvoiceCheckout(invoicePreviewModal);
+                              }}
+                              disabled={isInvoiceActionPending(invoicePreviewModal?.id)}
+                              className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-all disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <DollarSign size={16} />
+                              Pay with Sola
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={printInvoicePreview}

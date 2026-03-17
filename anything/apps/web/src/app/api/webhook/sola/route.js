@@ -1,24 +1,17 @@
 import crypto from "node:crypto";
-import { db, table, toNumber } from "../../utils/supabase-db.js";
-import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
-import { sendPaymentReceivedNotifications } from "../../utils/payment-received-notifications.js";
+import { db } from "../../utils/supabase-db.js";
+import {
+  applySolaPaymentPayload,
+  findInvoiceFromSolaPayload,
+} from "../../utils/sola-payment-processing.js";
 
 const SOLA_PAYMENTS_WEBHOOK_PIN = String(
   process.env.SOLA_PAYMENTS_WEBHOOK_PIN || process.env.SOLA_WEBHOOK_PIN || "",
 ).trim();
+const SOLA_PAYMENTS_DEBUG_WEBHOOK =
+  String(process.env.SOLA_PAYMENTS_DEBUG_WEBHOOK || "").trim().toLowerCase() === "true";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
-
-const readWebhookAmount = (payload) => {
-  const amount = toNumber(
-    payload?.xAuthAmount ??
-      payload?.xAmount ??
-      payload?.xauthamount ??
-      payload?.xamount,
-    0,
-  );
-  return Math.max(0, amount);
-};
 
 const parseWebhookPayload = (rawBody) => {
   const params = new URLSearchParams(rawBody);
@@ -45,6 +38,18 @@ const buildSignatureString = (rawBody) => {
   return normalized.map(([, value]) => value).join("") + SOLA_PAYMENTS_WEBHOOK_PIN;
 };
 
+const buildExpectedSignature = (rawBody) => {
+  if (!SOLA_PAYMENTS_WEBHOOK_PIN) {
+    return "";
+  }
+
+  return crypto
+    .createHash("md5")
+    .update(buildSignatureString(rawBody), "utf8")
+    .digest("hex")
+    .toLowerCase();
+};
+
 const hasValidSignature = (request, rawBody) => {
   if (!SOLA_PAYMENTS_WEBHOOK_PIN) {
     return true;
@@ -55,13 +60,23 @@ const hasValidSignature = (request, rawBody) => {
     return false;
   }
 
-  const expected = crypto
-    .createHash("md5")
-    .update(buildSignatureString(rawBody), "utf8")
-    .digest("hex")
-    .toLowerCase();
+  const expected = buildExpectedSignature(rawBody);
 
   return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+};
+
+const logWebhookDebug = (request, rawBody) => {
+  if (!SOLA_PAYMENTS_DEBUG_WEBHOOK) {
+    return;
+  }
+
+  console.log("[webhook/sola] Debug capture", {
+    url: request.url,
+    content_type: request.headers.get("content-type"),
+    signature_header: String(request.headers.get("ck-signature") || "").trim() || null,
+    expected_signature: buildExpectedSignature(rawBody) || null,
+    raw_body: rawBody,
+  });
 };
 
 const isApprovedPaymentEvent = (payload) => {
@@ -94,69 +109,6 @@ const isApprovedPaymentEvent = (payload) => {
   return true;
 };
 
-const findInvoice = async (supabase, payload) => {
-  const candidateFields = [
-    payload?.xInvoice,
-    payload?.xinvoice,
-    payload?.xCustom01,
-    payload?.xcustom01,
-    payload?.xCustom02,
-    payload?.xcustom02,
-    payload?.xOrderId,
-    payload?.xorderid,
-  ];
-
-  const candidates = Array.from(
-    new Set(candidateFields.map((value) => String(value || "").trim()).filter(Boolean)),
-  );
-
-  for (const candidate of candidates) {
-    let { data, error } = await supabase
-      .from(table("invoices"))
-      .select("*")
-      .eq("invoice_number", candidate)
-      .is("deleted_at", null)
-      .maybeSingle();
-    if (error) throw error;
-    if (data?.id) {
-      return data;
-    }
-
-    ({ data, error } = await supabase
-      .from(table("invoices"))
-      .select("*")
-      .eq("id", candidate)
-      .is("deleted_at", null)
-      .maybeSingle());
-    if (error) throw error;
-    if (data?.id) {
-      return data;
-    }
-  }
-
-  return null;
-};
-
-const loadLinkedAdIds = async (supabase, invoice) => {
-  const linkedIds = Array.isArray(invoice?.ad_ids)
-    ? invoice.ad_ids.map((value) => String(value || "").trim()).filter(Boolean)
-    : [];
-
-  const { data: invoiceItems, error: invoiceItemsError } = await supabase
-    .from(table("invoice_items"))
-    .select("ad_id")
-    .eq("invoice_id", invoice.id)
-    .not("ad_id", "is", null);
-  if (invoiceItemsError) throw invoiceItemsError;
-
-  return Array.from(
-    new Set([
-      ...linkedIds,
-      ...(invoiceItems || []).map((item) => String(item?.ad_id || "").trim()).filter(Boolean),
-    ]),
-  );
-};
-
 export async function GET() {
   return Response.json({
     ok: true,
@@ -167,6 +119,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const rawBody = await request.text();
+    logWebhookDebug(request, rawBody);
 
     if (!hasValidSignature(request, rawBody)) {
       return Response.json({ error: "Invalid signature" }, { status: 401 });
@@ -182,7 +135,7 @@ export async function POST(request) {
     }
 
     const supabase = db();
-    const invoice = await findInvoice(supabase, payload);
+    const invoice = await findInvoiceFromSolaPayload(supabase, payload);
     if (!invoice?.id) {
       return Response.json({
         received: true,
@@ -191,70 +144,7 @@ export async function POST(request) {
       });
     }
 
-    const invoiceTotal = Math.max(0, toNumber(invoice.total ?? invoice.amount, 0));
-    const existingAmountPaid = Math.max(0, toNumber(invoice.amount_paid, 0));
-    const webhookAmount = readWebhookAmount(payload);
-    const nextAmountPaid = Math.max(existingAmountPaid, webhookAmount);
-    const nextStatus =
-      nextAmountPaid >= invoiceTotal && invoiceTotal > 0
-        ? "Paid"
-        : nextAmountPaid > 0
-          ? "Partial"
-          : String(invoice.status || "Pending").trim() || "Pending";
-    const nowIso = new Date().toISOString();
-    const wasAlreadyPaid = normalizeText(invoice.status) === "paid";
-
-    const { error: invoiceUpdateError } = await supabase
-      .from(table("invoices"))
-      .update({
-        amount_paid: Math.min(nextAmountPaid, invoiceTotal || nextAmountPaid),
-        status: nextStatus,
-        updated_at: nowIso,
-      })
-      .eq("id", invoice.id);
-    if (invoiceUpdateError) throw invoiceUpdateError;
-
-    const linkedAdIds = await loadLinkedAdIds(supabase, invoice);
-    if (linkedAdIds.length > 0 && nextStatus === "Paid") {
-      const { error: adsUpdateError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: "Paid",
-          paid_via_invoice_id: invoice.id,
-          updated_at: nowIso,
-        })
-        .in("id", linkedAdIds);
-      if (adsUpdateError) throw adsUpdateError;
-    }
-
-    let notificationResult = null;
-    if (nextStatus === "Paid" && !wasAlreadyPaid) {
-      if (invoice.advertiser_id) {
-        await recalculateAdvertiserSpend(invoice.advertiser_id);
-      }
-
-      const updatedInvoice = {
-        ...invoice,
-        amount_paid: Math.min(nextAmountPaid, invoiceTotal || nextAmountPaid),
-        status: nextStatus,
-      };
-      notificationResult = await sendPaymentReceivedNotifications({
-        request,
-        supabase,
-        invoice: updatedInvoice,
-      });
-    }
-
-    return Response.json({
-      received: true,
-      processed: true,
-      invoice_id: invoice.id,
-      invoice_number: invoice.invoice_number,
-      status: nextStatus,
-      amount_paid: Math.min(nextAmountPaid, invoiceTotal || nextAmountPaid),
-      transaction_ref: String(payload?.xRefNum || payload?.xrefnum || "").trim() || null,
-      notifications: notificationResult,
-    });
+    return Response.json(await applySolaPaymentPayload({ request, supabase, payload }));
   } catch (error) {
     console.error("[webhook/sola] Failed:", error);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
