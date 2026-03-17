@@ -1,6 +1,6 @@
 import { db, table } from "../../../utils/supabase-db.js";
 import {
-  assertAdvertiserEmailConfig,
+  assertAdvertiserVerificationConfig,
   createAdvertiserVerificationToken,
   ensureAdvertiserRecord,
   findAuthUserByEmail,
@@ -49,7 +49,7 @@ const buildMetadata = ({
 
 export async function POST(request) {
   try {
-    assertAdvertiserEmailConfig();
+    assertAdvertiserVerificationConfig();
 
     const requesterIp = clientIpFromHeaders(request.headers) || "unknown";
     const body = await request.json();

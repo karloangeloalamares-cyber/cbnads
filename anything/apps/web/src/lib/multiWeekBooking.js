@@ -40,15 +40,21 @@ export const normalizeAdvertiserMultiWeekOverrides = (overrides, weeks) => {
   );
 };
 
-export const resolveAdvertiserMultiWeekPreview = (formData, weekIndex) => {
+export const resolveAdvertiserMultiWeekPreview = (
+  formData,
+  weekIndex,
+  options = {},
+) => {
+  const includeBaseFallback = options.includeBaseFallback !== false;
   const overrides = normalizeAdvertiserMultiWeekOverrides(
     formData?.multi_week_overrides,
     formData?.multi_week_weeks || 4,
   );
   const override = overrides[weekIndex] || normalizeAdvertiserMultiWeekOverride();
-  const baseName = String(formData?.ad_name || "").trim();
-  const baseText = String(formData?.ad_text || "").trim();
-  const baseMedia = Array.isArray(formData?.media) ? formData.media : [];
+  const baseName = includeBaseFallback ? String(formData?.ad_name || "").trim() : "";
+  const baseText = includeBaseFallback ? String(formData?.ad_text || "").trim() : "";
+  const baseMedia =
+    includeBaseFallback && Array.isArray(formData?.media) ? formData.media : [];
 
   return {
     ...formData,

@@ -120,6 +120,9 @@ export default function AdvertiserCreateAdSection({
               media: Array.isArray(formData.media) ? formData.media : [],
             },
             Math.min(previewWeekCount - 1, Math.max(0, previewWeekIndex)),
+            {
+              includeBaseFallback: !showMultiWeekWorkspace,
+            },
           )
         : {
             ...formData,

@@ -95,8 +95,16 @@ export default function SubmitAdPage() {
     }
 
     const clampedIndex = Math.min(previewWeekCount - 1, Math.max(0, previewWeekIndex));
-    return resolveAdvertiserMultiWeekPreview(previewSource, clampedIndex);
-  }, [isMultiWeekPreview, previewSource, previewWeekCount, previewWeekIndex]);
+    return resolveAdvertiserMultiWeekPreview(previewSource, clampedIndex, {
+      includeBaseFallback: !showMultiWeekWorkspace,
+    });
+  }, [
+    isMultiWeekPreview,
+    previewSource,
+    previewWeekCount,
+    previewWeekIndex,
+    showMultiWeekWorkspace,
+  ]);
   const isSubmitDisabled = loading || !!pastTimeError;
   const isDedicatedMultiWeek = phase === "form" && showMultiWeekWorkspace;
   const useSplitLayout = phase === "form";
