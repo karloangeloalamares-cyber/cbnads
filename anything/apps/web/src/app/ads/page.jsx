@@ -5832,6 +5832,21 @@ export default function AdsPage() {
       return;
     }
 
+    let paymentWindow = null;
+    if (typeof window !== "undefined") {
+      paymentWindow = window.open("", "_blank");
+      if (paymentWindow) {
+        try {
+          paymentWindow.opener = null;
+          paymentWindow.document.title = "Loading payment...";
+          paymentWindow.document.body.innerHTML =
+            "<p style=\"font-family: Arial, sans-serif; padding: 24px; color: #111827;\">Preparing your payment page...</p>";
+        } catch {
+          // Ignore cross-window access issues and use the window handle if available.
+        }
+      }
+    }
+
     const toastId = getInvoiceActionToastId("sola-checkout", normalizedInvoiceId);
     pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
     setPendingInvoiceActionIds((current) =>
@@ -5848,6 +5863,9 @@ export default function AdsPage() {
     try {
       const result = await createSolaInvoiceCheckout({ invoiceId: normalizedInvoiceId });
       if (!result?.checkout_url) {
+        if (paymentWindow && !paymentWindow.closed) {
+          paymentWindow.close();
+        }
         const description =
           result?.reason === "partial_payment_not_supported"
             ? "This invoice already has a partial payment. Finish that balance manually for now."
@@ -5862,8 +5880,9 @@ export default function AdsPage() {
       }
 
       if (typeof window !== "undefined") {
-        const popup = window.open(result.checkout_url, "_blank", "noopener,noreferrer");
-        if (!popup) {
+        if (paymentWindow && !paymentWindow.closed) {
+          paymentWindow.location.replace(result.checkout_url);
+        } else {
           window.location.assign(result.checkout_url);
         }
       }
