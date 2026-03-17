@@ -63,7 +63,7 @@ export async function POST(request) {
     if (isInvoicePaidViaCredits(invoice)) {
       return Response.json(
         {
-          error: "Invoices paid via credits cannot be charged through Sola.",
+          error: "Invoices paid via credits cannot be charged through the hosted payment page.",
           reason: "paid_via_credits",
         },
         { status: 409 },
@@ -85,7 +85,7 @@ export async function POST(request) {
       return Response.json(
         {
           error:
-            "Sola checkout currently supports invoices without a recorded partial payment.",
+            "Online invoice payment currently supports invoices without a recorded partial payment.",
           reason: "partial_payment_not_supported",
         },
         { status: 409 },
@@ -112,13 +112,13 @@ export async function POST(request) {
     ) {
       return Response.json(
         {
-          error: "Sola checkout is not configured yet.",
+          error: "Online invoice payment is not configured yet.",
           reason: "checkout_not_configured",
         },
         { status: 503 },
       );
     }
 
-    return Response.json({ error: "Failed to prepare Sola checkout." }, { status: 500 });
+    return Response.json({ error: "Failed to prepare invoice payment." }, { status: 500 });
   }
 }

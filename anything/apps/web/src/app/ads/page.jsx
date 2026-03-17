@@ -5812,7 +5812,7 @@ export default function AdsPage() {
       if (!response.ok) {
         return {
           skipped: false,
-          error: data?.error || "Failed to prepare Sola checkout.",
+          error: data?.error || "Failed to prepare invoice payment.",
           reason: data?.reason || "",
         };
       }
@@ -5821,7 +5821,7 @@ export default function AdsPage() {
     } catch (error) {
       return {
         skipped: false,
-        error: error instanceof Error ? error.message : "Failed to prepare Sola checkout.",
+        error: error instanceof Error ? error.message : "Failed to prepare invoice payment.",
       };
     }
   };
@@ -5840,7 +5840,7 @@ export default function AdsPage() {
     setOpenInvoiceMenuId(null);
     appToast.info({
       id: toastId,
-      title: "Opening Sola checkout...",
+      title: "Opening payment page...",
       description: "Please wait while we prepare the hosted payment page.",
       duration: Infinity,
     });
@@ -5852,10 +5852,10 @@ export default function AdsPage() {
           result?.reason === "partial_payment_not_supported"
             ? "This invoice already has a partial payment. Finish that balance manually for now."
             : result?.reason === "checkout_not_configured"
-              ? "Add SOLA_PAYMENTS_SITE_URL in Vercel before using live Sola checkout."
-              : result?.error || "Could not prepare the Sola hosted payment page.";
+              ? "Add SOLA_PAYMENTS_SITE_URL in Vercel before using live invoice payment."
+              : result?.error || "Could not prepare the hosted payment page.";
         appToast.warning({
-          title: "Sola checkout unavailable.",
+          title: "Payment page unavailable.",
           description,
         });
         return;
@@ -5869,8 +5869,8 @@ export default function AdsPage() {
       }
 
       appToast.success({
-        title: "Sola checkout opened.",
-        description: `Invoice #${item?.invoice_number || normalizedInvoiceId} was sent to Sola for ${formatCurrency(
+        title: "Payment page opened.",
+        description: `Invoice #${item?.invoice_number || normalizedInvoiceId} is ready for payment: ${formatCurrency(
           result?.outstanding_amount ?? getInvoiceOutstanding(item),
         )}.`,
       });
@@ -13702,7 +13702,7 @@ export default function AdsPage() {
                                                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                                                 >
                                                   <DollarSign size={16} className="text-gray-400" />
-                                                  Pay with Sola
+                                                  Pay Invoice
                                                 </button>
                                               ) : null}
                                               <button
@@ -13936,7 +13936,7 @@ export default function AdsPage() {
                               className="flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-all disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               <DollarSign size={16} />
-                              Pay with Sola
+                              Pay this Invoice
                             </button>
                           ) : null}
                           <button
