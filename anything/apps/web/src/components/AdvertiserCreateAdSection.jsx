@@ -15,7 +15,9 @@ import {
   checkMultiWeekOverridesAvailability,
   normalizeCustomDateEntries,
 } from "@/lib/adAvailabilityClient";
-import { formatUSPhoneNumber } from "@/lib/phone";
+import {
+  formatFlexiblePhoneInput,
+} from "@/lib/phone";
 import { isPastDateTimeInAppTimeZone } from "@/lib/timezone";
 import { appToast } from "@/lib/toast";
 import { navigateBackWithFallback } from "@/lib/navigation";
@@ -66,7 +68,7 @@ const buildInitialFormData = ({ advertiser, user }) => ({
   contact_name:
     String(advertiser?.contact_name || user?.name || user?.advertiser_name || "").trim(),
   email: String(advertiser?.email || user?.email || "").trim().toLowerCase(),
-  phone_number: formatUSPhoneNumber(
+  phone_number: formatFlexiblePhoneInput(
     advertiser?.phone_number ||
       advertiser?.phone ||
       user?.whatsapp_number ||
@@ -179,7 +181,7 @@ export default function AdvertiserCreateAdSection({
   const handleChange = (field, value) => {
     setFormData((current) => {
       const normalizedValue =
-        field === "phone_number" ? formatUSPhoneNumber(value) : value;
+        field === "phone_number" ? formatFlexiblePhoneInput(value) : value;
       const next = {
         ...current,
         [field]: normalizedValue,
@@ -278,6 +280,7 @@ export default function AdvertiserCreateAdSection({
 
   const validateForm = async () => {
     const current = formDataRef.current;
+    const isMultiWeek = current.post_type === "Multi-week booking (TBD)";
 
     if (!identityReady) {
       appToast.error({
@@ -290,7 +293,9 @@ export default function AdvertiserCreateAdSection({
     const missingRequiredFields = [];
     if (!String(current.advertiser_name || "").trim()) missingRequiredFields.push("advertiser name");
     if (!String(current.email || "").trim()) missingRequiredFields.push("email");
-    if (!String(current.ad_name || "").trim()) missingRequiredFields.push("ad name");
+    if (!isMultiWeek && !String(current.ad_name || "").trim()) {
+      missingRequiredFields.push("ad name");
+    }
 
     if (missingRequiredFields.length > 0) {
       appToast.error({
@@ -347,7 +352,7 @@ export default function AdvertiserCreateAdSection({
       return false;
     }
 
-    if (current.post_type === "Multi-week booking (TBD)") {
+    if (isMultiWeek) {
       const weeks = clampWeeks(current.multi_week_weeks || 4, 4);
       if (Number(current.multi_week_weeks) !== weeks) {
         appToast.error({
@@ -366,6 +371,27 @@ export default function AdvertiserCreateAdSection({
       const overrides = Array.isArray(current.multi_week_overrides)
         ? current.multi_week_overrides
         : [];
+
+      for (let index = 0; index < overrides.length; index += 1) {
+        const entry = overrides[index];
+        if (!entry || typeof entry !== "object") {
+          continue;
+        }
+
+        if (!String(entry.ad_name || "").trim()) {
+          appToast.error({
+            title: `Week ${index + 1} needs an ad name.`,
+          });
+          return false;
+        }
+
+        if (!String(entry.ad_text || "").trim()) {
+          appToast.error({
+            title: `Week ${index + 1} needs ad text.`,
+          });
+          return false;
+        }
+      }
 
       for (let index = 0; index < overrides.length; index += 1) {
         const entry = overrides[index];
@@ -445,6 +471,16 @@ export default function AdvertiserCreateAdSection({
 
     try {
       const current = formDataRef.current;
+      const firstWeekAdName = (Array.isArray(current.multi_week_overrides)
+        ? current.multi_week_overrides
+        : []
+      )
+        .map((entry) => String(entry?.ad_name || "").trim())
+        .find(Boolean);
+      const resolvedAdName =
+        String(current.ad_name || "").trim() ||
+        firstWeekAdName ||
+        (current.post_type === "Multi-week booking (TBD)" ? "Multi-week booking" : "");
       const postTimeWithSeconds =
         current.post_time && current.post_time.length === 5
           ? `${current.post_time}:00`
@@ -473,6 +509,7 @@ export default function AdvertiserCreateAdSection({
         },
         body: JSON.stringify({
           ...current,
+          ad_name: resolvedAdName,
           product_id: null,
           placement: "",
           post_time: postTimeWithSeconds,
@@ -518,6 +555,13 @@ export default function AdvertiserCreateAdSection({
     navigateBackWithFallback({ fallback: onBack });
   };
 
+  const requestAdvertiserSubmit = () => {
+    const form = document.getElementById("advertiser-create-ad-form");
+    if (form instanceof HTMLFormElement) {
+      form.requestSubmit();
+    }
+  };
+
   const submitDisabled = loading || checkingAvailability || !identityReady;
 
   return (
@@ -537,18 +581,6 @@ export default function AdvertiserCreateAdSection({
               </button>
 
               <div className="flex items-center gap-2">
-                {!isDedicatedMultiWeek ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      handleChange("post_type", "Multi-week booking (TBD)");
-                      setShowMultiWeekWorkspace(true);
-                    }}
-                    className="text-sm text-gray-700 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400 hover:bg-gray-50 lg:hidden"
-                  >
-                    Multi-week booking
-                  </button>
-                ) : null}
                 {!isDedicatedMultiWeek ? (
                   <button
                     type="button"
@@ -588,8 +620,8 @@ export default function AdvertiserCreateAdSection({
                         Cancel
                       </button>
                       <button
-                        type="submit"
-                        form="advertiser-create-ad-form"
+                        type="button"
+                        onClick={requestAdvertiserSubmit}
                         disabled={submitDisabled}
                         className="px-4 py-2 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -646,7 +678,7 @@ export default function AdvertiserCreateAdSection({
                   <div className="min-w-0 flex-1">
                     <FormHeader />
                   </div>
-                  <div className="hidden lg:flex shrink-0 pt-16">
+                  <div className="shrink-0 pt-2 sm:pt-16">
                     <button
                       type="button"
                       onClick={() => {
@@ -671,6 +703,7 @@ export default function AdvertiserCreateAdSection({
               <form
                 id="advertiser-create-ad-form"
                 onSubmit={handleSubmit}
+                noValidate
                 className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
               >
                 <AdvertiserInfoSection
@@ -683,14 +716,17 @@ export default function AdvertiserCreateAdSection({
                     "phone_number",
                   ]}
                   helperText="These fields are linked to your signup profile and are auto-filled for every request."
+                  allowInternationalPhone
                 />
 
-                <AdDetailsSection
-                  formData={formData}
-                  onChange={handleChange}
-                  onAddMedia={addMedia}
-                  onRemoveMedia={removeMedia}
-                />
+                {!isDedicatedMultiWeek ? (
+                  <AdDetailsSection
+                    formData={formData}
+                    onChange={handleChange}
+                    onAddMedia={addMedia}
+                    onRemoveMedia={removeMedia}
+                  />
+                ) : null}
 
                 {!isDedicatedMultiWeek ? (
                   <PostTypeSection

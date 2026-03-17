@@ -1,4 +1,7 @@
-import { US_PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+import {
+  FLEX_PHONE_INPUT_MAX_LENGTH,
+  US_PHONE_INPUT_MAX_LENGTH,
+} from "@/lib/phone";
 
 const containerClass = (readOnly) =>
   `border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 ${readOnly ? "bg-gray-50" : "hover:border-gray-300"}`;
@@ -11,12 +14,23 @@ export function AdvertiserInfoSection({
   onChange,
   readOnlyFields = [],
   helperText = "",
+  allowInternationalPhone = false,
 }) {
   const readOnlySet = new Set(
     Array.isArray(readOnlyFields) ? readOnlyFields.map((field) => String(field || "")) : [],
   );
 
   const isReadOnly = (field) => readOnlySet.has(field);
+
+  const phoneInputMaxLength = allowInternationalPhone
+    ? FLEX_PHONE_INPUT_MAX_LENGTH
+    : US_PHONE_INPUT_MAX_LENGTH;
+  const phonePlaceholder = allowInternationalPhone
+    ? "(123) 456-7890 or +6399123456789"
+    : "(123) 456-7890";
+  const phoneTitle = allowInternationalPhone
+    ? "Enter a valid US number or full international number with country code"
+    : "Please enter a valid phone number (digits, spaces, dashes, and parentheses only)";
 
   return (
     <div>
@@ -118,11 +132,11 @@ export function AdvertiserInfoSection({
               }
             }}
             inputMode="tel"
-            autoComplete="tel-national"
-            maxLength={US_PHONE_INPUT_MAX_LENGTH}
+            autoComplete={allowInternationalPhone ? "tel" : "tel-national"}
+            maxLength={phoneInputMaxLength}
             pattern={isReadOnly("phone_number") ? undefined : "[\\d\\s\\(\\)\\-\\+]+"}
-            title="Please enter a valid phone number (digits, spaces, dashes, and parentheses only)"
-            placeholder="(123) 456-7890"
+            title={phoneTitle}
+            placeholder={phonePlaceholder}
             className={inputClass(isReadOnly("phone_number"))}
           />
         </div>

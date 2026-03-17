@@ -687,16 +687,17 @@ export function ScheduleSection({
                             <label className="block text-xs font-semibold text-gray-700 mb-1">
                               {isPublicReviewMultiWeek ? "Ad Name" : "Override Ad Name (optional)"}
                             </label>
-                            <input
-                              type="text"
+                            <textarea
                               value={entry.ad_name}
                               onChange={(e) => {
                                 const next = [...normalizedOverrides];
                                 next[index] = { ...next[index], ad_name: e.target.value };
                                 onChange("multi_week_overrides", next);
                               }}
+                              rows={2}
+                              title={entry.ad_name || undefined}
                               placeholder={isPublicReviewMultiWeek ? "Enter ad name" : "Leave blank to use base"}
-                              className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
+                              className="w-full min-h-[48px] text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-y"
                             />
                           </div>
 

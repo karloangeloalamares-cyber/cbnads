@@ -10,8 +10,9 @@ import {
   isPastDateTimeInAppTimeZone,
 } from "@/lib/timezone";
 import {
-  formatUSPhoneNumber,
+  formatFlexiblePhoneInput,
   isCompleteUSPhoneNumber,
+  normalizeFlexiblePhoneNumber,
 } from "@/lib/phone";
 import { appToast } from "@/lib/toast";
 import { clampWeeks } from "@/lib/multiWeekBooking";
@@ -109,7 +110,7 @@ export function useSubmitAdForm() {
     submitIdempotencyKeyRef.current = "";
     setFormData((prev) => {
       const normalizedValue =
-        field === "phone_number" ? formatUSPhoneNumber(value) : value;
+        field === "phone_number" ? formatFlexiblePhoneInput(value) : value;
       const updated = { ...prev, [field]: normalizedValue };
       formDataRef.current = updated;
 
@@ -355,12 +356,13 @@ export function useSubmitAdForm() {
         domFormData?.get("contact_name") ?? formDataRef.current.contact_name ?? "",
       ),
       email: String(domFormData?.get("email") ?? formDataRef.current.email ?? ""),
-      phone_number: formatUSPhoneNumber(
-        String(domFormData?.get("phone_number") ?? formDataRef.current.phone_number ?? ""),
+      phone_number: String(
+        domFormData?.get("phone_number") ?? formDataRef.current.phone_number ?? "",
       ),
       ad_name: String(domFormData?.get("ad_name") ?? formDataRef.current.ad_name ?? ""),
       ad_text: String(domFormData?.get("ad_text") ?? formDataRef.current.ad_text ?? ""),
     };
+    currentFormData.phone_number = normalizeFlexiblePhoneNumber(currentFormData.phone_number);
     if (currentFormData.post_type === "Multi-week booking (TBD)") {
       const firstWeekAdName = (Array.isArray(currentFormData.multi_week_overrides)
         ? currentFormData.multi_week_overrides
@@ -387,7 +389,9 @@ export function useSubmitAdForm() {
       }
 
       if (!isCompleteUSPhoneNumber(currentFormData.phone_number)) {
-        showSubmitError("Phone number must be a complete US number.");
+        showSubmitError(
+          "Please enter a complete US phone number. International numbers are not supported in this form.",
+        );
         return;
       }
 
@@ -409,6 +413,20 @@ export function useSubmitAdForm() {
         const overrides = Array.isArray(currentFormData.multi_week_overrides)
           ? currentFormData.multi_week_overrides
           : [];
+        const missingNameWeekIndex = overrides.findIndex(
+          (entry) => !String(entry?.ad_name || "").trim(),
+        );
+        if (missingNameWeekIndex >= 0) {
+          showSubmitError(`Week ${missingNameWeekIndex + 1} needs an ad name.`);
+          return;
+        }
+        const missingTextWeekIndex = overrides.findIndex(
+          (entry) => !String(entry?.ad_text || "").trim(),
+        );
+        if (missingTextWeekIndex >= 0) {
+          showSubmitError(`Week ${missingTextWeekIndex + 1} needs ad text.`);
+          return;
+        }
         const missingScheduleWeekIndex = overrides.findIndex((entry) => {
           if (!entry || typeof entry !== "object" || entry.schedule_tbd) {
             return false;

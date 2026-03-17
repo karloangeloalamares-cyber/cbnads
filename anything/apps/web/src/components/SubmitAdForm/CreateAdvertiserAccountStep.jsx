@@ -46,6 +46,10 @@ export function CreateAdvertiserAccountStep({
           Your ad request is in. Set your password so you can sign in as an advertiser
           and track future submissions.
         </p>
+        <p className="mt-2 text-xs text-gray-500">
+          Public sign-ups are disabled, so complete account setup here instead of using
+          <code className="ml-1">/account/signup</code>.
+        </p>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] p-5 mb-6">

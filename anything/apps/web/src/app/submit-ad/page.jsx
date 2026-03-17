@@ -130,6 +130,13 @@ export default function SubmitAdPage() {
     navigateBackWithFallback({ fallbackPath: "/" });
   };
 
+  const requestPublicSubmit = () => {
+    const form = document.getElementById("submit-ad-form");
+    if (form instanceof HTMLFormElement) {
+      form.requestSubmit();
+    }
+  };
+
   return (
     <>
       {modalState.type === "alert" && (
@@ -153,18 +160,6 @@ export default function SubmitAdPage() {
               </button>
               {phase === "form" && (
                 <div className="flex items-center gap-2">
-                  {!isDedicatedMultiWeek ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleChange("post_type", "Multi-week booking (TBD)");
-                        setShowMultiWeekWorkspace(true);
-                      }}
-                      className="text-sm text-gray-700 transition-colors font-medium border border-gray-200 rounded-lg px-3 py-1.5 hover:border-gray-400 hover:bg-gray-50 lg:hidden"
-                    >
-                      Multi-week booking
-                    </button>
-                  ) : null}
                   {!isDedicatedMultiWeek ? (
                     <button
                       type="button"
@@ -229,8 +224,8 @@ export default function SubmitAdPage() {
                           Cancel
                         </button>
                         <button
-                          type="submit"
-                          form="submit-ad-form"
+                          type="button"
+                          onClick={requestPublicSubmit}
                           disabled={isSubmitDisabled}
                           className="px-4 py-2 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -287,7 +282,7 @@ export default function SubmitAdPage() {
                     <div className="min-w-0 flex-1">
                       <FormHeader />
                     </div>
-                    <div className="hidden lg:flex shrink-0 pt-16">
+                    <div className="shrink-0 pt-2 sm:pt-16">
                       <button
                         type="button"
                         onClick={() => {
@@ -302,15 +297,24 @@ export default function SubmitAdPage() {
                   </div>
                 )}
 
+                {!isDedicatedMultiWeek ? (
+                  <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    Public sign-ups at <code>/account/signup</code> are disabled. Submit your ad first,
+                    then use the guided account setup step here or ask an admin to enable advertiser access.
+                  </div>
+                ) : null}
+
                 <form
                   id="submit-ad-form"
                   onSubmit={handleHoneypotSubmit}
                   method="post"
+                  noValidate
                   className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
                 >
                   <AdvertiserInfoSection
                     formData={formData}
                     onChange={handleChange}
+                    allowInternationalPhone
                   />
 
                   {!isDedicatedMultiWeek ? (
