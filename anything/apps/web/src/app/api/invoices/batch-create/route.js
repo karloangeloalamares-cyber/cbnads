@@ -4,10 +4,9 @@ import {
   adAmount,
   extractAdScheduleDateKeys,
   formatInvoiceDateLabel,
-  nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../utils/invoice-helpers.js";
-import { applyInvoiceCredits } from "../../utils/prepaid-credits.js";
+import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../utils/invoice-atomic.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
@@ -78,7 +77,8 @@ export async function POST(request) {
       return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
-    const { advertiserId, dateFrom, dateTo, status } = await request.json();
+    const body = await request.json();
+    const { advertiserId, dateFrom, dateTo, status } = body;
 
     if (!advertiserId || !dateFrom || !dateTo) {
       return Response.json(
@@ -138,11 +138,6 @@ export async function POST(request) {
       }
     }
 
-    const invoiceNumber = await nextSequentialInvoiceNumber(
-      supabase,
-      table("invoices"),
-    );
-
     const nowIso = new Date().toISOString();
     let subtotal = 0;
     const lineItems = ads.flatMap((ad) => {
@@ -166,86 +161,49 @@ export async function POST(request) {
 
     const total = toNumber(subtotal, 0);
     const invoiceStatus = status || "Pending";
+    const normalizedStatus = String(invoiceStatus).trim() || "Pending";
+    const requestKey = resolveInvoiceRequestKey({
+      request,
+      bodyKey: body?.idempotency_key,
+      scope: "invoice-batch-create",
+    });
 
-    let invoice = null;
-    let creditApplication = null;
-    try {
-      const createInvoiceResult = await supabase
-        .from(table("invoices"))
-        .insert({
-          invoice_number: invoiceNumber,
-          advertiser_id: advertiser.id,
-          advertiser_name: advertiser.advertiser_name,
-          ad_ids: ads.map((ad) => ad.id),
-          contact_name: advertiser.contact_name || null,
-          contact_email: advertiser.email || null,
-          issue_date: getTodayInAppTimeZone(),
-          status: invoiceStatus,
-          total,
-          amount: total,
-          amount_paid: String(invoiceStatus).toLowerCase() === "paid" ? total : 0,
-          notes: `Batch invoice for ${dateFrom} to ${dateTo}`,
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        .select("*")
-        .single();
-      if (createInvoiceResult.error) throw createInvoiceResult.error;
-      invoice = createInvoiceResult.data || null;
-      if (!invoice?.id) {
-        throw new Error("Invoice record was not created.");
-      }
+    const invoiceResult = await createInvoiceAtomic({
+      supabase,
+      invoice: {
+        advertiser_id: advertiser.id,
+        advertiser_name: advertiser.advertiser_name,
+        ad_ids: ads.map((ad) => ad.id),
+        contact_name: advertiser.contact_name || null,
+        contact_email: advertiser.email || null,
+        issue_date: getTodayInAppTimeZone(),
+        status: normalizedStatus,
+        total,
+        amount: total,
+        amount_paid: String(normalizedStatus).toLowerCase() === "paid" ? total : 0,
+        notes: `Batch invoice for ${dateFrom} to ${dateTo}`,
+        source_request_key: requestKey,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+      items: lineItems.map((item) => ({
+        ad_id: item.ad_id,
+        product_id: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        amount: item.amount,
+        created_at: nowIso,
+      })),
+      adIds: ads.map((ad) => ad.id),
+      updateAdsPayment: String(normalizedStatus).toLowerCase() === "paid" ? "Paid" : "Pending",
+      applyCredits: String(normalizedStatus).toLowerCase() === "pending",
+      actorUserId: admin.user.id,
+      creditNote: "Prepaid credits applied automatically during batch invoice creation.",
+    });
+    const invoice = invoiceResult.invoice;
 
-      if (lineItems.length > 0) {
-        const { error: itemError } = await supabase
-          .from(table("invoice_items"))
-          .insert(
-            lineItems.map((item) => ({
-              invoice_id: invoice.id,
-              ad_id: item.ad_id,
-              product_id: item.product_id,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              amount: item.amount,
-              created_at: nowIso,
-            })),
-          );
-        if (itemError) throw itemError;
-      }
-
-      const nextPaymentStatus = String(invoiceStatus).toLowerCase() === "paid" ? "Paid" : "Pending";
-      const adIds = ads.map((ad) => ad.id);
-      const { error: updateAdsError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: nextPaymentStatus,
-          invoice_id: invoice.id,
-          paid_via_invoice_id: invoice.id,
-          updated_at: nowIso,
-        })
-        .in("id", adIds);
-      if (updateAdsError) throw updateAdsError;
-
-      if (String(invoiceStatus).toLowerCase() === "pending") {
-        creditApplication = await applyInvoiceCredits({
-          supabase,
-          invoiceId: invoice.id,
-          actorUserId: admin.user.id,
-          note: "Prepaid credits applied automatically during batch invoice creation.",
-        });
-        if (creditApplication?.invoice) {
-          invoice = creditApplication.invoice;
-        }
-      }
-    } catch (creationError) {
-      if (invoice?.id) {
-        await supabase.from(table("invoices")).delete().eq("id", invoice.id);
-      }
-      throw creationError;
-    }
-
-    if (String(invoiceStatus).toLowerCase() === "paid") {
+    if (String(normalizedStatus).toLowerCase() === "paid" || invoiceResult.appliedCredits) {
       await recalculateAdvertiserSpend(advertiser.id);
     }
 
@@ -253,8 +211,8 @@ export async function POST(request) {
       success: true,
       invoice,
       adsIncluded: ads.length,
-      credits_applied: creditApplication?.applied === true,
-      credit_notice_type: creditApplication?.notice_type || "none",
+      credits_applied: invoiceResult.appliedCredits === true,
+      credit_notice_type: invoiceResult.appliedCredits ? "covered_by_credits" : "none",
     });
   } catch (error) {
     console.error("Error creating batch invoice:", error);

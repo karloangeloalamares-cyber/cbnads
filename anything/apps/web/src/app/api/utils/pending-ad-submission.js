@@ -86,6 +86,7 @@ const optionalPendingSubmissionColumns = new Set([
   "series_index",
   "series_total",
   "series_week_start",
+  "source_request_key",
 ]);
 
 const missingColumnName = (error) => {
@@ -99,6 +100,83 @@ const missingColumnName = (error) => {
   return schemaCacheMatch?.[1] ? schemaCacheMatch[1].toLowerCase() : "";
 };
 
+const normalizeSourceRequestKey = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return normalized.slice(0, 255);
+};
+
+const buildSourceRequestKey = (baseKey, suffix = "") => {
+  const normalizedBase = normalizeSourceRequestKey(baseKey);
+  if (!normalizedBase) {
+    return null;
+  }
+
+  const normalizedSuffix = String(suffix || "").trim().toLowerCase();
+  if (!normalizedSuffix) {
+    return normalizedBase;
+  }
+
+  return `${normalizedBase}:${normalizedSuffix}`.slice(0, 255);
+};
+
+const isSourceRequestKeyUniqueViolation = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "");
+  const details = String(error?.details || "");
+  const hint = String(error?.hint || "");
+  return (
+    code === "23505" &&
+    /source_request_key|cbnads_web_pending_ads_source_request_key_uniq/i.test(
+      `${message} ${details} ${hint}`,
+    )
+  );
+};
+
+const fetchPendingAdBySourceRequestKey = async (supabase, sourceRequestKey) => {
+  const normalizedKey = normalizeSourceRequestKey(sourceRequestKey);
+  if (!normalizedKey) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from(table("pending_ads"))
+    .select("*")
+    .eq("source_request_key", normalizedKey)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  return data || null;
+};
+
+const fetchPendingAdsBySourceRequestKeys = async (supabase, sourceRequestKeys) => {
+  const normalizedKeys = (Array.isArray(sourceRequestKeys) ? sourceRequestKeys : [])
+    .map((value) => normalizeSourceRequestKey(value))
+    .filter(Boolean);
+
+  if (normalizedKeys.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(table("pending_ads"))
+    .select("*")
+    .in("source_request_key", normalizedKeys);
+  if (error) {
+    throw error;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const byKey = new Map(
+    rows.map((row) => [normalizeSourceRequestKey(row?.source_request_key), row]),
+  );
+
+  return normalizedKeys.map((key) => byKey.get(key)).filter(Boolean);
+};
+
 const insertPendingAd = async (supabase, payload) => {
   const insertPayload = { ...payload };
 
@@ -106,7 +184,21 @@ const insertPendingAd = async (supabase, payload) => {
     const result = await supabase.from(table("pending_ads")).insert(insertPayload).select("*").single();
 
     if (!result.error) {
-      return result.data;
+      return {
+        row: result.data || null,
+        created: true,
+      };
+    }
+
+    const sourceRequestKey = normalizeSourceRequestKey(insertPayload.source_request_key);
+    if (sourceRequestKey && isSourceRequestKeyUniqueViolation(result.error)) {
+      const existingRow = await fetchPendingAdBySourceRequestKey(supabase, sourceRequestKey);
+      if (existingRow) {
+        return {
+          row: existingRow,
+          created: false,
+        };
+      }
     }
 
     const missingColumn = missingColumnName(result.error);
@@ -130,7 +222,28 @@ const insertPendingAds = async (supabase, payloads) => {
     const result = await supabase.from(table("pending_ads")).insert(insertPayloads).select("*");
 
     if (!result.error) {
-      return Array.isArray(result.data) ? result.data : [];
+      return {
+        rows: Array.isArray(result.data) ? result.data : [],
+        created: true,
+      };
+    }
+
+    const sourceRequestKeys = insertPayloads
+      .map((payload) => normalizeSourceRequestKey(payload?.source_request_key))
+      .filter(Boolean);
+
+    if (
+      sourceRequestKeys.length > 0 &&
+      sourceRequestKeys.length === insertPayloads.length &&
+      isSourceRequestKeyUniqueViolation(result.error)
+    ) {
+      const existingRows = await fetchPendingAdsBySourceRequestKeys(supabase, sourceRequestKeys);
+      if (existingRows.length === sourceRequestKeys.length) {
+        return {
+          rows: existingRows,
+          created: false,
+        };
+      }
     }
 
     const missingColumn = missingColumnName(result.error);
@@ -163,6 +276,7 @@ export async function createPendingAdSubmission({
   supabase = db(),
   requirePhoneNumber = true,
   requireProductForMultiWeek = true,
+  sourceRequestKey = null,
 }) {
   const {
     advertiser_id,
@@ -190,6 +304,7 @@ export async function createPendingAdSubmission({
   const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
   const normalizedCustomDates = readCustomDates(custom_dates);
   const normalizedProductId = String(product_id || "").trim();
+  const normalizedSourceRequestKey = normalizeSourceRequestKey(sourceRequestKey);
   const resolvedAdName =
     String(ad_name || "").trim() ||
     (Array.isArray(multi_week?.overrides)
@@ -427,12 +542,38 @@ export async function createPendingAdSubmission({
         viewed_by_admin: false,
         created_at: nowIso,
         updated_at: nowIso,
+        source_request_key: buildSourceRequestKey(
+          normalizedSourceRequestKey,
+          `week:${weekInfo.series_index}`,
+        ),
         series_id: seriesId,
         series_index: weekInfo.series_index,
         series_total: weekInfo.series_total,
         series_week_start: weekInfo.series_week_start,
       };
     });
+
+    const pendingSourceRequestKeys = pendingPayloads
+      .map((payload) => normalizeSourceRequestKey(payload?.source_request_key))
+      .filter(Boolean);
+
+    if (
+      pendingSourceRequestKeys.length > 0 &&
+      pendingSourceRequestKeys.length === pendingPayloads.length
+    ) {
+      const existingPendingAds = await fetchPendingAdsBySourceRequestKeys(
+        supabase,
+        pendingSourceRequestKeys,
+      );
+      if (existingPendingAds.length === pendingSourceRequestKeys.length) {
+        const firstPendingAd = existingPendingAds[0] || null;
+        return {
+          pendingAd: firstPendingAd,
+          pendingAds: existingPendingAds,
+          series_id: String(firstPendingAd?.series_id || "").trim() || seriesId,
+        };
+      }
+    }
 
     for (let idx = 0; idx < pendingPayloads.length; idx += 1) {
       const payload = pendingPayloads[idx];
@@ -457,8 +598,17 @@ export async function createPendingAdSubmission({
       }
     }
 
-    const insertedPendingAds = await insertPendingAds(supabase, pendingPayloads);
+    const insertPendingResult = await insertPendingAds(supabase, pendingPayloads);
+    const insertedPendingAds = insertPendingResult.rows;
     const firstPendingAd = insertedPendingAds[0] || null;
+
+    if (!insertPendingResult.created) {
+      return {
+        pendingAd: firstPendingAd,
+        pendingAds: insertedPendingAds,
+        series_id: String(firstPendingAd?.series_id || "").trim() || seriesId,
+      };
+    }
 
     const escaped = {
       advertiser_name: escapeHtml(advertiser_name),
@@ -673,6 +823,18 @@ export async function createPendingAdSubmission({
     };
   }
 
+  if (normalizedSourceRequestKey) {
+    const existingPendingAd = await fetchPendingAdBySourceRequestKey(
+      supabase,
+      normalizedSourceRequestKey,
+    );
+    if (existingPendingAd) {
+      return {
+        pendingAd: existingPendingAd,
+      };
+    }
+  }
+
   if (normalizedPostType === "one_time" && post_date_from && post_time) {
     const availability = await checkSingleDateAvailability({
       supabase,
@@ -778,7 +940,7 @@ export async function createPendingAdSubmission({
   const nowIso = new Date().toISOString();
   const reminderMinutesValue = parseReminderMinutes(reminder_minutes, 15);
 
-  const insertedPendingAd = await insertPendingAd(supabase, {
+  const insertPendingResult = await insertPendingAd(supabase, {
     advertiser_id: advertiser_id || null,
     advertiser_name,
     contact_name,
@@ -804,7 +966,15 @@ export async function createPendingAdSubmission({
     viewed_by_admin: false,
     created_at: nowIso,
     updated_at: nowIso,
+    source_request_key: normalizedSourceRequestKey,
   });
+  const insertedPendingAd = insertPendingResult.row;
+
+  if (!insertPendingResult.created) {
+    return {
+      pendingAd: insertedPendingAd,
+    };
+  }
 
   const advertiserEmailHTML = `
 <!DOCTYPE html>

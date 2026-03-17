@@ -8,6 +8,7 @@ import {
   checkSingleDateAvailability,
   expandDateRange,
 } from "../../utils/ad-availability.js";
+import { getSlotCapacityErrorPayload } from "../../utils/slot-capacity-error.js";
 
 const readNumber = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -565,6 +566,11 @@ export async function PUT(request) {
 
     return Response.json({ ad: updatedAd });
   } catch (error) {
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("[Update Ad] Error:", error);
     return Response.json(
       {

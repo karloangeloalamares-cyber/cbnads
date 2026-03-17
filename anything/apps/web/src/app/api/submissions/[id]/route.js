@@ -17,6 +17,7 @@ import {
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
 import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
+import { getSlotCapacityErrorPayload } from "../../utils/slot-capacity-error.js";
 
 const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
 
@@ -406,6 +407,13 @@ export async function PUT(request, { params }) {
       submission: updatedSubmission,
     });
   } catch (error) {
+    const slotError = getSlotCapacityErrorPayload(error, {
+      timeBlockedMessage: "This time slot is already taken. Please choose a different time.",
+    });
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error updating submission:", error);
     return Response.json({ error: "Failed to update submission" }, { status: 500 });
   }

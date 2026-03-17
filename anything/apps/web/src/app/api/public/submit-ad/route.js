@@ -1,9 +1,11 @@
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
+import { createHash } from "node:crypto";
 import { createPendingAdSubmission } from "../../utils/pending-ad-submission.js";
 import {
   clientIpFromHeaders,
   consumePublicRateLimit,
 } from "../../utils/public-rate-limit.js";
+import { getSlotCapacityErrorPayload } from "../../utils/slot-capacity-error.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 20;
@@ -18,7 +20,10 @@ const getIdempotencyStore = () => {
 };
 
 
-const readIdempotencyKey = (headers, requesterIp) => {
+const hashIdempotencyNamespace = (value) =>
+  createHash("sha256").update(String(value || "").trim().toLowerCase()).digest("hex").slice(0, 24);
+
+const readIdempotencyKey = (headers, submission, requesterIp) => {
   const rawKey = String(headers.get("x-idempotency-key") || "")
     .trim()
     .slice(0, 200);
@@ -27,7 +32,12 @@ const readIdempotencyKey = (headers, requesterIp) => {
     return "";
   }
 
-  return `${requesterIp}:${rawKey}`;
+  const namespaceSeed =
+    String(submission?.email || "").trim().toLowerCase() ||
+    String(requesterIp || "").trim().toLowerCase() ||
+    "unknown";
+
+  return `${hashIdempotencyNamespace(namespaceSeed)}:${rawKey}`.slice(0, 255);
 };
 
 const cleanupIdempotencyStore = (store) => {
@@ -96,7 +106,7 @@ export async function POST(request) {
     }
 
     const rateLimitKey = `${requesterIp}:${getTodayInAppTimeZone()}`;
-    const idempotencyKey = readIdempotencyKey(request.headers, requesterIp);
+    const idempotencyKey = readIdempotencyKey(request.headers, body, requesterIp);
     const responsePayload = await runWithIdempotency(idempotencyKey, async () => {
       const rateLimitState = await consumePublicRateLimit({
         key: rateLimitKey,
@@ -114,6 +124,7 @@ export async function POST(request) {
         request,
         submission: body,
         requireProductForMultiWeek: false,
+        sourceRequestKey: idempotencyKey || null,
       });
 
       if (result?.error) {
@@ -139,6 +150,11 @@ export async function POST(request) {
 
     return Response.json(responsePayload.body, { status: responsePayload.status || 200 });
   } catch (error) {
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error creating pending ad:", error);
     return Response.json({ error: "Failed to submit ad" }, { status: 500 });
   }

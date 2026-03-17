@@ -12,23 +12,23 @@ import {
   adAmount,
   buildInvoiceLineItemsForAd,
   extractAdScheduleDateKeys,
-  nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
-import { applyInvoiceCredits } from "../../../utils/prepaid-credits.js";
+import { sendInvoiceCoveredByCreditsNotice } from "../../../utils/prepaid-credits.js";
 import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-dashboard-url.js";
 import { notifyInternalChannels } from "../../../utils/internal-notification-channels.js";
 import { ensureAdvertiserRecord } from "../../../utils/advertiser-auth.js";
+import { getSlotCapacityErrorPayload } from "../../../utils/slot-capacity-error.js";
+import { createInvoiceAtomic } from "../../../utils/invoice-atomic.js";
+import {
+  convertPendingToAdAtomic,
+  isPendingNotFoundError,
+  isPendingSubmissionAlreadyProcessedError,
+} from "../../../utils/pending-conversion-atomic.js";
 
 const APPROVAL_ZELLE_NUMBER = String(
   process.env.APPROVAL_ZELLE_NUMBER || "(555) 010-2026",
 ).trim();
-
-const isMissingColumnError = (error) => {
-  const code = String(error?.code || "");
-  const message = String(error?.message || "");
-  return code === "42703" || /column .* does not exist/i.test(message);
-};
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat("en-US", {
@@ -154,6 +154,26 @@ export async function POST(request) {
       .maybeSingle();
     if (pendingError) throw pendingError;
     if (!ad) {
+      const { data: existingAd, error: existingAdError } = await supabase
+        .from(table("ads"))
+        .select("id, invoice_id, paid_via_invoice_id, created_at")
+        .eq("source_pending_ad_id", pending_ad_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingAdError) throw existingAdError;
+
+      if (existingAd?.id) {
+        return Response.json(
+          {
+            error: "This pending submission has already been approved by another request.",
+            ad_id: existingAd.id,
+            invoice_id: existingAd.invoice_id || existingAd.paid_via_invoice_id || null,
+          },
+          { status: 409 },
+        );
+      }
+
       return Response.json({ error: "Pending ad not found" }, { status: 404 });
     }
 
@@ -293,50 +313,52 @@ export async function POST(request) {
       pendingAd: ad,
     });
 
-    let { data: newAd, error: createAdError } = await supabase
-      .from(table("ads"))
-        .insert({
-        ad_name: ad.ad_name,
-        advertiser: advertiserName,
-        advertiser_id: advertiserId,
-        product_id: resolvedProduct?.id || ad.product_id || null,
-        product_name: resolvedProduct?.product_name || ad.product_name || null,
-        status: adStatus,
-        post_type: normalizedPostType,
-        placement: ad.placement || "Standard",
-        payment: "Pending",
-        schedule: normalizedPostType === "one_time" ? primaryScheduleDate : null,
-        post_date: normalizedPostType === "one_time" ? primaryScheduleDate : null,
-        post_date_from:
-          normalizedPostType === "custom_schedule"
-            ? null
-            : normalizedPostType === "daily_run"
-              ? ad.post_date_from || primaryScheduleDate
-              : primaryScheduleDate,
-        post_date_to: normalizedPostType === "daily_run" ? ad.post_date_to || null : null,
-        custom_dates: normalizedCustomDates,
-        post_time: ad.post_time || null,
-        scheduled_timezone: APP_TIME_ZONE,
-        reminder_minutes: ad.reminder_minutes || 15,
-        ad_text: ad.ad_text || null,
-        media: Array.isArray(ad.media) ? ad.media : [],
-        notes: ad.notes || null,
-        price: unitAmount,
-        created_at: nowIso,
-        updated_at: nowIso,
-      })
-      .select("*")
-      .single();
-    if (createAdError) throw createAdError;
+    const adInsertPayload = {
+      ad_name: ad.ad_name,
+      advertiser: advertiserName,
+      advertiser_id: advertiserId,
+      source_pending_ad_id: pending_ad_id,
+      product_id: resolvedProduct?.id || ad.product_id || null,
+      product_name: resolvedProduct?.product_name || ad.product_name || null,
+      status: adStatus,
+      post_type: normalizedPostType,
+      placement: ad.placement || "Standard",
+      payment: "Pending",
+      schedule: normalizedPostType === "one_time" ? primaryScheduleDate : null,
+      post_date: normalizedPostType === "one_time" ? primaryScheduleDate : null,
+      post_date_from:
+        normalizedPostType === "custom_schedule"
+          ? null
+          : normalizedPostType === "daily_run"
+            ? ad.post_date_from || primaryScheduleDate
+            : primaryScheduleDate,
+      post_date_to: normalizedPostType === "daily_run" ? ad.post_date_to || null : null,
+      custom_dates: normalizedCustomDates,
+      post_time: ad.post_time || null,
+      scheduled_timezone: APP_TIME_ZONE,
+      reminder_minutes: ad.reminder_minutes || 15,
+      ad_text: ad.ad_text || null,
+      media: Array.isArray(ad.media) ? ad.media : [],
+      notes: ad.notes || null,
+      price: unitAmount,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    const conversion = await convertPendingToAdAtomic({
+      supabase,
+      pendingAdId: pending_ad_id,
+      adPayload: adInsertPayload,
+      deletePending: false,
+    });
+    let newAd = conversion.ad;
+    const adCreated = conversion.created === true;
 
     let approvedInvoice = null;
     let approvedInvoiceAmount = invoiceAmount;
     let creditApplication = null;
+    let invoiceCreated = false;
     try {
-      const invoiceNumber = await nextSequentialInvoiceNumber(
-        supabase,
-        table("invoices"),
-      );
       const approvedInvoiceItems = buildInvoiceLineItemsForAd({
         ad: newAd,
         unitAmount,
@@ -348,118 +370,68 @@ export async function POST(request) {
       const derivedInvoiceAmount = sumInvoiceItemAmounts(approvedInvoiceItems);
       const invoiceTotalAmount = Math.max(0, derivedInvoiceAmount || invoiceAmount);
       approvedInvoiceAmount = invoiceTotalAmount;
-      const invoiceInsertPayload = {
-        invoice_number: invoiceNumber,
-        advertiser_id: advertiserId || null,
-        advertiser_name: advertiserName || ad.advertiser_name || null,
-        ad_ids: [newAd.id],
-        contact_name: ad.contact_name || null,
-        contact_email: ad.email || null,
-        bill_to: advertiserName || ad.advertiser_name || null,
-        issue_date: getTodayInAppTimeZone(),
-        status: "Pending",
-        discount: 0,
-        tax: 0,
-        total: invoiceTotalAmount,
-        amount: invoiceTotalAmount,
-        amount_paid: 0,
-        notes: "Auto-generated on ad approval.",
-        created_at: nowIso,
-        updated_at: nowIso,
-      };
-
-      let createInvoiceResult = await supabase
-        .from(table("invoices"))
-        .insert(invoiceInsertPayload)
-        .select("*")
-        .single();
-
-      if (createInvoiceResult.error && isMissingColumnError(createInvoiceResult.error)) {
-        createInvoiceResult = await supabase
-          .from(table("invoices"))
-          .insert({
-            invoice_number: invoiceNumber,
-            advertiser_id: advertiserId || null,
-            advertiser_name: advertiserName || ad.advertiser_name || null,
-            ad_ids: [newAd.id],
-            amount: invoiceTotalAmount,
-            status: "Pending",
-            created_at: nowIso,
-            updated_at: nowIso,
-          })
-          .select("*")
-          .single();
-      }
-
-      if (createInvoiceResult.error) {
-        throw createInvoiceResult.error;
-      }
-      approvedInvoice = createInvoiceResult.data || null;
+      const invoiceResult = await createInvoiceAtomic({
+        supabase,
+        invoice: {
+          advertiser_id: advertiserId || null,
+          advertiser_name: advertiserName || ad.advertiser_name || null,
+          ad_ids: [newAd.id],
+          contact_name: ad.contact_name || null,
+          contact_email: ad.email || null,
+          bill_to: advertiserName || ad.advertiser_name || null,
+          issue_date: getTodayInAppTimeZone(),
+          status: "Pending",
+          discount: 0,
+          tax: 0,
+          total: invoiceTotalAmount,
+          amount: invoiceTotalAmount,
+          amount_paid: 0,
+          notes: "Auto-generated on ad approval.",
+          source_request_key: `pending-approve:${pending_ad_id}`,
+          created_at: nowIso,
+          updated_at: nowIso,
+        },
+        items: approvedInvoiceItems.map((item) => ({
+          ad_id: item.ad_id,
+          product_id: item.product_id,
+          description: item.description,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          amount: item.amount,
+          created_at: item.created_at || nowIso,
+        })),
+        adIds: [newAd.id],
+        updateAdsPayment: "Pending",
+        applyCredits: true,
+        actorUserId: admin.user.id,
+        creditNote: "Prepaid credits applied automatically during pending ad approval.",
+      });
+      approvedInvoice = invoiceResult.invoice;
+      invoiceCreated = invoiceResult.created === true;
       if (!approvedInvoice?.id) {
         throw new Error("Invoice record was not created.");
       }
 
-      let adUpdateResult = await supabase
+      const { data: updatedAd, error: updatedAdError } = await supabase
         .from(table("ads"))
-        .update({
-          payment: "Pending",
-          invoice_id: approvedInvoice.id,
-          paid_via_invoice_id: approvedInvoice.id,
-          updated_at: nowIso,
-        })
-        .eq("id", newAd.id)
         .select("*")
+        .eq("id", newAd.id)
         .maybeSingle();
-
-      if (adUpdateResult.error && isMissingColumnError(adUpdateResult.error)) {
-        adUpdateResult = await supabase
-          .from(table("ads"))
-          .update({
-            payment: "Pending",
-            updated_at: nowIso,
-          })
-          .eq("id", newAd.id)
-          .select("*")
-          .maybeSingle();
+      if (updatedAdError) {
+        throw updatedAdError;
+      }
+      if (updatedAd) {
+        newAd = updatedAd;
       }
 
-      if (adUpdateResult.error) {
-        throw adUpdateResult.error;
-      }
-      if (adUpdateResult.data) {
-        newAd = adUpdateResult.data;
-      }
-
-      try {
-        const invoiceItemsPayload = approvedInvoiceItems.map((item) => ({
-          ...item,
-          invoice_id: approvedInvoice.id,
-        }));
-        if (invoiceItemsPayload.length > 0) {
-          const { error: invoiceItemsError } = await supabase
-            .from(table("invoice_items"))
-            .insert(invoiceItemsPayload);
-          if (invoiceItemsError) throw invoiceItemsError;
-        }
-      } catch (invoiceItemError) {
-        console.error("[approve] Unable to create invoice item:", invoiceItemError);
-        throw invoiceItemError;
-      }
-
-      creditApplication = await applyInvoiceCredits({
-        request,
-        supabase,
-        invoiceId: approvedInvoice.id,
-        actorUserId: admin.user.id,
-        note: "Prepaid credits applied automatically during pending ad approval.",
-        sendNotice: true,
-      });
-      if (creditApplication?.invoice) {
-        approvedInvoice = creditApplication.invoice;
-      }
+      creditApplication = {
+        applied: invoiceResult.appliedCredits === true,
+        notice_type: invoiceResult.appliedCredits ? "covered_by_credits" : "none",
+        reason: invoiceResult.creditReason || null,
+      };
     } catch (invoiceError) {
       console.error("[approve] Invoice creation failed. Rolling back ad:", invoiceError);
-      if (approvedInvoice?.id) {
+      if (approvedInvoice?.id && invoiceCreated) {
         try {
           await supabase.from(table("invoices")).delete().eq("id", approvedInvoice.id);
         } catch (invoiceRollbackError) {
@@ -467,7 +439,9 @@ export async function POST(request) {
         }
       }
       try {
-        await supabase.from(table("ads")).delete().eq("id", newAd.id);
+        if (adCreated) {
+          await supabase.from(table("ads")).delete().eq("id", newAd.id);
+        }
       } catch (rollbackError) {
         console.error("[approve] Rollback failed:", rollbackError);
       }
@@ -475,11 +449,14 @@ export async function POST(request) {
     }
 
     await updateAdvertiserNextAdDate(advertiserName);
-    const { error: cleanupError } = await supabase
+    const { data: cleanedPending, error: cleanupError } = await supabase
       .from(table("pending_ads"))
       .delete()
-      .eq("id", pending_ad_id);
+      .eq("id", pending_ad_id)
+      .select("id")
+      .maybeSingle();
     if (cleanupError) throw cleanupError;
+    const shouldSendNotifications = Boolean(cleanedPending?.id);
 
     const invoiceNumberText =
       String(approvedInvoice?.invoice_number || "").trim() || "Pending assignment";
@@ -497,6 +474,18 @@ export async function POST(request) {
 
     try {
       if (creditApplication?.applied) {
+        if (shouldSendNotifications) {
+          try {
+            await sendInvoiceCoveredByCreditsNotice({
+              request,
+              supabase,
+              invoice: approvedInvoice,
+            });
+          } catch (noticeError) {
+            console.error("[approve] Failed to send covered-by-credits notice:", noticeError);
+          }
+        }
+
         return Response.json({
           success: true,
           ad: newAd,
@@ -504,6 +493,7 @@ export async function POST(request) {
           invoice: approvedInvoice,
           credits_applied: true,
           credit_notice_type: creditApplication.notice_type,
+          notifications_sent: shouldSendNotifications,
         });
       }
 
@@ -612,32 +602,34 @@ export async function POST(request) {
 </html>
 `;
 
-      if (ad.email) {
-        await sendEmail({
-          to: ad.email,
-          subject: `Ready for Payment - Invoice ${invoiceNumberText} (${ad.ad_name})`,
-          html: advertiserEmailHTML,
-        }).catch((err) => console.error("[approve] Advertiser email failed:", err));
-      }
+      if (shouldSendNotifications) {
+        if (ad.email) {
+          await sendEmail({
+            to: ad.email,
+            subject: `Ready for Payment - Invoice ${invoiceNumberText} (${ad.ad_name})`,
+            html: advertiserEmailHTML,
+          }).catch((err) => console.error("[approve] Advertiser email failed:", err));
+        }
 
-      const internalTelegramText = [
-        "<b>Approved + Invoice Attached (Ready for Payment)</b>",
-        "",
-        `<b>Advertiser:</b> ${escapeHtml(ad.advertiser_name || advertiserName || "N/A")}`,
-        `<b>Ad:</b> ${escapeHtml(ad.ad_name || "N/A")}`,
-        `<b>Invoice:</b> ${escapeHtml(invoiceNumberText)}`,
-        `<b>Amount Due:</b> ${escapeHtml(amountDueText)}`,
-        `<b>Status:</b> ${escapeHtml(adStatus)}`,
-      ].join("\n");
+        const internalTelegramText = [
+          "<b>Approved + Invoice Attached (Ready for Payment)</b>",
+          "",
+          `<b>Advertiser:</b> ${escapeHtml(ad.advertiser_name || advertiserName || "N/A")}`,
+          `<b>Ad:</b> ${escapeHtml(ad.ad_name || "N/A")}`,
+          `<b>Invoice:</b> ${escapeHtml(invoiceNumberText)}`,
+          `<b>Amount Due:</b> ${escapeHtml(amountDueText)}`,
+          `<b>Status:</b> ${escapeHtml(adStatus)}`,
+        ].join("\n");
 
-      const internalNotification = await notifyInternalChannels({
-        supabase,
-        emailSubject: `Ready for Payment - ${ad.ad_name} | ${invoiceNumberText}`,
-        emailHtml: adminEmailHTML,
-        telegramText: internalTelegramText,
-      });
-      if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
-        console.warn("[approve] Internal notifications were not sent:", internalNotification);
+        const internalNotification = await notifyInternalChannels({
+          supabase,
+          emailSubject: `Ready for Payment - ${ad.ad_name} | ${invoiceNumberText}`,
+          emailHtml: adminEmailHTML,
+          telegramText: internalTelegramText,
+        });
+        if (!internalNotification.email_sent && !internalNotification.telegram_sent) {
+          console.warn("[approve] Internal notifications were not sent:", internalNotification);
+        }
       }
     } catch (emailErr) {
       console.error("Error sending approval emails:", emailErr);
@@ -650,8 +642,25 @@ export async function POST(request) {
       invoice: approvedInvoice,
       credits_applied: creditApplication?.applied === true,
       credit_notice_type: creditApplication?.notice_type || "none",
+      notifications_sent: shouldSendNotifications,
     });
   } catch (error) {
+    if (isPendingNotFoundError(error)) {
+      return Response.json({ error: "Pending ad not found" }, { status: 404 });
+    }
+
+    if (isPendingSubmissionAlreadyProcessedError(error)) {
+      return Response.json(
+        { error: "This pending submission has already been approved by another request." },
+        { status: 409 },
+      );
+    }
+
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error approving ad:", error);
     return Response.json({ error: "Internal Server Error" }, { status: 500 });
   }

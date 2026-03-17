@@ -11,12 +11,12 @@ import {
   checkSingleDateAvailability,
   expandDateRange,
 } from "../../../utils/ad-availability.js";
-
-const isMissingColumnError = (error) => {
-  const code = String(error?.code || "");
-  const message = String(error?.message || "");
-  return code === "42703" || /column .* does not exist/i.test(message);
-};
+import { getSlotCapacityErrorPayload } from "../../../utils/slot-capacity-error.js";
+import {
+  convertPendingToAdAtomic,
+  isPendingNotFoundError,
+  isPendingSubmissionAlreadyProcessedError,
+} from "../../../utils/pending-conversion-atomic.js";
 
 const normalizeDateOnly = (value) => String(value || "").trim().slice(0, 10);
 
@@ -217,6 +217,7 @@ export async function POST(request, { params }) {
       ad_name: String(ad_name || submission.ad_name || "").trim(),
       advertiser: advertiser.advertiser_name,
       advertiser_id: advertiser.id,
+      source_pending_ad_id: submissionId,
       product_id: product.id,
       product_name: product.product_name,
       price: product.price || 0,
@@ -249,42 +250,21 @@ export async function POST(request, { params }) {
       updated_at: new Date().toISOString(),
     };
 
-    let insertPayload = payload;
-    let insertResult = await supabase.from(table("ads")).insert(insertPayload).select("*").single();
-    if (insertResult.error && isMissingColumnError(insertResult.error)) {
-      const fallback = { ...insertPayload };
-      delete fallback.series_id;
-      delete fallback.series_index;
-      delete fallback.series_total;
-      delete fallback.series_week_start;
-      insertPayload = fallback;
-      insertResult = await supabase.from(table("ads")).insert(insertPayload).select("*").single();
-    }
-    if (insertResult.error) throw insertResult.error;
-    const ad = insertResult.data;
+    const conversion = await convertPendingToAdAtomic({
+      supabase,
+      pendingAdId: submissionId,
+      adPayload: payload,
+      deletePending: true,
+    });
 
-    let deleteResult = await supabase
-      .from(table("pending_ads"))
-      .delete()
-      .eq("id", submissionId)
-      .select("*")
-      .maybeSingle();
-    if (deleteResult.error && isMissingColumnError(deleteResult.error)) {
-      deleteResult = await supabase
-        .from(table("pending_ads"))
-        .delete()
-        .eq("id", submissionId)
-        .select("*")
-        .maybeSingle();
+    if (!conversion.created && conversion.reason === "idempotency_reuse") {
+      return Response.json(
+        { error: "This submission has already been converted by another request." },
+        { status: 409 },
+      );
     }
-    if (deleteResult.error || !deleteResult.data) {
-      try {
-        await supabase.from(table("ads")).delete().eq("id", ad.id);
-      } catch (rollbackError) {
-        console.error("Error rolling back converted ad after pending cleanup failure:", rollbackError);
-      }
-      throw deleteResult.error || new Error("Failed to remove converted submission");
-    }
+
+    const ad = conversion.ad;
 
     await updateAdvertiserNextAdDate(advertiser.advertiser_name);
 
@@ -306,6 +286,24 @@ export async function POST(request, { params }) {
       },
     });
   } catch (error) {
+    if (isPendingNotFoundError(error)) {
+      return Response.json({ error: "Submission not found" }, { status: 404 });
+    }
+
+    if (isPendingSubmissionAlreadyProcessedError(error)) {
+      return Response.json(
+        { error: "This submission has already been converted by another request." },
+        { status: 409 },
+      );
+    }
+
+    const slotError = getSlotCapacityErrorPayload(error, {
+      timeBlockedMessage: "This time slot is already taken. Please choose a different time.",
+    });
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error converting submission:", error);
     return Response.json({ error: "Failed to convert submission" }, { status: 500 });
   }

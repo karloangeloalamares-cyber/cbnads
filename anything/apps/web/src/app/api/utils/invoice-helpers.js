@@ -197,6 +197,45 @@ export function formatInvoiceNumber({ date = new Date(), suffix, prefix = DEFAUL
   return `${invoicePrefix}-${dateDigits}-${safeSuffix}`;
 }
 
+export const isInvoiceNumberConflictError = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "");
+  const details = String(error?.details || "");
+  const hint = String(error?.hint || "");
+  return (
+    code === "23505" &&
+    /invoice_number|cbnads_web_invoices_invoice_number_key/i.test(
+      `${message} ${details} ${hint}`,
+    )
+  );
+};
+
+export async function reserveInvoiceNumberWithRetry(
+  createInvoiceAttempt,
+  {
+    date = new Date(),
+    prefix = DEFAULT_INVOICE_PREFIX,
+    maxAttempts = 8,
+  } = {},
+) {
+  let lastConflictError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const invoiceNumber = formatInvoiceNumber({ date, prefix });
+    try {
+      const value = await createInvoiceAttempt({ invoiceNumber, attempt });
+      return { value, invoiceNumber, attempt };
+    } catch (error) {
+      if (isInvoiceNumberConflictError(error)) {
+        lastConflictError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastConflictError || new Error("Could not allocate a unique invoice number");
+}
+
 export function fallbackInvoiceNumber(date = new Date(), { prefix = DEFAULT_INVOICE_PREFIX } = {}) {
   return formatInvoiceNumber({ date, prefix });
 }

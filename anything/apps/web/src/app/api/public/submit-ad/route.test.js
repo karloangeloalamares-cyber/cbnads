@@ -29,7 +29,10 @@ describe("public submit-ad route", () => {
     const response = await POST(
       new Request("https://example.com/api/public/submit-ad", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-idempotency-key": "submission-123",
+        },
         body: JSON.stringify({
           advertiser_name: "Acme Co",
           contact_name: "Jordan Smith",
@@ -51,5 +54,10 @@ describe("public submit-ad route", () => {
     expect(data.pending_ad).toEqual({ id: "pending-1" });
     expect(data.pending_ads).toHaveLength(2);
     expect(data.series_id).toBe("series-123");
+    expect(createPendingAdSubmission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceRequestKey: expect.stringMatching(/^[0-9a-f]{24}:submission-123$/),
+      }),
+    );
   });
 });

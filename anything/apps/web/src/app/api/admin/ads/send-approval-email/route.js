@@ -6,9 +6,9 @@ import { buildAdvertiserDashboardSignInUrl } from "../../../utils/advertiser-das
 import {
   buildInvoiceLineItemsForAd,
   fallbackInvoiceNumber,
-  nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../../utils/invoice-helpers.js";
+import { createInvoiceAtomic } from "../../../utils/invoice-atomic.js";
 import {
   applyInvoiceCredits,
   sendInvoiceCoveredByCreditsNotice,
@@ -83,12 +83,6 @@ const resolveAmountDue = ({ invoice, invoiceItemsTotal = 0, ad }) => {
     return adjustedItemsTotal;
   }
   return scheduleAmount;
-};
-
-const isMissingColumnError = (error) => {
-  const code = String(error?.code || "");
-  const message = String(error?.message || "");
-  return code === "42703" || /column .* does not exist/i.test(message);
 };
 
 const fetchInvoiceById = async (supabase, invoiceId) => {
@@ -176,17 +170,6 @@ const fetchInvoiceByAdArrayLink = async (supabase, adId) => {
   return matched || null;
 };
 
-const resolveInvoiceNumber = async (supabase) => {
-  try {
-    return await nextSequentialInvoiceNumber(supabase, table("invoices"));
-  } catch (error) {
-    if (!isMissingColumnError(error)) {
-      throw error;
-    }
-    return fallbackInvoiceNumber();
-  }
-};
-
 const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
   const nowIso = new Date().toISOString();
   const unitAmount = Math.max(0, Number(ad?.price || 0) || 0);
@@ -199,112 +182,60 @@ const createAndLinkInvoice = async ({ supabase, ad, advertiser }) => {
     createdAt: nowIso,
   });
   const invoiceAmount = sumInvoiceItemAmounts(derivedInvoiceItems);
-  const invoiceNumber = await resolveInvoiceNumber(supabase);
+  const invoiceResult = await createInvoiceAtomic({
+    supabase,
+    invoice: {
+      advertiser_id: ad?.advertiser_id || advertiser?.id || null,
+      advertiser_name: advertiser?.advertiser_name || ad?.advertiser || null,
+      ad_ids: [ad.id],
+      contact_name: advertiser?.contact_name || null,
+      contact_email: advertiser?.email || null,
+      bill_to: advertiser?.advertiser_name || ad?.advertiser || null,
+      issue_date: getTodayInAppTimeZone(),
+      status: "Pending",
+      discount: 0,
+      tax: 0,
+      total: invoiceAmount,
+      amount: invoiceAmount,
+      amount_paid: 0,
+      notes: "Auto-generated on ad approval email.",
+      source_request_key: `approval-email:${ad.id}`,
+      created_at: nowIso,
+      updated_at: nowIso,
+    },
+    items: derivedInvoiceItems.map((item) => ({
+      ad_id: item.ad_id,
+      product_id: item.product_id,
+      description: item.description,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      amount: item.amount,
+      created_at: item.created_at || nowIso,
+    })),
+    adIds: [ad.id],
+    updateAdsPayment: "Pending",
+    applyCredits: false,
+  });
 
-  const invoicePayload = {
-    invoice_number: invoiceNumber,
-    advertiser_id: ad?.advertiser_id || advertiser?.id || null,
-    advertiser_name: advertiser?.advertiser_name || ad?.advertiser || null,
-    ad_ids: [ad.id],
-    contact_name: advertiser?.contact_name || null,
-    contact_email: advertiser?.email || null,
-    bill_to: advertiser?.advertiser_name || ad?.advertiser || null,
-    issue_date: getTodayInAppTimeZone(),
-    status: "Pending",
-    discount: 0,
-    tax: 0,
-    total: invoiceAmount,
-    amount: invoiceAmount,
-    amount_paid: 0,
-    notes: "Auto-generated on ad approval email.",
-    created_at: nowIso,
-    updated_at: nowIso,
-  };
-
-  let createInvoiceResult = await supabase
-    .from(table("invoices"))
-    .insert(invoicePayload)
-    .select("*")
-    .single();
-
-  if (createInvoiceResult.error && isMissingColumnError(createInvoiceResult.error)) {
-    createInvoiceResult = await supabase
-      .from(table("invoices"))
-      .insert({
-        invoice_number: invoiceNumber,
-        advertiser_id: ad?.advertiser_id || advertiser?.id || null,
-        advertiser_name: advertiser?.advertiser_name || ad?.advertiser || null,
-        ad_ids: [ad.id],
-        amount: invoiceAmount,
-        status: "Pending",
-        created_at: nowIso,
-        updated_at: nowIso,
-      })
-      .select("*")
-      .single();
-  }
-
-  if (createInvoiceResult.error) {
-    throw createInvoiceResult.error;
-  }
-
-  const invoice = createInvoiceResult.data || null;
+  const invoice = invoiceResult.invoice;
   if (!invoice?.id) {
     throw new Error("Invoice record was not created.");
   }
 
-  try {
-    const invoiceItemsPayload = derivedInvoiceItems.map((item) => ({
-      ...item,
-      invoice_id: invoice.id,
-    }));
-    if (invoiceItemsPayload.length > 0) {
-      const { error: invoiceItemsError } = await supabase
-        .from(table("invoice_items"))
-        .insert(invoiceItemsPayload);
-      if (invoiceItemsError) {
-        throw invoiceItemsError;
-      }
-    }
-  } catch (invoiceItemError) {
-    console.error("[admin/ads/send-approval-email] Unable to create invoice item:", invoiceItemError);
-    await supabase.from(table("invoices")).delete().eq("id", invoice.id);
-    throw invoiceItemError;
-  }
-
-  let adUpdateResult = await supabase
+  const { data: updatedAd, error: updatedAdError } = await supabase
     .from(table("ads"))
-    .update({
-      payment: "Pending",
-      invoice_id: invoice.id,
-      paid_via_invoice_id: invoice.id,
-      updated_at: nowIso,
-    })
-    .eq("id", ad.id)
     .select("*")
+    .eq("id", ad.id)
     .maybeSingle();
 
-  if (adUpdateResult.error && isMissingColumnError(adUpdateResult.error)) {
-    adUpdateResult = await supabase
-      .from(table("ads"))
-      .update({
-        payment: "Pending",
-        updated_at: nowIso,
-      })
-      .eq("id", ad.id)
-      .select("*")
-      .maybeSingle();
-  }
-
-  if (adUpdateResult.error) {
-    await supabase.from(table("invoices")).delete().eq("id", invoice.id);
-    throw adUpdateResult.error;
+  if (updatedAdError) {
+    throw updatedAdError;
   }
 
   return {
     invoice,
-    ad: adUpdateResult.data || ad,
-    invoiceCreated: true,
+    ad: updatedAd || ad,
+    invoiceCreated: invoiceResult.created === true,
   };
 };
 

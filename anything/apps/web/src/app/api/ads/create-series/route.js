@@ -9,6 +9,7 @@ import {
 } from "../../utils/series-helpers.js";
 import { checkSingleDateAvailability } from "../../utils/ad-availability.js";
 import { parseReminderMinutes } from "../../utils/reminder-minutes.js";
+import { getSlotCapacityErrorPayload } from "../../utils/slot-capacity-error.js";
 
 const missingColumnName = (error) => {
   const message = String(error?.message || "");
@@ -392,6 +393,11 @@ export async function POST(request) {
       ads,
     });
   } catch (error) {
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error creating ad series:", error);
     return Response.json({ error: "Failed to create ad series" }, { status: 500 });
   }

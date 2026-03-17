@@ -19,6 +19,12 @@ const computeInvoiceStatus = (invoiceTotal, amountPaid, currentStatus) => {
   return "Pending";
 };
 
+const isInvoiceNotFoundError = (error) =>
+  /invoice_not_found|invoice not found/i.test(String(error?.message || ""));
+
+const isInvoiceAlreadyDeletedError = (error) =>
+  /invoice_already_deleted|invoice already deleted/i.test(String(error?.message || ""));
+
 export async function GET(request) {
   try {
     const auth = await requireAuth(request);
@@ -218,8 +224,10 @@ export async function PUT(request) {
       amount: computedTotal,
       amount_paid: nextAmountPaid,
       status: nextStatus,
-      issue_date: getTodayInAppTimeZone(),
     };
+    if (issue_date !== undefined) {
+      patch.issue_date = issue_date || getTodayInAppTimeZone();
+    }
     if (advertiser_id !== undefined) patch.advertiser_id = advertiser_id || null;
     if (advertiser_name !== undefined) patch.advertiser_name = advertiser_name;
     if (contact_name !== undefined) patch.contact_name = contact_name;
@@ -229,39 +237,41 @@ export async function PUT(request) {
     if (tax !== undefined) patch.tax = toNumber(tax, 0);
     if (notes !== undefined) patch.notes = notes;
 
-    const { error: invoiceUpdateError } = await supabase
-      .from(table("invoices"))
-      .update(patch)
-      .eq("id", id);
-    if (invoiceUpdateError) throw invoiceUpdateError;
+    const normalizedItems = Array.isArray(items)
+      ? items.map((item) => {
+          const quantity = toNumber(item?.quantity, 1) || 1;
+          const unitPrice = toNumber(item?.unit_price, 0);
+          const amount = toNumber(item?.amount, quantity * unitPrice);
+          return {
+            ad_id: item?.ad_id || null,
+            product_id: item?.product_id || null,
+            description: item?.description || "",
+            quantity,
+            unit_price: unitPrice,
+            amount,
+          };
+        })
+      : [];
 
-    if (Array.isArray(items)) {
-      const { error: deleteItemsError } = await supabase
-        .from(table("invoice_items"))
-        .delete()
-        .eq("invoice_id", id);
-      if (deleteItemsError) throw deleteItemsError;
+    const { data: updateResultRows, error: updateResultError } = await supabase.rpc(
+      "cbnads_web_update_invoice_atomic",
+      {
+        p_invoice_id: id,
+        p_patch: patch,
+        p_items: normalizedItems,
+        p_replace_items: Array.isArray(items),
+      },
+    );
+    if (updateResultError) throw updateResultError;
 
-      for (const item of items) {
-        const quantity = toNumber(item.quantity, 1) || 1;
-        const unitPrice = toNumber(item.unit_price, 0);
-        const amount = toNumber(item.amount, quantity * unitPrice);
-        const { error: itemError } = await supabase.from(table("invoice_items")).insert({
-          invoice_id: id,
-          ad_id: item.ad_id || null,
-          product_id: item.product_id || null,
-          description: item.description || "",
-          quantity,
-          unit_price: unitPrice,
-          amount,
-          created_at: new Date().toISOString(),
-        });
-        if (itemError) throw itemError;
-      }
-    }
+    const updateResult = Array.isArray(updateResultRows)
+      ? updateResultRows[0] || null
+      : updateResultRows;
 
-    const oldAdvertiserId = currentInvoice.advertiser_id;
-    const newAdvertiserId = advertiser_id !== undefined ? advertiser_id : oldAdvertiserId;
+    const oldAdvertiserId = updateResult?.old_advertiser_id || currentInvoice.advertiser_id;
+    const newAdvertiserId =
+      updateResult?.new_advertiser_id ||
+      (advertiser_id !== undefined ? advertiser_id : oldAdvertiserId);
     if (newAdvertiserId) {
       await recalculateAdvertiserSpend(newAdvertiserId);
     }
@@ -287,6 +297,10 @@ export async function PUT(request) {
       invoice: { ...updatedInvoice, items: updatedItems || [] },
     });
   } catch (error) {
+    if (isInvoiceNotFoundError(error)) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
     console.error("Error updating invoice:", error);
     return Response.json(
       { error: "Failed to update invoice" },
@@ -313,67 +327,32 @@ export async function DELETE(request) {
       );
     }
 
-    const { data: invoice, error: invoiceError } = await supabase
-      .from(table("invoices"))
-      .select("id, advertiser_id, invoice_number, paid_via_credits, total, amount, amount_paid")
-      .eq("id", id)
-      .maybeSingle();
-    if (invoiceError) throw invoiceError;
-    if (!invoice) {
-      return Response.json({ error: "Invoice not found" }, { status: 404 });
-    }
+    const { data: deleteResultRows, error: deleteError } = await supabase.rpc(
+      "cbnads_web_soft_delete_invoice_atomic",
+      {
+        p_invoice_id: id,
+        p_created_by: admin.user?.id || null,
+      },
+    );
+    if (deleteError) throw deleteError;
 
-    const { error: softDeleteError } = await supabase
-      .from(table("invoices"))
-      .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", id);
-    if (softDeleteError) throw softDeleteError;
+    const deleteResult = Array.isArray(deleteResultRows)
+      ? deleteResultRows[0] || null
+      : deleteResultRows;
 
-    // Clear invoice links from ads tied to this invoice
-    const { data: linkedItems, error: linkedItemsError } = await supabase
-      .from(table("invoice_items"))
-      .select("ad_id")
-      .eq("invoice_id", id)
-      .not("ad_id", "is", null);
-    if (linkedItemsError) throw linkedItemsError;
-
-    const adIds = (linkedItems || []).map((row) => row.ad_id).filter(Boolean);
-    if (adIds.length > 0) {
-      const { error: unlinkError } = await supabase
-        .from(table("ads"))
-        .update({
-          invoice_id: null,
-          paid_via_invoice_id: null,
-          payment: "Unpaid",
-          updated_at: new Date().toISOString(),
-        })
-        .in("id", adIds);
-      if (unlinkError) throw unlinkError;
-    }
-
-    if (invoice.paid_via_credits === true && invoice.advertiser_id) {
-      const refundAmount = toNumber(invoice.total ?? invoice.amount ?? invoice.amount_paid, 0);
-      if (refundAmount > 0) {
-        const refundNote = `Prepaid credits restored after deleting invoice ${invoice.invoice_number || invoice.id}`;
-        const { error: refundError } = await supabase.rpc("cbnads_web_adjust_prepaid_credits", {
-          p_advertiser_id: invoice.advertiser_id,
-          p_amount: refundAmount,
-          p_entry_type: "invoice_delete_credit_refund",
-          p_note: refundNote,
-          p_created_by: admin.user?.id || null,
-          p_invoice_id: invoice.id,
-          p_ad_id: null,
-        });
-        if (refundError) throw refundError;
-      }
-    }
-
-    if (invoice.advertiser_id) {
-      await recalculateAdvertiserSpend(invoice.advertiser_id);
+    if (deleteResult?.advertiser_id) {
+      await recalculateAdvertiserSpend(deleteResult.advertiser_id);
     }
 
     return Response.json({ success: true });
   } catch (error) {
+    if (isInvoiceNotFoundError(error)) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
+    if (isInvoiceAlreadyDeletedError(error)) {
+      return Response.json({ error: "Invoice already deleted" }, { status: 409 });
+    }
+
     console.error("Error deleting invoice:", error);
     return Response.json(
       { error: "Failed to delete invoice" },

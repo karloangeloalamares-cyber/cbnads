@@ -3,10 +3,9 @@ import { requirePermission } from "../../utils/auth-check.js";
 import {
   adAmount,
   buildInvoiceLineItemsForAd,
-  nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../utils/invoice-helpers.js";
-import { applyInvoiceCredits } from "../../utils/prepaid-credits.js";
+import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../utils/invoice-atomic.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
@@ -76,11 +75,6 @@ export async function POST(request) {
       advertiser = data;
     }
 
-    const invoiceNumber = await nextSequentialInvoiceNumber(
-      supabase,
-      table("invoices"),
-    );
-
     const nowIso = new Date().toISOString();
     let subtotal = 0;
     const unresolvedAds = [];
@@ -136,41 +130,35 @@ export async function POST(request) {
     const tax = toNumber(invoiceData.tax, 0);
     const total = subtotal - discount + tax;
     const status = invoiceData.status || "Pending";
+    const normalizedStatus = String(status).trim() || "Pending";
+    const requestKey = resolveInvoiceRequestKey({
+      request,
+      bodyKey: invoiceData.idempotency_key || invoiceData.idempotencyKey,
+      scope: "invoice-create-from-ads",
+    });
 
-    let invoice = null;
-    let creditApplication = null;
-    try {
-      const createInvoiceResult = await supabase
-        .from(table("invoices"))
-        .insert({
-          invoice_number: invoiceNumber,
-          advertiser_id: advertiser?.id || null,
-          advertiser_name: targetAdvertiserName,
-          ad_ids: uniqueAdIds,
-          contact_name: invoiceData.contactName || advertiser?.contact_name || null,
-          contact_email: invoiceData.contactEmail || advertiser?.email || null,
-          bill_to: invoiceData.billTo || targetAdvertiserName || null,
-          issue_date: getTodayInAppTimeZone(),
-          status,
-          discount,
-          tax,
-          total,
-          amount: total,
-          amount_paid: String(status).toLowerCase() === "paid" ? total : 0,
-          notes: invoiceData.notes || null,
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        .select("*")
-        .single();
-      if (createInvoiceResult.error) throw createInvoiceResult.error;
-      invoice = createInvoiceResult.data || null;
-      if (!invoice?.id) {
-        throw new Error("Invoice record was not created.");
-      }
-
-      const invoiceItemsPayload = lineItems.map((item) => ({
-        invoice_id: invoice.id,
+    const invoiceResult = await createInvoiceAtomic({
+      supabase,
+      invoice: {
+        advertiser_id: advertiser?.id || null,
+        advertiser_name: targetAdvertiserName,
+        ad_ids: uniqueAdIds,
+        contact_name: invoiceData.contactName || advertiser?.contact_name || null,
+        contact_email: invoiceData.contactEmail || advertiser?.email || null,
+        bill_to: invoiceData.billTo || targetAdvertiserName || null,
+        issue_date: getTodayInAppTimeZone(),
+        status: normalizedStatus,
+        discount,
+        tax,
+        total,
+        amount: total,
+        amount_paid: String(normalizedStatus).toLowerCase() === "paid" ? total : 0,
+        notes: invoiceData.notes || null,
+        source_request_key: requestKey,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+      items: lineItems.map((item) => ({
         ad_id: item.ad_id,
         product_id: item.product_id,
         description: item.description,
@@ -178,45 +166,16 @@ export async function POST(request) {
         unit_price: item.unit_price,
         amount: item.amount,
         created_at: nowIso,
-      }));
-      if (invoiceItemsPayload.length > 0) {
-        const { error: itemError } = await supabase
-          .from(table("invoice_items"))
-          .insert(invoiceItemsPayload);
-        if (itemError) throw itemError;
-      }
+      })),
+      adIds: uniqueAdIds,
+      updateAdsPayment: String(normalizedStatus).toLowerCase() === "paid" ? "Paid" : "Pending",
+      applyCredits: String(normalizedStatus).toLowerCase() === "pending",
+      actorUserId: auth.user.id,
+      creditNote: "Prepaid credits applied automatically during invoice creation.",
+    });
+    const invoice = invoiceResult.invoice;
 
-      const nextPaymentStatus = String(status).toLowerCase() === "paid" ? "Paid" : "Pending";
-      const { error: adUpdateError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: nextPaymentStatus,
-          invoice_id: invoice.id,
-          paid_via_invoice_id: invoice.id,
-          updated_at: nowIso,
-        })
-        .in("id", uniqueAdIds);
-      if (adUpdateError) throw adUpdateError;
-
-      if (String(status).toLowerCase() === "pending") {
-        creditApplication = await applyInvoiceCredits({
-          supabase,
-          invoiceId: invoice.id,
-          actorUserId: auth.user.id,
-          note: "Prepaid credits applied automatically during invoice creation.",
-        });
-        if (creditApplication?.invoice) {
-          invoice = creditApplication.invoice;
-        }
-      }
-    } catch (creationError) {
-      if (invoice?.id) {
-        await supabase.from(table("invoices")).delete().eq("id", invoice.id);
-      }
-      throw creationError;
-    }
-
-    if (String(status).toLowerCase() === "paid") {
+    if (String(normalizedStatus).toLowerCase() === "paid" || invoiceResult.appliedCredits) {
       if (advertiser?.id) {
         await recalculateAdvertiserSpend(advertiser.id);
       }
@@ -225,9 +184,9 @@ export async function POST(request) {
     return Response.json({
       success: true,
       invoice,
-      invoiceNumber,
-      credits_applied: creditApplication?.applied === true,
-      credit_notice_type: creditApplication?.notice_type || "none",
+      invoiceNumber: invoice?.invoice_number || null,
+      credits_applied: invoiceResult.appliedCredits === true,
+      credit_notice_type: invoiceResult.appliedCredits ? "covered_by_credits" : "none",
     });
   } catch (error) {
     console.error("Error creating invoice from ads:", error);

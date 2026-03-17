@@ -43,11 +43,19 @@ const defaultProducts = [
 const buildMockSupabase = ({
   insertResults = [],
   products = defaultProducts,
+  existingPendingAdsBySourceRequestKey = {},
   availability = { available: true, is_day_full: false, is_time_blocked: false },
 } = {}) => {
   const pendingAdResults = [...insertResults];
   const insertCalls = [];
   const productRows = [...products];
+  const normalizeSourceRequestKey = (value) => String(value || "").trim().toLowerCase();
+  const existingPendingAds = new Map(
+    Object.entries(existingPendingAdsBySourceRequestKey).map(([key, row]) => [
+      normalizeSourceRequestKey(key),
+      structuredClone(row),
+    ]),
+  );
 
   const selectBuilder = (tableName, payload) => {
     if (tableName !== "cbnads_web_pending_ads") {
@@ -94,6 +102,31 @@ const buildMockSupabase = ({
             select() {
               return {
                 or() {
+                  return Promise.resolve({ data: [], error: null });
+                },
+                eq(column, value) {
+                  return {
+                    async maybeSingle() {
+                      if (String(column) === "source_request_key") {
+                        return {
+                          data: existingPendingAds.get(normalizeSourceRequestKey(value)) || null,
+                          error: null,
+                        };
+                      }
+
+                      return { data: null, error: null };
+                    },
+                  };
+                },
+                in(column, values) {
+                  if (String(column) === "source_request_key") {
+                    const rows = (Array.isArray(values) ? values : [])
+                      .map((value) => existingPendingAds.get(normalizeSourceRequestKey(value)))
+                      .filter(Boolean);
+
+                    return Promise.resolve({ data: rows, error: null });
+                  }
+
                   return Promise.resolve({ data: [], error: null });
                 },
               };
@@ -227,6 +260,37 @@ describe("createPendingAdSubmission", () => {
     expect(insertCalls[4]).not.toHaveProperty("price");
   });
 
+  it("reuses an existing submission when source_request_key conflicts", async () => {
+    const { client, insertCalls } = buildMockSupabase({
+      insertResults: [
+        {
+          data: null,
+          error: {
+            code: "23505",
+            message:
+              'duplicate key value violates unique constraint "cbnads_web_pending_ads_source_request_key_uniq"',
+          },
+        },
+      ],
+      existingPendingAdsBySourceRequestKey: {
+        "127.0.0.1:dup-1": {
+          id: "pending-existing",
+          source_request_key: "127.0.0.1:dup-1",
+        },
+      },
+    });
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      sourceRequestKey: "127.0.0.1:dup-1",
+      submission: buildSubmission(),
+    });
+
+    expect(result.pendingAd).toMatchObject({ id: "pending-existing" });
+    expect(insertCalls).toHaveLength(0);
+  });
+
   it("creates one pending row per week with product overrides and series linkage", async () => {
     const { client, insertCalls } = buildMockSupabase();
 
@@ -285,6 +349,53 @@ describe("createPendingAdSubmission", () => {
       series_week_start: "2026-03-22",
       reminder_minutes: 60,
     });
+  });
+
+  it("reuses existing multi-week rows when all source_request_key entries already exist", async () => {
+    const { client, insertCalls } = buildMockSupabase({
+      existingPendingAdsBySourceRequestKey: {
+        "127.0.0.1:series-dup:week:1": {
+          id: "pending-existing-1",
+          series_id: "series-dup",
+          source_request_key: "127.0.0.1:series-dup:week:1",
+        },
+        "127.0.0.1:series-dup:week:2": {
+          id: "pending-existing-2",
+          series_id: "series-dup",
+          source_request_key: "127.0.0.1:series-dup:week:2",
+        },
+      },
+    });
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      sourceRequestKey: "127.0.0.1:series-dup",
+      requireProductForMultiWeek: false,
+      submission: buildSubmission({
+        post_type: "Multi-week booking (TBD)",
+        multi_week: {
+          weeks: 2,
+          series_week_start: "2026-03-15",
+          overrides: [
+            {
+              placement: "WhatsApp",
+              post_date_from: "2026-03-15",
+              post_time: "09:00",
+            },
+            {
+              placement: "Website",
+              schedule_tbd: true,
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(insertCalls).toHaveLength(0);
+    expect(result.pendingAds).toHaveLength(2);
+    expect(result.pendingAd).toMatchObject({ id: "pending-existing-1" });
+    expect(result.series_id).toBe("series-dup");
   });
 
   it("rejects multi-week submissions without a base product", async () => {

@@ -4,10 +4,9 @@ import {
   adAmount,
   extractAdScheduleDateKeys,
   formatInvoiceDateLabel,
-  nextSequentialInvoiceNumber,
   sumInvoiceItemAmounts,
 } from "../../utils/invoice-helpers.js";
-import { applyInvoiceCredits } from "../../utils/prepaid-credits.js";
+import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../utils/invoice-atomic.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
 const inRange = (value, from, to) => {
@@ -77,7 +76,8 @@ export async function POST(request) {
       return Response.json({ error: admin.error }, { status: admin.status || 401 });
     }
 
-    const { advertiserId, period, startDate, endDate } = await request.json();
+    const body = await request.json();
+    const { advertiserId, period, startDate, endDate } = body;
 
     if (!["weekly", "monthly", "quarterly"].includes(period)) {
       return Response.json(
@@ -144,11 +144,6 @@ export async function POST(request) {
       }
     }
 
-    const invoiceNumber = await nextSequentialInvoiceNumber(
-      supabase,
-      table("invoices"),
-    );
-
     const nowIso = new Date().toISOString();
     let subtotal = 0;
     const lineItems = ads.flatMap((ad) => {
@@ -171,90 +166,56 @@ export async function POST(request) {
     });
 
     const total = toNumber(subtotal, 0);
+    const requestKey = resolveInvoiceRequestKey({
+      request,
+      bodyKey: body?.idempotency_key,
+      scope: "invoice-generate-recurring",
+    });
 
-    let invoice = null;
-    let creditApplication = null;
-    try {
-      const createInvoiceResult = await supabase
-        .from(table("invoices"))
-        .insert({
-          invoice_number: invoiceNumber,
-          advertiser_id: advertiser.id,
-          advertiser_name: advertiser.advertiser_name,
-          ad_ids: ads.map((ad) => ad.id),
-          contact_name: advertiser.contact_name || null,
-          contact_email: advertiser.email || null,
-          issue_date: getTodayInAppTimeZone(),
-          status: "Pending",
-          total,
-          amount: total,
-          amount_paid: 0,
-          is_recurring: true,
-          recurring_period: period,
-          last_generated_at: nowIso,
-          notes: `Recurring ${period} invoice for ${startDate} to ${endDate}`,
-          created_at: nowIso,
-          updated_at: nowIso,
-        })
-        .select("*")
-        .single();
-      if (createInvoiceResult.error) throw createInvoiceResult.error;
-      invoice = createInvoiceResult.data || null;
-      if (!invoice?.id) {
-        throw new Error("Invoice record was not created.");
-      }
-
-      if (lineItems.length > 0) {
-        const { error: itemError } = await supabase
-          .from(table("invoice_items"))
-          .insert(
-            lineItems.map((item) => ({
-              invoice_id: invoice.id,
-              ad_id: item.ad_id,
-              product_id: item.product_id,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              amount: item.amount,
-              created_at: nowIso,
-            })),
-          );
-        if (itemError) throw itemError;
-      }
-
-      const { error: updateAdsError } = await supabase
-        .from(table("ads"))
-        .update({
-          payment: "Pending",
-          invoice_id: invoice.id,
-          paid_via_invoice_id: invoice.id,
-          updated_at: nowIso,
-        })
-        .in("id", ads.map((ad) => ad.id));
-      if (updateAdsError) throw updateAdsError;
-
-      creditApplication = await applyInvoiceCredits({
-        supabase,
-        invoiceId: invoice.id,
-        actorUserId: admin.user.id,
-        note: "Prepaid credits applied automatically during recurring invoice generation.",
-      });
-      if (creditApplication?.invoice) {
-        invoice = creditApplication.invoice;
-      }
-    } catch (creationError) {
-      if (invoice?.id) {
-        await supabase.from(table("invoices")).delete().eq("id", invoice.id);
-      }
-      throw creationError;
-    }
+    const invoiceResult = await createInvoiceAtomic({
+      supabase,
+      invoice: {
+        advertiser_id: advertiser.id,
+        advertiser_name: advertiser.advertiser_name,
+        ad_ids: ads.map((ad) => ad.id),
+        contact_name: advertiser.contact_name || null,
+        contact_email: advertiser.email || null,
+        issue_date: getTodayInAppTimeZone(),
+        status: "Pending",
+        total,
+        amount: total,
+        amount_paid: 0,
+        is_recurring: true,
+        recurring_period: period,
+        last_generated_at: nowIso,
+        notes: `Recurring ${period} invoice for ${startDate} to ${endDate}`,
+        source_request_key: requestKey,
+        created_at: nowIso,
+        updated_at: nowIso,
+      },
+      items: lineItems.map((item) => ({
+        ad_id: item.ad_id,
+        product_id: item.product_id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        amount: item.amount,
+        created_at: nowIso,
+      })),
+      adIds: ads.map((ad) => ad.id),
+      updateAdsPayment: "Pending",
+      applyCredits: true,
+      actorUserId: admin.user.id,
+      creditNote: "Prepaid credits applied automatically during recurring invoice generation.",
+    });
+    const invoice = invoiceResult.invoice;
 
     return Response.json({
       success: true,
       invoice,
       adsIncluded: ads.length,
-      credits_applied: creditApplication?.applied === true,
-      credit_notice_type: creditApplication?.notice_type || "none",
+      credits_applied: invoiceResult.appliedCredits === true,
+      credit_notice_type: invoiceResult.appliedCredits ? "covered_by_credits" : "none",
     });
   } catch (error) {
     console.error("Error generating recurring invoice:", error);

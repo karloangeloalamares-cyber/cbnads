@@ -9,6 +9,7 @@ import {
 } from "../utils/auth-check.js";
 import { createPendingAdSubmission } from "../utils/pending-ad-submission.js";
 import { isCompleteUSPhoneNumber, normalizeUSPhoneNumber } from "../../../lib/phone.js";
+import { getSlotCapacityErrorPayload } from "../utils/slot-capacity-error.js";
 
 const submissionPriority = (status) => {
   const normalized = String(status || "").trim().toLowerCase();
@@ -289,6 +290,11 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("Error creating advertiser submission:", error);
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     const message = String(error?.message || "").trim();
     const isInvalidAdvertiserId = /invalid input syntax for type uuid/i.test(message);
     const isSchemaMismatch = isMissingColumnError(error);

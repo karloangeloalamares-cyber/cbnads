@@ -7,6 +7,7 @@ import {
   checkSingleDateAvailability,
   expandDateRange,
 } from "../../utils/ad-availability.js";
+import { getSlotCapacityErrorPayload } from "../../utils/slot-capacity-error.js";
 
 const typeEquals = (value, target) => normalizePostType(value) === normalizePostType(target);
 
@@ -262,6 +263,11 @@ export async function POST(request) {
 
     return Response.json({ ad: createdAd });
   } catch (error) {
+    const slotError = getSlotCapacityErrorPayload(error);
+    if (slotError) {
+      return Response.json(slotError.body, { status: slotError.status });
+    }
+
     console.error("Error creating ad:", error);
     return Response.json({ error: "Failed to create ad" }, { status: 500 });
   }
