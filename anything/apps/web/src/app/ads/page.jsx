@@ -70,6 +70,7 @@ import InvoiceSortableHeader from "@/components/InvoiceSortableHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
+import { LivePreviewRail } from "@/components/preview/LivePreviewRail";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
@@ -12112,10 +12113,13 @@ export default function AdsPage() {
                   </div>
                 </div>
 
-                <div className="hidden lg:flex w-[380px] xl:w-[420px] bg-[#F5F5F5] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 justify-center">
-                  <div className="w-full max-w-[320px]">
+                <div className="hidden lg:block w-[380px] xl:w-[420px] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0">
+                  <LivePreviewRail
+                    title="Main create-ad preview"
+                    description="Your mobile ad preview updates as you fill in the form."
+                  >
                     <AdPreview formData={createAdPreviewData} />
-                  </div>
+                  </LivePreviewRail>
                 </div>
               </div>
             </div>
