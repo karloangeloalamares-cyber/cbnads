@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { bucketName, getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
+import { hasSupabaseConfig, supabaseAnonKey } from "@/lib/supabase";
 
 const FILE_UPLOAD_ENDPOINTS = ["/api/upload", "/_create/api/upload", "/_create/api/upload/"];
 const SIGNED_UPLOAD_ENDPOINT = "/api/upload/signed-url";
@@ -139,6 +139,9 @@ async function getSignedUploadPayload(file) {
   }
 
   if (!signResponse.ok) {
+    if (signResponse.status === 429) {
+      throw new Error(await readUploadErrorMessage(signResponse, "Upload failed"));
+    }
     if (signResponse.status === 404 || signResponse.status === 405) {
       signedUploadEndpointAvailable = false;
     }
@@ -149,38 +152,49 @@ async function getSignedUploadPayload(file) {
   return signResponse.json();
 }
 
+async function uploadFileToSignedUrl(file, signedUpload) {
+  const signedUrl = String(signedUpload?.signedUrl || "").trim();
+  if (!signedUrl) {
+    throw new Error("Upload failed");
+  }
+
+  const headers = new Headers({
+    "x-upsert": "false",
+  });
+
+  const publicKey = String(supabaseAnonKey || "").trim();
+  if (publicKey) {
+    headers.set("apikey", publicKey);
+    headers.set("Authorization", `Bearer ${publicKey}`);
+  }
+
+  const body = new FormData();
+  body.append("cacheControl", "3600");
+  body.append("", file);
+
+  const response = await fetch(signedUrl, {
+    method: "PUT",
+    headers,
+    body,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readUploadErrorMessage(response, "Upload failed"));
+  }
+}
+
 async function uploadFileDirectly(file) {
   const signedUpload = await getSignedUploadPayload(file);
   if (!signedUpload) {
     return uploadFileViaApi(file);
   }
 
-  const supabase = getSupabaseClient();
-  const targetBucket = String(signedUpload.bucket || "").trim() || bucketName("uploads");
-  const targetPath = String(signedUpload.path || "").trim();
-  const uploadToken = String(signedUpload.token || "").trim();
-
-  if (!targetPath || !uploadToken) {
+  const publicUrl = String(signedUpload.publicUrl || "").trim();
+  if (!publicUrl) {
     return uploadFileViaApi(file);
   }
 
-  const { error } = await supabase.storage.from(targetBucket).uploadToSignedUrl(
-    targetPath,
-    uploadToken,
-    file,
-    {
-      contentType: file.type || "application/octet-stream",
-      upsert: false,
-    },
-  );
-
-  if (error) {
-    throw new Error(error.message || "Upload failed");
-  }
-
-  const publicUrl =
-    String(signedUpload.publicUrl || "").trim() ||
-    supabase.storage.from(targetBucket).getPublicUrl(targetPath).data.publicUrl;
+  await uploadFileToSignedUrl(file, signedUpload);
 
   return {
     url: publicUrl,

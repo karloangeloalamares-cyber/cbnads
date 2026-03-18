@@ -1,51 +1,34 @@
-﻿import { FileText, Play, Volume2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AttachmentThumbnail } from "@/components/media/AttachmentThumbnail";
+import { getMediaItemName, getMediaItemUrl } from "@/lib/media";
 import { parseWhatsAppFormatting } from "@/utils/whatsappFormatter";
-
-const getFileExtension = (value = "") => {
-  const dotIndex = String(value || "").lastIndexOf(".");
-  if (dotIndex < 0) return "";
-  return String(value || "").slice(dotIndex).toLowerCase();
-};
-
-const resolvePreviewMediaType = (item) => {
-  const declaredType = String(item?.type || "").trim().toLowerCase();
-  if (["image", "video", "audio", "document"].includes(declaredType)) {
-    return declaredType;
-  }
-
-  const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType === "application/pdf") return "document";
-
-  const extension = getFileExtension(item?.name || item?.url || item?.cdnUrl || "");
-  if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".heic", ".heif"].includes(extension)) {
-    return "image";
-  }
-  if ([".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"].includes(extension)) {
-    return "video";
-  }
-  if ([".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".flac"].includes(extension)) {
-    return "audio";
-  }
-  if (extension === ".pdf") {
-    return "document";
-  }
-
-  return "file";
-};
 
 export function AdPreview({ formData, sticky = true }) {
   const data = formData || {};
   const mediaItems = Array.isArray(data.media) ? data.media : [];
-  const primaryMedia = mediaItems[0] || null;
-  const primaryMediaType = resolvePreviewMediaType(primaryMedia);
-  const primaryMediaUrl = primaryMedia?.url || primaryMedia?.cdnUrl || "";
-  const primaryMediaName = primaryMedia?.name || "Attachment";
+  const mediaSignature = useMemo(
+    () =>
+      mediaItems
+        .map((item) => getMediaItemUrl(item) || getMediaItemName(item, "attachment"))
+        .join("|"),
+    [mediaItems],
+  );
+  const [selectedMediaIndex, setSelectedMediaIndex] = useState(0);
+
+  useEffect(() => {
+    setSelectedMediaIndex(0);
+  }, [mediaSignature]);
+
+  const primaryMedia = mediaItems[selectedMediaIndex] || mediaItems[0] || null;
 
   return (
-    <div className={sticky ? "sticky top-8 flex items-center justify-center min-h-screen" : "flex items-center justify-center"}>
+    <div
+      className={
+        sticky
+          ? "sticky top-8 flex items-center justify-center min-h-screen"
+          : "flex items-center justify-center"
+      }
+    >
       <div className="flex justify-center">
         <div className="relative" style={{ width: "332px", height: "684px" }}>
           <svg
@@ -91,7 +74,7 @@ export function AdPreview({ formData, sticky = true }) {
               className="bg-[#ECE5DD] px-3 py-4 overflow-y-auto rounded-t-[18px]"
               style={{ height: "100%" }}
             >
-              {data.ad_text || (data.media && data.media.length > 0) ? (
+              {data.ad_text || mediaItems.length > 0 ? (
                 <div className="bg-white rounded-lg shadow-sm overflow-hidden max-w-[90%]">
                   <div className="flex items-center gap-2 p-2.5 border-b border-gray-100">
                     <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-white p-1">
@@ -111,29 +94,47 @@ export function AdPreview({ formData, sticky = true }) {
 
                   {primaryMedia ? (
                     <div className="w-full">
-                      {primaryMediaType === "image" ? (
-                        <img
-                          src={primaryMediaUrl}
-                          alt={primaryMediaName}
-                          className="w-full h-auto"
-                          style={{ maxHeight: "180px", objectFit: "cover" }}
-                        />
-                      ) : primaryMediaType === "video" ? (
-                        <div className="h-[180px] bg-gray-900 text-white flex flex-col items-center justify-center gap-2">
-                          <Play size={30} className="opacity-90" />
-                          <span className="text-xs font-medium">Video attachment</span>
+                      <AttachmentThumbnail
+                        item={primaryMedia}
+                        className="h-[180px]"
+                        videoOverlaySize={20}
+                      />
+
+                      {mediaItems.length > 1 ? (
+                        <div className="border-t border-gray-100 bg-white px-2 py-2">
+                          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+                            Attachments
+                          </div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {mediaItems.map((item, index) => {
+                              const itemKey =
+                                getMediaItemUrl(item) ||
+                                `${getMediaItemName(item, "attachment")}-${index}`;
+
+                              return (
+                                <button
+                                  key={itemKey}
+                                  type="button"
+                                  onClick={() => setSelectedMediaIndex(index)}
+                                  className={`aspect-square overflow-hidden rounded-md border bg-gray-50 transition-all ${
+                                    index === selectedMediaIndex
+                                      ? "border-gray-900 ring-1 ring-gray-900"
+                                      : "border-gray-200 hover:border-gray-300"
+                                  }`}
+                                  aria-label={`Preview attachment ${index + 1}`}
+                                >
+                                  <AttachmentThumbnail
+                                    item={item}
+                                    compact
+                                    showVideoOverlay={false}
+                                    className="h-full w-full"
+                                  />
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      ) : primaryMediaType === "audio" ? (
-                        <div className="h-[140px] bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-2 px-4 text-center">
-                          <Volume2 size={28} />
-                          <span className="text-xs font-medium line-clamp-2">{primaryMediaName}</span>
-                        </div>
-                      ) : (
-                        <div className="h-[140px] bg-gray-100 text-gray-700 flex flex-col items-center justify-center gap-2 px-4 text-center">
-                          <FileText size={28} />
-                          <span className="text-xs font-medium line-clamp-2">{primaryMediaName}</span>
-                        </div>
-                      )}
+                      ) : null}
                     </div>
                   ) : null}
 

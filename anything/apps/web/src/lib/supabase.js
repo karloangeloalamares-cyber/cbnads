@@ -29,6 +29,7 @@ const SUPABASE_ANON_KEY =
 let cachedClient = null;
 
 export const hasSupabaseConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+export const supabaseAnonKey = SUPABASE_ANON_KEY;
 export const publicAppUrl =
   readEnv('APP_URL', 'AUTH_URL', 'NEXT_PUBLIC_APP_URL', 'VITE_APP_URL');
 

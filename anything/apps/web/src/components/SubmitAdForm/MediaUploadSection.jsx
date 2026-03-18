@@ -1,37 +1,17 @@
 import { useState } from "react";
-import { FileText, Play, Plus, Trash2, Volume2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
+import { AttachmentThumbnail } from "@/components/media/AttachmentThumbnail";
+import {
+  AUDIO_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
+  getFileExtension,
+  getMediaItemName,
+  IMAGE_EXTENSIONS,
+  resolveMediaType,
+  VIDEO_EXTENSIONS,
+} from "@/lib/media";
 import useUpload from "@/utils/useUpload";
 import { appToast } from "@/lib/toast";
-
-const IMAGE_EXTENSIONS = new Set([
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".svg",
-  ".bmp",
-  ".heic",
-  ".heif",
-]);
-const VIDEO_EXTENSIONS = new Set([
-  ".mp4",
-  ".mov",
-  ".webm",
-  ".m4v",
-  ".avi",
-  ".mkv",
-]);
-const AUDIO_EXTENSIONS = new Set([
-  ".mp3",
-  ".wav",
-  ".m4a",
-  ".aac",
-  ".ogg",
-  ".oga",
-  ".flac",
-]);
-const DOCUMENT_EXTENSIONS = new Set([".pdf"]);
 
 const MEDIA_SIZE_LIMITS = {
   image: 20 * 1024 * 1024,
@@ -55,12 +35,6 @@ const MEDIA_TYPE_LABELS = {
   file: "File",
 };
 
-const getFileExtension = (name = "") => {
-  const dotIndex = String(name || "").lastIndexOf(".");
-  if (dotIndex < 0) return "";
-  return String(name).slice(dotIndex).toLowerCase();
-};
-
 const classifyMediaFile = (file) => {
   const mimeType = String(file?.type || "").toLowerCase();
   const extension = getFileExtension(file?.name);
@@ -82,27 +56,6 @@ const classifyMediaFile = (file) => {
   }
 
   return "";
-};
-
-const resolveMediaType = (item) => {
-  const declaredType = String(item?.type || "").trim().toLowerCase();
-  if (["image", "video", "audio", "document"].includes(declaredType)) {
-    return declaredType;
-  }
-
-  const mimeType = String(item?.mimeType || item?.mime_type || "").toLowerCase();
-  if (mimeType.startsWith("image/")) return "image";
-  if (mimeType.startsWith("video/")) return "video";
-  if (mimeType.startsWith("audio/")) return "audio";
-  if (mimeType === "application/pdf") return "document";
-
-  const extension = getFileExtension(item?.name || item?.url || item?.cdnUrl || "");
-  if (IMAGE_EXTENSIONS.has(extension)) return "image";
-  if (VIDEO_EXTENSIONS.has(extension)) return "video";
-  if (AUDIO_EXTENSIONS.has(extension)) return "audio";
-  if (DOCUMENT_EXTENSIONS.has(extension)) return "document";
-
-  return "file";
 };
 
 export function MediaUploadSection({
@@ -184,65 +137,39 @@ export function MediaUploadSection({
 
         {media.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
-            {media.map((item, index) => (
-              <div key={index} className="relative group">
-                {(() => {
-                  const itemType = resolveMediaType(item);
-                  const itemLabel = MEDIA_TYPE_LABELS[itemType] || MEDIA_TYPE_LABELS.file;
-                  const itemUrl = item?.url || item?.cdnUrl || "";
-                  const itemName = item?.name || `Attachment ${index + 1}`;
+            {media.map((item, index) => {
+              const itemType = resolveMediaType(item);
+              const itemLabel = MEDIA_TYPE_LABELS[itemType] || MEDIA_TYPE_LABELS.file;
+              const itemName = getMediaItemName(item, `Attachment ${index + 1}`);
 
-                  return (
-                    <>
-                      <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
-                        {itemType === "image" ? (
-                          <img src={itemUrl} alt={itemName} className="w-full h-full object-cover" />
-                        ) : itemType === "video" ? (
-                          <div className="relative w-full h-full">
-                            <video src={itemUrl} className="w-full h-full object-cover" preload="metadata" />
-                            <button
-                              type="button"
-                              onClick={() => setPlayingVideo(item)}
-                              className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors"
-                            >
-                              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center">
-                                <Play size={20} className="text-gray-900 ml-0.5" fill="currentColor" />
-                              </div>
-                            </button>
-                          </div>
-                        ) : itemType === "audio" ? (
-                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-gray-100 to-gray-200 px-3 text-center">
-                            <Volume2 size={32} className="text-gray-700" />
-                            <span className="text-[11px] text-gray-700 line-clamp-2 break-words">
-                              {itemName}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 bg-gradient-to-b from-gray-100 to-gray-200 px-3 text-center">
-                            <FileText size={32} className="text-gray-700" />
-                            <span className="text-[11px] text-gray-700 line-clamp-2 break-words">
-                              {itemName}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
+              return (
+                <div key={index} className="relative group">
+                  <div className="aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                    <AttachmentThumbnail item={item} className="h-full w-full" />
+                    {itemType === "video" ? (
                       <button
                         type="button"
-                        onClick={() => onRemoveMedia(index)}
-                        className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        onClick={() => setPlayingVideo(item)}
+                        aria-label={`Preview ${itemName}`}
+                        className="absolute inset-0"
+                      />
+                    ) : null}
+                  </div>
 
-                      <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded">
-                        {itemLabel}
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-            ))}
+                  <button
+                    type="button"
+                    onClick={() => onRemoveMedia(index)}
+                    className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+
+                  <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 text-white text-xs rounded">
+                    {itemLabel}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

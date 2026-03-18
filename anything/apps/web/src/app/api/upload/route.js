@@ -1,10 +1,12 @@
 import { getSupabaseAdmin, adminBucketName } from "../../../lib/supabaseAdmin.js";
 import crypto from "node:crypto";
 import path from "node:path";
-import { requireAuth } from "../utils/auth-check.js";
+import { enforceUploadAccess } from "../utils/upload-access.js";
 
 const BUCKET = adminBucketName("uploads");
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+const PUBLIC_UPLOAD_MAX_ATTEMPTS = 20;
+const PUBLIC_UPLOAD_WINDOW_MS = 10 * 60 * 1000;
 
 /**
  * POST /api/upload
@@ -21,9 +23,13 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
  */
 export async function POST(request) {
     try {
-        const auth = await requireAuth(request);
-        if (!auth.authorized) {
-            return Response.json({ error: auth.error }, { status: auth.status || 401 });
+        const access = await enforceUploadAccess(request, {
+            scope: "api-upload",
+            maxAttempts: PUBLIC_UPLOAD_MAX_ATTEMPTS,
+            windowMs: PUBLIC_UPLOAD_WINDOW_MS,
+        });
+        if (access.response) {
+            return access.response;
         }
 
         const supabase = getSupabaseAdmin();

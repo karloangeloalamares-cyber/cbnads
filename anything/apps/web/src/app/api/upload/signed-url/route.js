@@ -1,9 +1,11 @@
 import { getSupabaseAdmin, adminBucketName } from "../../../../lib/supabaseAdmin.js";
 import crypto from "node:crypto";
 import path from "node:path";
-import { requireAuth } from "../../utils/auth-check.js";
+import { enforceUploadAccess } from "../../utils/upload-access.js";
 
 const BUCKET = adminBucketName("uploads");
+const PUBLIC_SIGNED_UPLOAD_MAX_ATTEMPTS = 40;
+const PUBLIC_SIGNED_UPLOAD_WINDOW_MS = 10 * 60 * 1000;
 
 const ensureBucketExists = async (supabase) => {
   const { data: buckets, error: listError } = await supabase.storage.listBuckets();
@@ -57,9 +59,13 @@ const buildStoragePath = (fileName, mimeType) => {
 
 export async function POST(request) {
   try {
-    const auth = await requireAuth(request);
-    if (!auth.authorized) {
-      return Response.json({ error: auth.error }, { status: auth.status || 401 });
+    const access = await enforceUploadAccess(request, {
+      scope: "api-upload-signed-url",
+      maxAttempts: PUBLIC_SIGNED_UPLOAD_MAX_ATTEMPTS,
+      windowMs: PUBLIC_SIGNED_UPLOAD_WINDOW_MS,
+    });
+    if (access.response) {
+      return access.response;
     }
 
     const body = await request.json();
