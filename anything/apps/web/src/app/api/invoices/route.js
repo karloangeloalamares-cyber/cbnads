@@ -3,7 +3,6 @@ import {
   getRequestStatusForError,
   isAdvertiserUser,
   matchesAdvertiserScope,
-  requireAdmin,
   requireAuth,
   requirePermission,
   resolveAdvertiserScope,
@@ -13,6 +12,19 @@ import {
   rebalanceInvoiceLineItemsToSubtotal,
   sumInvoiceItemAmounts,
 } from "../utils/invoice-helpers.js";
+import { resolveInvoiceRequestKey } from "../utils/invoice-atomic.js";
+import { isCreditRuleViolation } from "../utils/prepaid-credits.js";
+import {
+  formatGuardrailFieldList,
+  getCreditInvoiceRestrictedChanges,
+  getInvoiceMutationGuardrail,
+  getReconciliationInvoiceRestrictedChanges,
+  getSettledInvoiceRestrictedChanges,
+  hasInvoiceRecordedPayment,
+  isInvoiceReconciliationRequired,
+  isCreditInvoiceRecord,
+  normalizeFinancialChangeReason,
+} from "../utils/invoice-guardrails.js";
 import { can } from "../../../lib/permissions.js";
 import { getTodayInAppTimeZone } from "../../../lib/timezone.js";
 
@@ -28,6 +40,17 @@ const isInvoiceNotFoundError = (error) =>
 
 const isInvoiceAlreadyDeletedError = (error) =>
   /invoice_already_deleted|invoice already deleted/i.test(String(error?.message || ""));
+
+const isInvoiceDeletedError = (error) =>
+  /invoice_deleted|invoice deleted/i.test(String(error?.message || ""));
+
+const isCreditInvoiceError = (error) =>
+  /invoice_not_credit_record|invoice_total_must_be_positive|credit_invoice_amount_missing/i.test(
+    String(error?.message || ""),
+  );
+
+const isInsufficientCreditsError = (error) =>
+  /insufficient credits/i.test(String(error?.message || ""));
 
 export async function GET(request) {
   try {
@@ -176,12 +199,18 @@ export async function PUT(request) {
     const supabase = db();
     const body = await request.json();
     const { id } = body;
+    const changeReason = normalizeFinancialChangeReason(
+      body?.change_reason || body?.changeReason,
+    );
 
     if (!id) {
       return Response.json(
         { error: "Invoice ID is required" },
         { status: 400 },
       );
+    }
+    if (!changeReason) {
+      return Response.json({ error: "A change reason is required" }, { status: 400 });
     }
 
     const {
@@ -203,12 +232,118 @@ export async function PUT(request) {
 
     const { data: currentInvoice, error: currentInvoiceError } = await supabase
       .from(table("invoices"))
-      .select("id, advertiser_id, status, total, amount_paid, discount, tax")
+      .select(
+        "id, invoice_number, advertiser_id, advertiser_name, status, total, amount, amount_paid, discount, tax, paid_via_credits, deleted_at, notes, issue_date, contact_name, contact_email, bill_to, ad_ids",
+      )
       .eq("id", id)
       .maybeSingle();
     if (currentInvoiceError) throw currentInvoiceError;
     if (!currentInvoice) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
+    if (currentInvoice.deleted_at) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
+
+    const requestKey = resolveInvoiceRequestKey({
+      request,
+      bodyKey: body?.idempotency_key || body?.idempotencyKey,
+      scope: `invoice-update:${id}`,
+    });
+    const { data: existingItems, error: existingItemsError } = await supabase
+      .from(table("invoice_items"))
+      .select("ad_id, product_id, description, quantity, unit_price, amount")
+      .eq("invoice_id", id)
+      .order("created_at", { ascending: true });
+    if (existingItemsError) throw existingItemsError;
+
+    const currentInvoiceWithItems = {
+      ...currentInvoice,
+      items: existingItems || [],
+    };
+
+    const reconciliationRequired = isInvoiceReconciliationRequired(currentInvoiceWithItems);
+
+    if (isCreditInvoiceRecord(currentInvoice)) {
+      const restrictedChanges = getCreditInvoiceRestrictedChanges(currentInvoiceWithItems, body);
+      if (restrictedChanges.length > 0) {
+        return Response.json(
+          {
+            error: `Credit records cannot change these fields: ${formatGuardrailFieldList(
+              restrictedChanges,
+            )}.`,
+          },
+          { status: 400 },
+        );
+      }
+
+      const nextCreditTotal = toNumber(total ?? amount ?? currentInvoice.total ?? currentInvoice.amount, 0);
+      const { error: creditUpdateError } = await supabase.rpc(
+        "cbnads_web_update_credit_invoice_atomic",
+        {
+          p_invoice_id: id,
+          p_total: nextCreditTotal,
+          p_note: notes !== undefined ? notes : null,
+          p_issue_date:
+            issue_date !== undefined
+              ? issue_date || currentInvoice.issue_date || getTodayInAppTimeZone()
+              : null,
+          p_contact_name: contact_name !== undefined ? contact_name : null,
+          p_contact_email: contact_email !== undefined ? contact_email : null,
+          p_bill_to: bill_to !== undefined ? bill_to : null,
+          p_created_by: auth.user?.id || null,
+          p_change_reason: changeReason,
+          p_source_request_key: requestKey,
+        },
+      );
+      if (creditUpdateError) {
+        if (isCreditRuleViolation(creditUpdateError) || isCreditInvoiceError(creditUpdateError)) {
+          return Response.json({ error: creditUpdateError.message }, { status: 400 });
+        }
+        throw creditUpdateError;
+      }
+
+      if (currentInvoice.advertiser_id) {
+        await recalculateAdvertiserSpend(currentInvoice.advertiser_id);
+      }
+
+      const { data: updatedInvoice, error: updatedInvoiceError } = await supabase
+        .from(table("invoices"))
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (updatedInvoiceError) throw updatedInvoiceError;
+
+      const { data: updatedItems, error: updatedItemsError } = await supabase
+        .from(table("invoice_items"))
+        .select("*")
+        .eq("invoice_id", id)
+        .order("created_at", { ascending: true });
+      if (updatedItemsError) throw updatedItemsError;
+
+      return Response.json({
+        invoice: { ...updatedInvoice, items: updatedItems || [] },
+      });
+    }
+
+    if (hasInvoiceRecordedPayment(currentInvoice)) {
+      const restrictedChanges = reconciliationRequired
+        ? getReconciliationInvoiceRestrictedChanges(currentInvoiceWithItems, body)
+        : getSettledInvoiceRestrictedChanges(currentInvoiceWithItems, body);
+      if (restrictedChanges.length > 0) {
+        return Response.json(
+          {
+            error: reconciliationRequired
+              ? `Reconciliation repairs cannot change these fields: ${formatGuardrailFieldList(
+                  restrictedChanges,
+                )}.`
+              : `Settled invoices only allow metadata edits. Locked fields: ${formatGuardrailFieldList(
+                  restrictedChanges,
+                )}.`,
+          },
+          { status: 400 },
+        );
+      }
     }
 
     const normalizedDiscount =
@@ -328,6 +463,15 @@ export async function PUT(request) {
     if (isInvoiceNotFoundError(error)) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
     }
+    if (isInvoiceDeletedError(error)) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
+    if (isCreditRuleViolation(error) || isCreditInvoiceError(error)) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Failed to update invoice" },
+        { status: 400 },
+      );
+    }
 
     console.error("Error updating invoice:", error);
     return Response.json(
@@ -339,14 +483,23 @@ export async function PUT(request) {
 
 export async function DELETE(request) {
   try {
-    const admin = await requireAdmin(request);
-    if (!admin.authorized) {
-      return Response.json({ error: admin.error }, { status: admin.status || 401 });
+    const auth = await requirePermission("billing:delete", request);
+    if (!auth.authorized) {
+      return Response.json({ error: auth.error }, { status: auth.status || 401 });
     }
 
     const supabase = db();
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
+    let body = {};
+    try {
+      body = await request.json();
+    } catch {
+      body = {};
+    }
+    const id = String(body?.id || searchParams.get("id") || "").trim();
+    const deleteReason = normalizeFinancialChangeReason(
+      body?.delete_reason || body?.deleteReason,
+    );
 
     if (!id) {
       return Response.json(
@@ -354,31 +507,121 @@ export async function DELETE(request) {
         { status: 400 },
       );
     }
+    if (!deleteReason) {
+      return Response.json({ error: "A delete reason is required" }, { status: 400 });
+    }
 
-    const { data: deleteResultRows, error: deleteError } = await supabase.rpc(
-      "cbnads_web_soft_delete_invoice_atomic",
-      {
-        p_invoice_id: id,
-        p_created_by: admin.user?.id || null,
-      },
-    );
-    if (deleteError) throw deleteError;
+    const { data: currentInvoice, error: currentInvoiceError } = await supabase
+      .from(table("invoices"))
+      .select(
+        "id, invoice_number, advertiser_id, status, total, amount, amount_paid, paid_via_credits, deleted_at, ad_ids",
+      )
+      .eq("id", id)
+      .maybeSingle();
+    if (currentInvoiceError) throw currentInvoiceError;
+    if (!currentInvoice || currentInvoice.deleted_at) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
 
-    const deleteResult = Array.isArray(deleteResultRows)
-      ? deleteResultRows[0] || null
-      : deleteResultRows;
+    const { data: existingItems, error: existingItemsError } = await supabase
+      .from(table("invoice_items"))
+      .select("ad_id, product_id, description, quantity, unit_price, amount")
+      .eq("invoice_id", id)
+      .order("created_at", { ascending: true });
+    if (existingItemsError) throw existingItemsError;
+
+    const currentInvoiceWithItems = {
+      ...currentInvoice,
+      items: existingItems || [],
+    };
+    const guardrail = getInvoiceMutationGuardrail(currentInvoiceWithItems);
+
+    const requestKey = resolveInvoiceRequestKey({
+      request,
+      bodyKey: body?.idempotency_key || body?.idempotencyKey,
+      scope: `invoice-delete:${id}`,
+    });
+
+    let deleteResult = null;
+    if (guardrail.action === "reconcile_required") {
+      return Response.json({ error: guardrail.message }, { status: 409 });
+    }
+
+    if (guardrail.action === "blocked_external_settlement") {
+      return Response.json({ error: guardrail.message }, { status: 400 });
+    }
+
+    if (guardrail.action === "reverse_credit_record") {
+      const { data: deleteResultRows, error: deleteError } = await supabase.rpc(
+        "cbnads_web_delete_credit_invoice_atomic",
+        {
+          p_invoice_id: id,
+          p_created_by: auth.user?.id || null,
+          p_change_reason: deleteReason,
+          p_source_request_key: requestKey,
+        },
+      );
+      if (deleteError) {
+        if (isInsufficientCreditsError(deleteError)) {
+          return Response.json(
+            {
+              error:
+                "This credit record cannot be deleted because some of its credits have already been used.",
+            },
+            { status: 400 },
+          );
+        }
+        if (isCreditRuleViolation(deleteError) || isCreditInvoiceError(deleteError)) {
+          return Response.json({ error: deleteError.message }, { status: 400 });
+        }
+        throw deleteError;
+      }
+
+      deleteResult = Array.isArray(deleteResultRows)
+        ? deleteResultRows[0] || null
+        : deleteResultRows;
+    } else {
+      const { data: deleteResultRows, error: deleteError } = await supabase.rpc(
+        "cbnads_web_soft_delete_invoice_atomic",
+        {
+          p_invoice_id: id,
+          p_created_by: auth.user?.id || null,
+        },
+      );
+      if (deleteError) throw deleteError;
+
+      deleteResult = Array.isArray(deleteResultRows)
+        ? deleteResultRows[0] || null
+        : deleteResultRows;
+    }
 
     if (deleteResult?.advertiser_id) {
       await recalculateAdvertiserSpend(deleteResult.advertiser_id);
     }
 
-    return Response.json({ success: true });
+    return Response.json({
+      success: true,
+      action: guardrail.action,
+      refunded_credits: deleteResult?.refunded_credits ?? deleteResult?.reversed_amount ?? 0,
+      had_credit_refund:
+        deleteResult?.had_credit_refund === true ||
+        toNumber(deleteResult?.reversed_amount, 0) > 0,
+    });
   } catch (error) {
     if (isInvoiceNotFoundError(error)) {
       return Response.json({ error: "Invoice not found" }, { status: 404 });
     }
+    if (isInvoiceDeletedError(error)) {
+      return Response.json({ error: "Invoice not found" }, { status: 404 });
+    }
     if (isInvoiceAlreadyDeletedError(error)) {
       return Response.json({ error: "Invoice already deleted" }, { status: 409 });
+    }
+    if (isCreditRuleViolation(error) || isCreditInvoiceError(error)) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : "Failed to delete invoice" },
+        { status: 400 },
+      );
     }
 
     console.error("Error deleting invoice:", error);

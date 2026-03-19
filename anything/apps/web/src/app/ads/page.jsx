@@ -518,6 +518,147 @@ const getInvoiceStatusColor = (status) => {
 };
 
 const isInvoicePaidViaCredits = (invoice) => invoice?.paid_via_credits === true;
+const isCreditInvoiceRecord = (invoice) =>
+  String(invoice?.invoice_number || "").trim().toUpperCase().startsWith("CRE-");
+const getInvoiceAssociationSummary = (invoice) => {
+  const items = Array.isArray(invoice?.items) ? invoice.items : [];
+  const linkedAdIds = new Set();
+
+  for (const adId of Array.isArray(invoice?.ad_ids) ? invoice.ad_ids : []) {
+    const normalizedAdId = String(adId || "").trim();
+    if (normalizedAdId) {
+      linkedAdIds.add(normalizedAdId);
+    }
+  }
+
+  for (const item of items) {
+    const normalizedAdId = String(item?.ad_id || "").trim();
+    if (normalizedAdId) {
+      linkedAdIds.add(normalizedAdId);
+    }
+  }
+
+  return {
+    itemCount: items.length,
+    linkedAdCount: linkedAdIds.size,
+  };
+};
+const hasInvoiceRecordedPayment = (invoice) => {
+  const normalizedStatus = normalizeInvoiceStatus(invoice?.status);
+  const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
+  return (
+    Boolean(invoice?.paid_via_credits) ||
+    amountPaid > 0 ||
+    normalizedStatus === "Paid" ||
+    normalizedStatus === "Partial"
+  );
+};
+const hasExternalInvoiceSettlement = (invoice) => {
+  if (isCreditInvoiceRecord(invoice)) {
+    return false;
+  }
+  const normalizedStatus = normalizeInvoiceStatus(invoice?.status);
+  const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
+  return (
+    !Boolean(invoice?.paid_via_credits) &&
+    (amountPaid > 0 || normalizedStatus === "Paid" || normalizedStatus === "Partial")
+  );
+};
+const getInvoiceMutationGuardrail = (invoice) => {
+  const total = Number(invoice?.total ?? invoice?.amount ?? 0) || 0;
+  const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
+  const normalizedStatus = normalizeInvoiceStatus(invoice?.status).toLowerCase();
+  const paidViaCredits = Boolean(invoice?.paid_via_credits);
+  const { itemCount, linkedAdCount } = getInvoiceAssociationSummary(invoice);
+  const hasBillingLinks = itemCount > 0 || linkedAdCount > 0;
+
+  if (isCreditInvoiceRecord(invoice)) {
+    return {
+      action: "reverse_credit_record",
+      itemCount,
+      linkedAdCount,
+      total,
+      amountPaid,
+      message: "Credit records must be reversed, not deleted outright.",
+    };
+  }
+
+  if (
+    paidViaCredits &&
+    (
+      total <= 0 ||
+      amountPaid <= 0 ||
+      Math.abs(total - amountPaid) > 0.009 ||
+      normalizedStatus !== "paid" ||
+      !hasBillingLinks
+    )
+  ) {
+    return {
+      action: "reconcile_required",
+      itemCount,
+      linkedAdCount,
+      total,
+      amountPaid,
+      message:
+        "This invoice is inconsistent. Reconcile its totals and billing links before editing or deleting it.",
+    };
+  }
+
+  if (paidViaCredits) {
+    return {
+      action: "reverse_credit_payment",
+      itemCount,
+      linkedAdCount,
+      total,
+      amountPaid,
+      message: "Deleting this invoice will restore prepaid credits to the advertiser.",
+    };
+  }
+
+  if (hasExternalInvoiceSettlement(invoice)) {
+    return {
+      action: "blocked_external_settlement",
+      itemCount,
+      linkedAdCount,
+      total,
+      amountPaid,
+      message: "Paid or partially paid invoices cannot be deleted. Void or reissue the invoice instead.",
+    };
+  }
+
+  return {
+    action: "safe_delete",
+    itemCount,
+    linkedAdCount,
+    total,
+    amountPaid,
+    message: "This invoice can be deleted.",
+  };
+};
+const isInvoiceReconciliationRequired = (invoice) =>
+  getInvoiceMutationGuardrail(invoice).action === "reconcile_required";
+const getInvoiceDeleteActionLabel = (invoice) => {
+  switch (getInvoiceMutationGuardrail(invoice).action) {
+    case "reverse_credit_payment":
+      return "Reverse Credits";
+    case "reverse_credit_record":
+      return "Reverse Credit";
+    case "reconcile_required":
+      return "Review Issue";
+    case "blocked_external_settlement":
+      return "Delete Unavailable";
+    default:
+      return "Delete";
+  }
+};
+const canSelectInvoiceForBatchDelete = (invoice) => {
+  const action = getInvoiceMutationGuardrail(invoice).action;
+  return (
+    action === "safe_delete" ||
+    action === "reverse_credit_payment" ||
+    action === "reverse_credit_record"
+  );
+};
 
 const formatInvoiceListDate = (value) => {
   if (!value) {
@@ -2846,6 +2987,10 @@ export default function AdsPage() {
   const submissionEditAvailabilityRequestIdRef = useRef(0);
   const [adDeleteModal, setAdDeleteModal] = useState(null);
   const [invoiceDeleteModal, setInvoiceDeleteModal] = useState(null);
+  const [invoiceDeleteForm, setInvoiceDeleteForm] = useState({
+    reason: "",
+    confirmationText: "",
+  });
   const [user, setUser] = useState(() => getSignedInUser());
   const [ready, setReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -2876,6 +3021,7 @@ export default function AdsPage() {
   const [createAdErrors, setCreateAdErrors] = useState({});
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(() => createBlankInvoice());
+  const [invoiceChangeReason, setInvoiceChangeReason] = useState("");
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [invoiceCreditsApplying, setInvoiceCreditsApplying] = useState(false);
   const [invoiceLowCreditSending, setInvoiceLowCreditSending] = useState(false);
@@ -2950,6 +3096,8 @@ export default function AdsPage() {
   const allowedSections = getVisibleSectionsForRole(userRole);
   const canViewBilling = can(userRole, "billing:view");
   const canEditBilling = can(userRole, "billing:edit");
+  const canDeleteBilling = can(userRole, "billing:delete");
+  const canMarkInvoicePaid = can(userRole, "billing:mark_paid");
   const canViewSettings = can(userRole, "settings:view");
   const canDeleteAds = can(userRole, "ads:delete");
   const canEditAds = can(userRole, "ads:edit");
@@ -3713,7 +3861,31 @@ export default function AdsPage() {
     [ads, invoice.ad_ids, invoice.items],
   );
 
+  const persistedEditingInvoice = useMemo(() => {
+    const editingInvoiceId = String(invoice?.id || "").trim();
+    if (!editingInvoiceId) {
+      return null;
+    }
+
+    return (
+      invoices.find((item) => String(item?.id || "").trim() === editingInvoiceId) || null
+    );
+  }, [invoice?.id, invoices]);
+
   const isCreditComposer = billingComposerMode === "credit";
+  const isEditingExistingInvoice = Boolean(String(invoice?.id || "").trim());
+  const isEditingCreditRecord =
+    isEditingExistingInvoice && isCreditInvoiceRecord(persistedEditingInvoice || invoice);
+  const isReconcileLockedInvoiceEdit =
+    isEditingExistingInvoice &&
+    !isEditingCreditRecord &&
+    isInvoiceReconciliationRequired(persistedEditingInvoice || invoice);
+  const isLockedInvoiceEdit =
+    isEditingExistingInvoice &&
+    !isEditingCreditRecord &&
+    !isReconcileLockedInvoiceEdit &&
+    hasInvoiceRecordedPayment(persistedEditingInvoice || invoice);
+  const isRepairOnlyInvoiceEdit = isReconcileLockedInvoiceEdit;
 
   const invoicePreviewItems = useMemo(() => {
     if (isCreditComposer) {
@@ -3792,6 +3964,17 @@ export default function AdsPage() {
     [invoicePreviewDiscount, invoicePreviewSubtotal, invoicePreviewTax],
   );
   const selectedAdvertiserCredits = Number(selectedInvoiceAdvertiser?.credits ?? 0) || 0;
+  const persistedEditingCreditAmount = isEditingCreditRecord
+    ? Number(
+        persistedEditingInvoice?.total ??
+          persistedEditingInvoice?.amount ??
+          persistedEditingInvoice?.amount_paid ??
+          0,
+      ) || 0
+    : 0;
+  const creditBalanceAfterSave = isCreditComposer
+    ? selectedAdvertiserCredits + invoicePreviewAmount - persistedEditingCreditAmount
+    : selectedAdvertiserCredits;
   const creditsCoverInvoiceTotal =
     !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
   const creditsInsufficientForInvoice =
@@ -5040,9 +5223,29 @@ export default function AdsPage() {
   }, [advertisers, invoiceFilters, invoices, invoiceSortConfig]);
 
   const deletableFilteredInvoiceIds = useMemo(
-    () => filteredInvoices.map((item) => String(item.id)),
+    () =>
+      filteredInvoices
+        .filter((item) => canSelectInvoiceForBatchDelete(item))
+        .map((item) => String(item.id)),
     [filteredInvoices],
   );
+  const selectedBatchDeleteLabel = useMemo(() => {
+    const selectedInvoices = [...selectedInvoiceIds]
+      .map((id) => invoices.find((item) => String(item?.id || "").trim() === String(id || "").trim()))
+      .filter(Boolean);
+    const actions = [...new Set(selectedInvoices.map((item) => getInvoiceMutationGuardrail(item).action))];
+    if (actions.length !== 1) {
+      return "Review selected invoices";
+    }
+    switch (actions[0]) {
+      case "reverse_credit_record":
+        return `Reverse ${selectedInvoices.length} credit record${selectedInvoices.length > 1 ? "s" : ""}`;
+      case "reverse_credit_payment":
+        return `Reverse credits for ${selectedInvoices.length} invoice${selectedInvoices.length > 1 ? "s" : ""}`;
+      default:
+        return `Delete ${selectedInvoices.length} invoice${selectedInvoices.length > 1 ? "s" : ""}`;
+    }
+  }, [invoices, selectedInvoiceIds]);
 
   const invoiceSummary = useMemo(() => {
       const summary = invoices.reduce(
@@ -5541,6 +5744,97 @@ export default function AdsPage() {
       ...init,
       headers: retryHeaders,
     });
+  };
+
+  const requestInvoiceUpdate = async (payload) => {
+    const response = await fetchWithSessionAuth("/api/invoices", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to update invoice.");
+    }
+    const nextDb = await refreshDbFromSupabase();
+    const updatedInvoice = (nextDb?.invoices || []).find(
+      (item) => String(item?.id || "").trim() === String(payload?.id || "").trim(),
+    );
+    return updatedInvoice || data?.invoice || null;
+  };
+
+  const requestInvoiceDelete = async ({ invoiceId, reason }) => {
+    const response = await fetchWithSessionAuth("/api/invoices", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id: invoiceId,
+        delete_reason: reason,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to delete invoice.");
+    }
+    await refreshDbFromSupabase();
+    return data;
+  };
+
+  const buildInvoiceUpdatePayload = ({ draftInvoice, existingInvoice, changeReason }) => {
+    const advertiserId = String(
+      draftInvoice?.advertiser_id || existingInvoice?.advertiser_id || "",
+    ).trim();
+    const advertiserName =
+      advertisers.find((item) => String(item?.id || "").trim() === advertiserId)
+        ?.advertiser_name ||
+      draftInvoice?.advertiser_name ||
+      existingInvoice?.advertiser_name ||
+      "";
+
+    return {
+      id: draftInvoice?.id || existingInvoice?.id,
+      advertiser_id: advertiserId,
+      advertiser_name: advertiserName,
+      contact_name: draftInvoice?.contact_name ?? existingInvoice?.contact_name ?? "",
+      contact_email: draftInvoice?.contact_email ?? existingInvoice?.contact_email ?? "",
+      bill_to: draftInvoice?.bill_to ?? existingInvoice?.bill_to ?? "",
+      issue_date:
+        draftInvoice?.issue_date || existingInvoice?.issue_date || getTodayInAppTimeZone(),
+      status: normalizeInvoiceStatus(
+        draftInvoice?.status || existingInvoice?.status || "Pending",
+      ),
+      discount: draftInvoice?.discount ?? existingInvoice?.discount ?? 0,
+      tax: draftInvoice?.tax ?? existingInvoice?.tax ?? 0,
+      notes: draftInvoice?.notes ?? existingInvoice?.notes ?? "",
+      amount:
+        draftInvoice?.total ??
+        draftInvoice?.amount ??
+        existingInvoice?.total ??
+        existingInvoice?.amount ??
+        0,
+      total:
+        draftInvoice?.total ??
+        draftInvoice?.amount ??
+        existingInvoice?.total ??
+        existingInvoice?.amount ??
+        0,
+      amount_paid: draftInvoice?.amount_paid ?? existingInvoice?.amount_paid ?? 0,
+      ad_ids: Array.isArray(draftInvoice?.ad_ids)
+        ? draftInvoice.ad_ids
+        : Array.isArray(existingInvoice?.ad_ids)
+          ? existingInvoice.ad_ids
+          : [],
+      items: Array.isArray(draftInvoice?.items)
+        ? draftInvoice.items
+        : Array.isArray(existingInvoice?.items)
+          ? existingInvoice.items
+          : [],
+      change_reason: changeReason,
+    };
   };
 
   const ensureAdvertiserAccountInvite = async (advertiserId) => {
@@ -7549,17 +7843,18 @@ export default function AdsPage() {
   };
 
   const openInvoiceEditor = (item) => {
-    if (!isAdmin) {
+    if (!canEditBilling) {
       return;
     }
-    setBillingComposerMode("invoice");
+    setBillingComposerMode(isCreditInvoiceRecord(item) ? "credit" : "invoice");
     setInvoice({
       ...createBlankInvoice(),
       ...item,
-      issue_date: getTodayInAppTimeZone(),
+      issue_date: item.issue_date || getTodayInAppTimeZone(),
       status: normalizeInvoiceStatus(item.status),
       ad_ids: toStringArray(item.ad_ids),
     });
+    setInvoiceChangeReason("");
     setView("newInvoice");
     setOpenInvoiceMenuId(null);
     setShowInvoiceCreateMenu(false);
@@ -7640,7 +7935,7 @@ export default function AdsPage() {
   };
 
   const markInvoiceAsPaid = async (item) => {
-    if (!isAdmin) {
+    if (!canMarkInvoicePaid) {
       return;
     }
     const normalizedInvoiceId = String(item?.id || "").trim();
@@ -7692,51 +7987,207 @@ export default function AdsPage() {
     }
   };
 
-  const deleteInvoiceRecord = async (invoiceId) => {
-    if (!isAdmin) {
+  const closeInvoiceDeleteModal = () => {
+    setInvoiceDeleteModal(null);
+    setInvoiceDeleteForm({
+      reason: "",
+      confirmationText: "",
+    });
+  };
+
+  const buildInvoiceDeleteModalState = (modalInvoices) => {
+    const actions = [...new Set(modalInvoices.map((item) => getInvoiceMutationGuardrail(item).action))];
+    if (actions.length !== 1) {
+      return {
+        action: "mixed",
+        blocked: true,
+        title: "Mixed billing actions",
+        description:
+          "Batch actions only work when every selected record has the same billing action.",
+        impactLines: [],
+        confirmLabel: "Close",
+        pendingLabel: "Close",
+        reasonLabel: "",
+        reasonPlaceholder: "",
+        requiresReason: false,
+        requiresConfirmationText: false,
+      };
+    }
+
+    const action = actions[0];
+    const totalCreditImpact = modalInvoices.reduce((sum, item) => {
+      const guardrail = getInvoiceMutationGuardrail(item);
+      return sum + Math.max(guardrail.total || guardrail.amountPaid || 0, 0);
+    }, 0);
+    const totalItemCount = modalInvoices.reduce(
+      (sum, item) => sum + getInvoiceAssociationSummary(item).itemCount,
+      0,
+    );
+    const totalLinkedAdCount = modalInvoices.reduce(
+      (sum, item) => sum + getInvoiceAssociationSummary(item).linkedAdCount,
+      0,
+    );
+    const requiredConfirmationText =
+      modalInvoices.length > 1
+        ? `CONFIRM ${modalInvoices.length}`
+        : "";
+
+    if (action === "blocked_external_settlement") {
+      return {
+        action,
+        blocked: true,
+        title: "Delete unavailable",
+        description:
+          "Paid or partially paid invoices that were settled externally cannot be deleted here.",
+        impactLines: [
+          "Use a void, reissue, or reconciliation flow instead.",
+        ],
+        confirmLabel: "Close",
+        pendingLabel: "Close",
+        reasonLabel: "",
+        reasonPlaceholder: "",
+        requiresReason: false,
+        requiresConfirmationText: false,
+      };
+    }
+
+    if (action === "reconcile_required") {
+      return {
+        action,
+        blocked: true,
+        title:
+          modalInvoices.length === 1
+            ? `Reconcile ${String(modalInvoices[0]?.invoice_number || "").trim()} first`
+            : "Reconciliation required",
+        description:
+          "These records are inconsistent. Reconcile totals and billing links before any destructive action.",
+        impactLines: [
+          `Invoice items: ${totalItemCount}`,
+          `Linked ads: ${totalLinkedAdCount}`,
+          `Paid via credits: ${formatCurrency(totalCreditImpact)}`,
+        ],
+        confirmLabel: "Close",
+        pendingLabel: "Close",
+        reasonLabel: "",
+        reasonPlaceholder: "",
+        requiresReason: false,
+        requiresConfirmationText: false,
+      };
+    }
+
+    if (action === "reverse_credit_record") {
+      return {
+        action,
+        blocked: false,
+        title:
+          modalInvoices.length === 1
+            ? `Reverse ${String(modalInvoices[0]?.invoice_number || "").trim()}?`
+            : `Reverse ${modalInvoices.length} credit records?`,
+        description:
+          "This archives the credit record and reverses the advertiser's prepaid credits.",
+        impactLines: [
+          `Credits reversed: ${formatCurrency(totalCreditImpact)}`,
+          `Linked ads affected: ${totalLinkedAdCount}`,
+        ],
+        confirmLabel: modalInvoices.length === 1 ? "Reverse Credit" : "Reverse Credits",
+        pendingLabel: modalInvoices.length === 1 ? "Reversing..." : "Reversing credits...",
+        reasonLabel: "Reversal Reason",
+        reasonPlaceholder: "Explain why this credit record should be reversed.",
+        requiresReason: true,
+        requiresConfirmationText: modalInvoices.length > 1,
+        requiredConfirmationText,
+      };
+    }
+
+    if (action === "reverse_credit_payment") {
+      return {
+        action,
+        blocked: false,
+        title:
+          modalInvoices.length === 1
+            ? `Reverse credit payment for ${String(modalInvoices[0]?.invoice_number || "").trim()}?`
+            : `Reverse credit payments for ${modalInvoices.length} invoices?`,
+        description:
+          "This archives the invoice and restores prepaid credits to the advertiser.",
+        impactLines: [
+          `Credits restored: ${formatCurrency(totalCreditImpact)}`,
+          `Invoice items removed: ${totalItemCount}`,
+          `Linked ads removed: ${totalLinkedAdCount}`,
+        ],
+        confirmLabel:
+          modalInvoices.length === 1 ? "Reverse Credits" : "Reverse Credits & Archive",
+        pendingLabel:
+          modalInvoices.length === 1 ? "Reversing..." : "Reversing credits...",
+        reasonLabel: "Reversal Reason",
+        reasonPlaceholder:
+          "Explain why this credit-paid invoice should be reversed and archived.",
+        requiresReason: true,
+        requiresConfirmationText: modalInvoices.length > 1,
+        requiredConfirmationText,
+      };
+    }
+
+    return {
+      action,
+      blocked: false,
+      title:
+        modalInvoices.length === 1
+          ? `Delete ${String(modalInvoices[0]?.invoice_number || modalInvoices[0]?.id || "").trim()}?`
+          : `Delete ${modalInvoices.length} invoices?`,
+      description: "This removes the invoice and clears its billing links.",
+      impactLines: [
+        `Invoice items removed: ${totalItemCount}`,
+        `Linked ads removed: ${totalLinkedAdCount}`,
+      ],
+      confirmLabel: modalInvoices.length === 1 ? "Delete Invoice" : "Delete Invoices",
+      pendingLabel: modalInvoices.length === 1 ? "Deleting..." : "Deleting invoices...",
+      reasonLabel: "Delete Reason",
+      reasonPlaceholder: "Explain why this invoice should be deleted.",
+      requiresReason: true,
+      requiresConfirmationText: modalInvoices.length > 1,
+      requiredConfirmationText,
+    };
+  };
+
+  const openInvoiceDeleteConfirmation = (invoiceIds) => {
+    if (!canDeleteBilling) {
       return;
     }
+
+    const normalizedInvoiceIds = [...new Set(invoiceIds.map((id) => String(id || "").trim()))].filter(
+      Boolean,
+    );
+    if (normalizedInvoiceIds.length === 0) {
+      return;
+    }
+
+    const modalInvoices = normalizedInvoiceIds
+      .map((id) => invoices.find((item) => String(item?.id || "").trim() === id))
+      .filter(Boolean);
+    if (modalInvoices.length === 0) {
+      return;
+    }
+    const modalConfig = buildInvoiceDeleteModalState(modalInvoices);
+
+    setInvoiceDeleteForm({
+      reason: "",
+      confirmationText: "",
+    });
+    setInvoiceDeleteModal({
+      invoiceIds: modalInvoices.map((item) => String(item?.id || "").trim()).filter(Boolean),
+      invoices: modalInvoices,
+      ...modalConfig,
+    });
+    setOpenInvoiceMenuId(null);
+  };
+
+  const deleteInvoiceRecord = (invoiceId) => {
     const normalizedInvoiceId = String(invoiceId || "").trim();
     if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
       return;
     }
 
-    const toastId = getInvoiceActionToastId("delete", normalizedInvoiceId);
-    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
-    setPendingInvoiceActionIds((current) =>
-      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
-    );
-    setOpenInvoiceMenuId(null);
-    appToast.info({
-      id: toastId,
-      title: "Deleting invoice...",
-      description: "Please wait while the invoice is removed.",
-      duration: Infinity,
-    });
-    try {
-      const invoiceRecord = invoices.find(
-        (item) => String(item?.id || "").trim() === normalizedInvoiceId,
-      );
-      const refundedCredits = isInvoicePaidViaCredits(invoiceRecord);
-      await run(async () => {
-        await deleteInvoice(normalizedInvoiceId);
-        if (String(invoicePreviewModal?.id || "").trim() === normalizedInvoiceId) {
-          setInvoicePreviewModal(null);
-        }
-      });
-      appToast.success({
-        title: "Invoice deleted.",
-        description: refundedCredits
-          ? "Paid credits were refunded to the advertiser."
-          : "",
-      });
-    } finally {
-      appToast.dismiss(toastId);
-      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
-      setPendingInvoiceActionIds((current) =>
-        current.filter((itemId) => itemId !== normalizedInvoiceId),
-      );
-    }
+    openInvoiceDeleteConfirmation([normalizedInvoiceId]);
   };
 
   const handleToggleSelectInvoice = (invoiceId) => {
@@ -7762,7 +8213,7 @@ export default function AdsPage() {
   };
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!canDeleteBilling) {
       setSelectedInvoiceIds(new Set());
       return;
     }
@@ -7782,7 +8233,7 @@ export default function AdsPage() {
         const invoiceRecord = invoices.find(
           (item) => String(item?.id || "").trim() === normalizedInvoiceId,
         );
-        if (!invoiceRecord) {
+        if (!invoiceRecord || !canSelectInvoiceForBatchDelete(invoiceRecord)) {
           continue;
         }
         cleaned.add(normalizedInvoiceId);
@@ -7803,104 +8254,182 @@ export default function AdsPage() {
 
       return cleaned;
     });
-  }, [invoices, isAdmin]);
+  }, [canDeleteBilling, invoices]);
 
-  const executeBatchDeleteInvoices = async (invoiceIds) => {
-    const toastId = "batch-delete-invoices";
+  const executeBatchDeleteInvoices = async (invoiceIds, reason) => {
     const uniqueInvoiceIds = [...new Set(invoiceIds.map((id) => String(id || "").trim()))].filter(
       Boolean,
     );
     if (uniqueInvoiceIds.length === 0) {
-      appToast.warning({
-        title: "No invoices deleted",
-        description: "No valid invoices were selected.",
+      return {
+        deletedInvoiceIds: [],
+        failedInvoiceIds: [],
+        failedMessages: [],
+      };
+    }
+
+    const deletedInvoiceIds = [];
+    const failedInvoiceIds = [];
+    const failedMessages = [];
+
+    for (const id of uniqueInvoiceIds) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await requestInvoiceDelete({ invoiceId: id, reason });
+        deletedInvoiceIds.push(id);
+      } catch (error) {
+        failedInvoiceIds.push(id);
+        failedMessages.push(error instanceof Error ? error.message : "Failed to delete invoice.");
+      }
+    }
+
+    if (deletedInvoiceIds.includes(String(invoicePreviewModal?.id || "").trim())) {
+      setInvoicePreviewModal(null);
+    }
+
+    return {
+      deletedInvoiceIds,
+      failedInvoiceIds,
+      failedMessages,
+    };
+  };
+
+  const confirmInvoiceDelete = async () => {
+    if (!invoiceDeleteModal) {
+      return;
+    }
+    if (invoiceDeleteModal.blocked) {
+      closeInvoiceDeleteModal();
+      return;
+    }
+
+    const reason = String(invoiceDeleteForm.reason || "").trim();
+    const confirmationText = String(invoiceDeleteForm.confirmationText || "").trim();
+    const requiredConfirmationText = String(
+      invoiceDeleteModal.requiredConfirmationText || "",
+    ).trim();
+    if (invoiceDeleteModal.requiresReason && !reason) {
+      appToast.error({
+        title: "Reason required.",
+      });
+      return;
+    }
+    if (
+      invoiceDeleteModal.requiresConfirmationText &&
+      (!requiredConfirmationText || confirmationText !== requiredConfirmationText)
+    ) {
+      appToast.error({
+        title: "Confirmation text does not match.",
+        description: `Type ${requiredConfirmationText} to continue.`,
       });
       return;
     }
 
-    appToast.info({ id: toastId, title: "Deleting invoices...", duration: Infinity });
+    const modalInvoiceIds = Array.isArray(invoiceDeleteModal.invoiceIds)
+      ? invoiceDeleteModal.invoiceIds
+      : [];
+    const toastId =
+      modalInvoiceIds.length === 1
+        ? getInvoiceActionToastId("delete", modalInvoiceIds[0])
+        : "batch-delete-invoices";
+
+    for (const invoiceId of modalInvoiceIds) {
+      pendingInvoiceActionIdsRef.current.add(invoiceId);
+    }
+    setPendingInvoiceActionIds((current) => [
+      ...new Set([...current, ...modalInvoiceIds]),
+    ]);
+    appToast.info({
+      id: toastId,
+      title: invoiceDeleteModal.pendingLabel || "Updating invoices...",
+      description: "Please wait while the billing records are removed.",
+      duration: Infinity,
+    });
+
     try {
-      const deletedInvoiceIds = [];
-      const failedInvoiceIds = [];
-      const failedMessages = [];
+      const { deletedInvoiceIds, failedInvoiceIds, failedMessages } =
+        await executeBatchDeleteInvoices(modalInvoiceIds, reason);
 
-      for (const id of uniqueInvoiceIds) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await deleteInvoice(id);
-          deletedInvoiceIds.push(id);
-        } catch (error) {
-          failedInvoiceIds.push(id);
-          failedMessages.push(error instanceof Error ? error.message : "Failed to delete invoice.");
-        }
-      }
-
-      if (deletedInvoiceIds.includes(String(invoicePreviewModal?.id || "").trim())) {
-        setInvoicePreviewModal(null);
-      }
-
-      setDb(readDb());
       setSelectedInvoiceIds(new Set(failedInvoiceIds));
+
+      if (deletedInvoiceIds.length > 0 && failedInvoiceIds.length === 0) {
+        closeInvoiceDeleteModal();
+      } else if (deletedInvoiceIds.length > 0) {
+        setInvoiceDeleteModal(null);
+      }
 
       if (failedInvoiceIds.length > 0) {
         appToast.warning({
-          title: "Some invoices were not deleted",
+          title:
+            deletedInvoiceIds.length > 0
+              ? "Some invoices were not deleted."
+              : "Invoice delete failed.",
           description: failedMessages[0] || "One or more invoices could not be deleted.",
         });
-        return;
       }
 
       if (deletedInvoiceIds.length === 0) {
-        appToast.warning({
-          title: "No invoices deleted",
-          description: "No invoices were deleted.",
-        });
         return;
       }
 
-      const refundedCount = deletedInvoiceIds.filter((id) => {
-        const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
-        return Boolean(invoiceRecord && isInvoicePaidViaCredits(invoiceRecord));
-      }).length;
+      const deletedInvoices = deletedInvoiceIds
+        .map(
+          (id) =>
+            invoiceDeleteModal.invoices?.find((item) => String(item?.id || "").trim() === id) ||
+            invoices.find((item) => String(item?.id || "").trim() === id),
+        )
+        .filter(Boolean);
+      const deletedAction = invoiceDeleteModal.action || "safe_delete";
+      const restoredCredits = deletedInvoices.reduce((sum, item) => {
+        const guardrail = getInvoiceMutationGuardrail(item);
+        if (
+          guardrail.action !== "reverse_credit_payment" &&
+          guardrail.action !== "reverse_credit_record"
+        ) {
+          return sum;
+        }
+        return sum + Math.max(guardrail.total || guardrail.amountPaid || 0, 0);
+      }, 0);
       appToast.success({
-        title: `${deletedInvoiceIds.length} invoice${deletedInvoiceIds.length > 1 ? "s" : ""} deleted`,
+        title:
+          deletedAction === "reverse_credit_record"
+            ? deletedInvoiceIds.length === 1
+              ? "Credit record reversed."
+              : `${deletedInvoiceIds.length} credit records reversed.`
+            : deletedAction === "reverse_credit_payment"
+              ? deletedInvoiceIds.length === 1
+                ? "Credit payment reversed."
+                : `${deletedInvoiceIds.length} credit payments reversed.`
+              : deletedInvoiceIds.length === 1
+                ? "Invoice deleted."
+                : `${deletedInvoiceIds.length} invoices deleted.`,
         description:
-          refundedCount > 0
-            ? `Credits refunded for ${refundedCount} deleted invoice${refundedCount > 1 ? "s" : ""} that were paid via credits.`
+          restoredCredits > 0
+            ? `${formatCurrency(restoredCredits)} in prepaid credits was restored.`
             : "",
       });
     } finally {
       appToast.dismiss(toastId);
+      for (const invoiceId of modalInvoiceIds) {
+        pendingInvoiceActionIdsRef.current.delete(invoiceId);
+      }
+      setPendingInvoiceActionIds((current) =>
+        current.filter((itemId) => !modalInvoiceIds.includes(itemId)),
+      );
     }
   };
 
   const handleBatchDeleteInvoices = () => {
-    if (selectedInvoiceIds.size === 0) return;
-    const ids = [...selectedInvoiceIds].map((id) => String(id || "").trim()).filter(Boolean);
-    const refundedCount = ids.filter((id) => {
-      const invoiceRecord = invoices.find((item) => String(item?.id || "").trim() === id);
-      return invoiceRecord && isInvoicePaidViaCredits(invoiceRecord);
-    }).length;
-
-    appToast.warning({
-      id: "confirm-batch-delete-invoices",
-      title: `Delete ${ids.length} invoice${ids.length !== 1 ? "s" : ""}?`,
-      description:
-        refundedCount > 0
-          ? `${refundedCount} invoice${refundedCount > 1 ? "s" : ""} ${refundedCount > 1 ? "were" : "was"} paid via credits and ${refundedCount > 1 ? "will" : "will"} refund those credits. This cannot be undone.`
-          : "This cannot be undone.",
-      duration: 8000,
-      action: {
-        label: "Delete",
-        onClick: () => {
-          void executeBatchDeleteInvoices(ids);
-        },
-      },
-    });
+    if (selectedInvoiceIds.size === 0) {
+      return;
+    }
+    openInvoiceDeleteConfirmation(
+      [...selectedInvoiceIds].map((id) => String(id || "").trim()).filter(Boolean),
+    );
   };
 
   const saveInvoiceForm = async () => {
-    if (!isAdmin || invoiceSaving) {
+    if (!canEditBilling || invoiceSaving) {
       return;
     }
     setInvoiceSaving(true);
@@ -7915,142 +8444,196 @@ export default function AdsPage() {
     let creditApplicationResult = null;
     let creditApplicationError = "";
     try {
-      await run(async () => {
-        if (isCreditComposer) {
-          const advertiserId = String(invoice.advertiser_id || "").trim();
-          const absoluteAmount = Math.abs(
-            Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0,
+      const issueDate = invoice.issue_date || getTodayInAppTimeZone();
+      const changeReason = String(invoiceChangeReason || "").trim();
+      if (isEditingExistingInvoice && !changeReason) {
+        throw new Error("Add a change reason before saving.");
+      }
+
+      if (isCreditComposer) {
+        const advertiserId = String(invoice.advertiser_id || "").trim();
+        const absoluteAmount = Math.abs(
+          Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0,
+        );
+        const reason = String(invoice.notes || "").trim();
+
+        if (!advertiserId) {
+          throw new Error("Advertiser required");
+        }
+        if (!absoluteAmount) {
+          throw new Error("Enter a credit amount.");
+        }
+        if (!reason) {
+          throw new Error("Reason required");
+        }
+
+        if (isEditingCreditRecord) {
+          const refreshedDb = await refreshDbFromSupabase();
+          const existingInvoice =
+            (Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : []).find(
+              (item) => String(item?.id || "").trim() === String(invoice.id || "").trim(),
+            ) || null;
+          if (!existingInvoice) {
+            throw new Error("Credit record not found.");
+          }
+
+          const updatedInvoice = await requestInvoiceUpdate(
+            buildInvoiceUpdatePayload({
+              draftInvoice: {
+                ...invoice,
+                issue_date: issueDate,
+                status: "Paid",
+              },
+              existingInvoice,
+              changeReason,
+            }),
           );
-          const reason = String(invoice.notes || "").trim();
-
-          if (!advertiserId) {
-            throw new Error("Advertiser required");
-          }
-          if (!absoluteAmount) {
-            throw new Error("Enter a credit amount.");
-          }
-          if (!reason) {
-            throw new Error("Reason required");
-          }
-
-          const { data, updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
-            advertiserId,
-            amount: absoluteAmount,
-            reason,
-          });
-
-          if (
-            advertiserViewModal?.advertiser?.id &&
-            String(advertiserViewModal.advertiser.id) === advertiserId &&
-            updatedAdvertiser
-          ) {
-            setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
-          }
 
           setBillingComposerMode("invoice");
           setInvoice(createBlankInvoice());
+          setInvoiceChangeReason("");
           setView("list");
 
           appToast.success({
-            title: "Credits added.",
-            description: data?.credit_invoice?.invoice_number
-              ? `Recorded as ${data.credit_invoice.invoice_number}.`
+            title: "Credit record updated.",
+            description: updatedInvoice?.invoice_number
+              ? `Updated ${updatedInvoice.invoice_number}.`
               : undefined,
           });
           return;
         }
 
-        const issueDate = getTodayInAppTimeZone();
-        if (!invoice.advertiser_id) {
-          throw new Error("Advertiser required");
-        }
-        const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
-        const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
-        const explicitAmountValue =
-          Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
-        const hasPositiveAmount = explicitAmountValue > 0;
-        if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
-          throw new Error("Link at least one ad, add line items, or enter a positive amount.");
-        }
-
-        let existingInvoice = null;
-        if (invoice.id) {
-          const refreshedDb = await refreshDbFromSupabase();
-          existingInvoice =
-            (Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : []).find(
-              (item) => String(item?.id || "") === String(invoice.id || ""),
-            ) || null;
-        }
-
-        const savedInvoice = await upsertInvoice({
-          ...(existingInvoice || {}),
-          ...invoice,
-          ad_ids:
-            Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
-              ? invoice.ad_ids
-              : Array.isArray(existingInvoice?.ad_ids)
-                ? existingInvoice.ad_ids
-                : [],
-          items:
-            Array.isArray(invoice.items) && invoice.items.length > 0
-              ? invoice.items
-              : Array.isArray(existingInvoice?.items)
-                ? existingInvoice.items
-                : [],
-          issue_date: issueDate,
-          status: normalizeInvoiceStatus(invoice.status),
+        const { data, updatedAdvertiser, nextDb } = await requestAdvertiserCreditsAdjustment({
+          advertiserId,
+          amount: absoluteAmount,
+          reason,
         });
-        const hasExistingInvoice = Boolean(existingInvoice?.id);
-        const previousInvoiceStatus = hasExistingInvoice
-          ? normalizeInvoiceStatus(existingInvoice?.status || "")
-          : "";
-        const nextInvoiceStatus = normalizeInvoiceStatus(
-          savedInvoice?.status || invoice.status || "",
-        );
-        if (nextInvoiceStatus === "Paid" && previousInvoiceStatus !== "Paid") {
-          paymentNoticeInvoiceId = String(savedInvoice?.id || invoice.id || "").trim();
-        }
+
         if (
-          nextInvoiceStatus === "Pending" &&
-          hasSupabaseConfig
+          advertiserViewModal?.advertiser?.id &&
+          String(advertiserViewModal.advertiser.id) === advertiserId &&
+          updatedAdvertiser
         ) {
-          try {
-            const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                invoice_id: String(savedInvoice?.id || invoice.id || "").trim(),
-              }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              throw new Error(data?.error || "Failed to check prepaid credits.");
-            }
-            creditApplicationResult = data || null;
-            if (
-              !creditApplicationResult?.applied &&
-              !isInvoicePaidViaCredits(creditApplicationResult?.invoice)
-            ) {
-              if (!hasExistingInvoice || previousInvoiceStatus !== "Pending") {
-                readyForPaymentReminderInvoice = creditApplicationResult?.invoice || savedInvoice;
-              }
-            }
-          } catch (error) {
-            creditApplicationError =
-              error instanceof Error ? error.message : "Failed to check prepaid credits.";
-          }
-        } else if (
-          nextInvoiceStatus === "Pending" &&
-          (!hasExistingInvoice || previousInvoiceStatus !== "Pending")
-        ) {
-          readyForPaymentReminderInvoice = savedInvoice;
+          setAdvertiserViewModal(buildAdvertiserViewModalState(updatedAdvertiser, nextDb));
         }
-        setInvoice(createBlankInvoice());
+
         setBillingComposerMode("invoice");
+        setInvoice(createBlankInvoice());
+        setInvoiceChangeReason("");
         setView("list");
-      }, isCreditComposer ? "" : "Invoice saved.");
+
+        appToast.success({
+          title: "Credits added.",
+          description: data?.credit_invoice?.invoice_number
+            ? `Recorded as ${data.credit_invoice.invoice_number}.`
+            : undefined,
+        });
+        return;
+      }
+
+      if (!invoice.advertiser_id) {
+        throw new Error("Advertiser required");
+      }
+      const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
+      const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
+      const explicitAmountValue =
+        Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
+      const hasPositiveAmount = explicitAmountValue > 0;
+      if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
+        throw new Error("Link at least one ad, add line items, or enter a positive amount.");
+      }
+
+      let existingInvoice = null;
+      if (invoice.id) {
+        const refreshedDb = await refreshDbFromSupabase();
+        existingInvoice =
+          (Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : []).find(
+            (item) => String(item?.id || "") === String(invoice.id || ""),
+          ) || null;
+      }
+
+      const hasExistingInvoice = Boolean(existingInvoice?.id);
+      const savedInvoice = hasExistingInvoice
+        ? await requestInvoiceUpdate(
+            buildInvoiceUpdatePayload({
+              draftInvoice: {
+                ...invoice,
+                issue_date: issueDate,
+                status: normalizeInvoiceStatus(invoice.status),
+              },
+              existingInvoice,
+              changeReason,
+            }),
+          )
+        : await upsertInvoice({
+            ...(existingInvoice || {}),
+            ...invoice,
+            ad_ids:
+              Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
+                ? invoice.ad_ids
+                : Array.isArray(existingInvoice?.ad_ids)
+                  ? existingInvoice.ad_ids
+                  : [],
+            items:
+              Array.isArray(invoice.items) && invoice.items.length > 0
+                ? invoice.items
+                : Array.isArray(existingInvoice?.items)
+                  ? existingInvoice.items
+                  : [],
+            issue_date: issueDate,
+            status: normalizeInvoiceStatus(invoice.status),
+          });
+      const previousInvoiceStatus = hasExistingInvoice
+        ? normalizeInvoiceStatus(existingInvoice?.status || "")
+        : "";
+      const nextInvoiceStatus = normalizeInvoiceStatus(savedInvoice?.status || invoice.status || "");
+      if (nextInvoiceStatus === "Paid" && previousInvoiceStatus !== "Paid") {
+        paymentNoticeInvoiceId = String(savedInvoice?.id || invoice.id || "").trim();
+      }
+      if (
+        nextInvoiceStatus === "Pending" &&
+        hasSupabaseConfig
+      ) {
+        try {
+          const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              invoice_id: String(savedInvoice?.id || invoice.id || "").trim(),
+            }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data?.error || "Failed to check prepaid credits.");
+          }
+          creditApplicationResult = data || null;
+          if (
+            !creditApplicationResult?.applied &&
+            !isInvoicePaidViaCredits(creditApplicationResult?.invoice)
+          ) {
+            if (!hasExistingInvoice || previousInvoiceStatus !== "Pending") {
+              readyForPaymentReminderInvoice = creditApplicationResult?.invoice || savedInvoice;
+            }
+          }
+        } catch (error) {
+          creditApplicationError =
+            error instanceof Error ? error.message : "Failed to check prepaid credits.";
+        }
+      } else if (
+        nextInvoiceStatus === "Pending" &&
+        (!hasExistingInvoice || previousInvoiceStatus !== "Pending")
+      ) {
+        readyForPaymentReminderInvoice = savedInvoice;
+      }
+      setInvoice(createBlankInvoice());
+      setBillingComposerMode("invoice");
+      setInvoiceChangeReason("");
+      setView("list");
+      appToast.success({
+        title: hasExistingInvoice ? "Invoice updated." : "Invoice saved.",
+      });
 
       if (creditApplicationResult?.invoice || creditApplicationResult?.applied) {
         await refreshDbFromSupabase();
@@ -8115,6 +8698,11 @@ export default function AdsPage() {
           });
         }
       }
+    } catch (error) {
+      console.error("[AdsPage] Invoice save failed", error);
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to save invoice.",
+      });
     } finally {
       appToast.dismiss(INVOICE_SUBMIT_TOAST_ID);
       setInvoiceSaving(false);
@@ -8705,7 +9293,7 @@ export default function AdsPage() {
             setInvoice({
               ...createBlankInvoice(),
               ...linkedInvoice,
-              issue_date: getTodayInAppTimeZone(),
+              issue_date: linkedInvoice.issue_date || getTodayInAppTimeZone(),
               status: normalizeInvoiceStatus(linkedInvoice.status),
               advertiser_id: linkedInvoice.advertiser_id || payload.advertiser_id || "",
               ad_ids: Array.isArray(linkedInvoice.ad_ids)
@@ -8733,6 +9321,7 @@ export default function AdsPage() {
               ad_ids: savedAd?.id ? [savedAd.id] : [],
             });
           }
+          setInvoiceChangeReason("");
           setActiveSection("Billing");
           setView("newInvoice");
         } else {
@@ -9082,6 +9671,7 @@ export default function AdsPage() {
     setAd(blankAd);
     setProduct(blankProduct);
     setInvoice(createBlankInvoice());
+    setInvoiceChangeReason("");
     setAdvertiserCreateOpen(false);
     setProductCreateOpen(false);
     setOpenProductMenuId(null);
@@ -9247,7 +9837,11 @@ export default function AdsPage() {
     }
     setInvoiceCreditsApplying(true);
     try {
-      const issueDate = getTodayInAppTimeZone();
+      const issueDate = invoice.issue_date || getTodayInAppTimeZone();
+      const changeReason = String(invoiceChangeReason || "").trim();
+      if (!changeReason) {
+        throw new Error("Add a change reason before applying credits.");
+      }
       if (!invoice.advertiser_id) {
         throw new Error("Advertiser required");
       }
@@ -9259,24 +9853,21 @@ export default function AdsPage() {
           (item) => String(item?.id || "") === invoiceId,
         ) || null;
 
-      const syncedInvoice = await upsertInvoice({
-        ...(existingInvoice || {}),
-        ...invoice,
-        ad_ids:
-          Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
-            ? invoice.ad_ids
-            : Array.isArray(existingInvoice?.ad_ids)
-              ? existingInvoice.ad_ids
-              : [],
-        items:
-          Array.isArray(invoice.items) && invoice.items.length > 0
-            ? invoice.items
-            : Array.isArray(existingInvoice?.items)
-              ? existingInvoice.items
-              : [],
-        issue_date: issueDate,
-        status: normalizeInvoiceStatus(invoice.status),
-      });
+      if (!existingInvoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      const syncedInvoice = await requestInvoiceUpdate(
+        buildInvoiceUpdatePayload({
+          draftInvoice: {
+            ...invoice,
+            issue_date: issueDate,
+            status: normalizeInvoiceStatus(invoice.status),
+          },
+          existingInvoice,
+          changeReason,
+        }),
+      );
 
       const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
         method: "POST",
@@ -9303,11 +9894,12 @@ export default function AdsPage() {
         setInvoice({
           ...createBlankInvoice(),
           ...refreshedInvoice,
-          issue_date: getTodayInAppTimeZone(),
+          issue_date: refreshedInvoice.issue_date || getTodayInAppTimeZone(),
           status: normalizeInvoiceStatus(refreshedInvoice.status),
           ad_ids: toStringArray(refreshedInvoice.ad_ids),
         });
       }
+      setInvoiceChangeReason("");
 
       if (
         data?.applied ||
@@ -9405,6 +9997,9 @@ export default function AdsPage() {
   };
 
   const openBillingCreditsComposer = () => {
+    if (!canEditBilling) {
+      return;
+    }
     const defaultAdvertiserId =
       String(advertiserViewModal?.advertiser?.id || "").trim() ||
       String(advertisers?.[0]?.id || "").trim() ||
@@ -9418,6 +10013,7 @@ export default function AdsPage() {
       status: "Paid",
       notes: "",
     });
+    setInvoiceChangeReason("");
     setView("newInvoice");
     setShowInvoiceCreateMenu(false);
   };
@@ -13389,7 +13985,7 @@ export default function AdsPage() {
                       : "Manage invoices, track payments, and view billing history."}
                   </p>
                 </div>
-                {isAdmin ? (
+                {canEditBilling ? (
                   <button
                     type="button"
                     onClick={openBillingCreditsComposer}
@@ -13492,7 +14088,7 @@ export default function AdsPage() {
                       ? "Invoices linked to your account will appear here."
                       : "Invoices are generated from approved ads."}
                   </p>
-                  {isAdmin ? (
+                  {canEditBilling ? (
                     <button
                       type="button"
                       onClick={openBillingCreditsComposer}
@@ -13504,7 +14100,7 @@ export default function AdsPage() {
                 </div>
               ) : (
                 <>
-                {isAdmin && selectedInvoiceIds.size > 0 && (
+                {canDeleteBilling && selectedInvoiceIds.size > 0 && (
                   <div className="mb-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
                     <span className="text-sm text-gray-700 font-medium">
                       {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size > 1 ? "s" : ""} selected
@@ -13523,7 +14119,7 @@ export default function AdsPage() {
                         className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 transition-colors"
                       >
                         <Trash2 size={13} />
-                        Delete {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size > 1 ? "s" : ""}
+                        {selectedBatchDeleteLabel}
                       </button>
                     </div>
                   </div>
@@ -13533,7 +14129,7 @@ export default function AdsPage() {
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
-                          {isAdmin && (
+                          {canDeleteBilling && (
                             <th className="px-4 py-3 w-10">
                               <input
                                 type="checkbox"
@@ -13591,6 +14187,7 @@ export default function AdsPage() {
                             "-";
                           const status = normalizeInvoiceStatus(item.status);
                           const statusLabel = getInvoiceStatusLabel(status);
+                          const deleteActionLabel = getInvoiceDeleteActionLabel(item);
                           const itemCount =
                             Array.isArray(item.ad_ids) && item.ad_ids.length > 0
                               ? item.ad_ids.length
@@ -13603,7 +14200,7 @@ export default function AdsPage() {
                               className="hover:bg-gray-50 transition-colors cursor-pointer group"
                               onClick={() => openInvoicePreview(item)}
                             >
-                              {isAdmin && (
+                              {canDeleteBilling && (
                                 <td
                                   className="px-4 py-4"
                                   onClick={(event) => event.stopPropagation()}
@@ -13611,6 +14208,7 @@ export default function AdsPage() {
                                   <input
                                     type="checkbox"
                                     checked={selectedInvoiceIds.has(String(item.id))}
+                                    disabled={!canSelectInvoiceForBatchDelete(item)}
                                     onChange={() => handleToggleSelectInvoice(item.id)}
                                     className="h-4 w-4 rounded border-gray-300 accent-gray-900 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                   />
@@ -13702,17 +14300,19 @@ export default function AdsPage() {
                                             <Eye size={16} className="text-gray-400" />
                                             View Invoice
                                           </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setOpenInvoiceMenuId(null);
-                                              openInvoiceEditor(item);
-                                            }}
-                                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                          >
-                                            <Edit2 size={16} className="text-gray-400" />
-                                            Edit Invoice
-                                          </button>
+                                          {canEditBilling ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setOpenInvoiceMenuId(null);
+                                                openInvoiceEditor(item);
+                                              }}
+                                              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                            >
+                                              <Edit2 size={16} className="text-gray-400" />
+                                              Edit Invoice
+                                            </button>
+                                          ) : null}
                                           {status !== "Paid" ? (
                                             <>
                                               {canPayInvoiceWithSola(item) ? (
@@ -13728,44 +14328,52 @@ export default function AdsPage() {
                                                   Pay Invoice
                                                 </button>
                                               ) : null}
-                                              <button
-                                                type="button"
-                                                onClick={() => {
-                                                  void resendInvoicePaymentReminder(item);
-                                                }}
-                                                disabled={isInvoiceActionPending(item.id)}
-                                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                              >
-                                                <Mail size={16} className="text-gray-400" />
-                                                Resend Payment Reminder
-                                              </button>
+                                              {isAdmin ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    void resendInvoicePaymentReminder(item);
+                                                  }}
+                                                  disabled={isInvoiceActionPending(item.id)}
+                                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                  <Mail size={16} className="text-gray-400" />
+                                                  Resend Payment Reminder
+                                                </button>
+                                              ) : null}
+                                              {canMarkInvoicePaid ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setOpenInvoiceMenuId(null);
+                                                    markInvoiceAsPaid(item);
+                                                  }}
+                                                  disabled={isInvoiceActionPending(item.id)}
+                                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                  <CheckCircle size={16} className="text-gray-400" />
+                                                  Mark as Paid
+                                                </button>
+                                              ) : null}
+                                            </>
+                                          ) : null}
+                                          {canDeleteBilling ? (
+                                            <>
+                                              <div className="border-t border-gray-100 my-1" />
                                               <button
                                                 type="button"
                                                 onClick={() => {
                                                   setOpenInvoiceMenuId(null);
-                                                  markInvoiceAsPaid(item);
+                                                  deleteInvoiceRecord(item.id);
                                                 }}
                                                 disabled={isInvoiceActionPending(item.id)}
-                                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                                               >
-                                                <CheckCircle size={16} className="text-gray-400" />
-                                                Mark as Paid
+                                                <Trash2 size={16} className="text-red-500" />
+                                                {deleteActionLabel}
                                               </button>
                                             </>
                                           ) : null}
-                                          <div className="border-t border-gray-100 my-1" />
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setOpenInvoiceMenuId(null);
-                                              deleteInvoiceRecord(item.id);
-                                            }}
-                                            disabled={isInvoiceActionPending(item.id)}
-                                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                          >
-                                            <Trash2 size={16} className="text-red-500" />
-                                            Delete
-                                          </button>
                                         </div>,
                                         document.body,
                                       )
@@ -13992,10 +14600,134 @@ export default function AdsPage() {
                   </div>
                 </>
               ) : null}
+
+              {invoiceDeleteModal ? (
+                <>
+                  <div
+                    onClick={closeInvoiceDeleteModal}
+                    className="fixed inset-0 bg-black/50 z-40 transition-opacity"
+                  />
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
+                      <div className="flex items-start justify-between gap-4 mb-4">
+                        <div>
+                          <h2 className="text-xl font-semibold text-gray-900">
+                            {invoiceDeleteModal.title || "Delete invoice"}
+                          </h2>
+                          <p className="mt-2 text-sm text-gray-600">
+                            {invoiceDeleteModal.description}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={closeInvoiceDeleteModal}
+                          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                          <X size={18} className="text-gray-500" />
+                        </button>
+                      </div>
+
+                      {Array.isArray(invoiceDeleteModal.impactLines) &&
+                      invoiceDeleteModal.impactLines.length > 0 ? (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                          <div className="font-medium">
+                            {invoiceDeleteModal.blocked ? "Why this is blocked" : "Impact summary"}
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {invoiceDeleteModal.impactLines.map((line) => (
+                              <div key={line}>{line}</div>
+                            ))}
+                          </div>
+                          {invoiceDeleteModal.requiresConfirmationText ? (
+                            <div className="mt-2 text-amber-800">
+                              Type{" "}
+                              <span className="font-semibold">
+                                {invoiceDeleteModal.requiredConfirmationText}
+                              </span>{" "}
+                              to continue.
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      {invoiceDeleteModal.requiresReason || invoiceDeleteModal.requiresConfirmationText ? (
+                        <div className="mt-5 space-y-4">
+                          {invoiceDeleteModal.requiresReason ? (
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                {invoiceDeleteModal.reasonLabel || "Reason"}
+                              </label>
+                              <textarea
+                                value={invoiceDeleteForm.reason}
+                                onChange={(event) =>
+                                  setInvoiceDeleteForm((current) => ({
+                                    ...current,
+                                    reason: event.target.value,
+                                  }))
+                                }
+                                rows={3}
+                                placeholder={invoiceDeleteModal.reasonPlaceholder || "Explain why this action is needed."}
+                                className="w-full rounded-lg border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                              />
+                            </div>
+                          ) : null}
+
+                          {invoiceDeleteModal.requiresConfirmationText ? (
+                            <div>
+                              <label className="block text-xs font-semibold text-gray-700 mb-2">
+                                Confirmation Text
+                              </label>
+                              <input
+                                type="text"
+                                value={invoiceDeleteForm.confirmationText}
+                                onChange={(event) =>
+                                  setInvoiceDeleteForm((current) => ({
+                                    ...current,
+                                    confirmationText: event.target.value,
+                                  }))
+                                }
+                                placeholder={invoiceDeleteModal.requiredConfirmationText}
+                                className="w-full rounded-lg border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-6 flex gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void confirmInvoiceDelete();
+                          }}
+                          disabled={pendingInvoiceActionIds.length > 0}
+                          className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+                            invoiceDeleteModal.blocked
+                              ? "bg-gray-900 hover:bg-gray-800"
+                              : "bg-red-600 hover:bg-red-700"
+                          }`}
+                        >
+                          {pendingInvoiceActionIds.length > 0
+                            ? invoiceDeleteModal.pendingLabel || "Updating..."
+                            : invoiceDeleteModal.confirmLabel || "Confirm"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={closeInvoiceDeleteModal}
+                          disabled={pendingInvoiceActionIds.length > 0}
+                          className="flex-1 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
 
-          {activeSection === "Billing" && view === "newInvoice" && isAdmin && (
+          {activeSection === "Billing" && view === "newInvoice" && canEditBilling && (
             <div className="max-w-[1400px] mx-auto">
               <button
                 type="button"
@@ -14003,6 +14735,7 @@ export default function AdsPage() {
                   setView("list");
                   setBillingComposerMode("invoice");
                   setInvoice(createBlankInvoice());
+                  setInvoiceChangeReason("");
                 }}
                 disabled={invoiceSaving}
                 className="mb-6 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -14015,18 +14748,40 @@ export default function AdsPage() {
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
                   <h2 className="text-2xl font-semibold text-gray-900 mb-2">
                     {invoice.id
-                      ? "Edit Invoice"
+                      ? isEditingCreditRecord
+                        ? "Edit Credit Record"
+                        : "Edit Invoice"
                       : isCreditComposer
                         ? "Add Credits"
                         : "Create Invoice"}
                   </h2>
                   <p className="text-sm text-gray-500 mb-8">
-                    {isCreditComposer
+                    {isEditingCreditRecord
+                      ? "Update the credit record total or metadata. Advertiser, linked items, and paid state stay locked."
+                      : isCreditComposer
                       ? "Create a CRE-prefixed billing record and add prepaid credits to an advertiser."
                       : "Select an advertiser and include linked ads for billing"}
                   </p>
 
                   <div className="space-y-6">
+                    {isEditingCreditRecord ? (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                        Editing a credit record requires a reason. The advertiser, linked items, and paid state cannot change.
+                      </div>
+                    ) : isReconcileLockedInvoiceEdit ? (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+                        This invoice is inconsistent. Repair its totals, linked ads, or line items here. Advertiser, status, and recorded payment stay locked until the record is consistent again.
+                      </div>
+                    ) : isLockedInvoiceEdit ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        This invoice has recorded payment. Only metadata edits are allowed. Amount, status, linked ads, and line items stay locked.
+                      </div>
+                    ) : isEditingExistingInvoice ? (
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                        Existing invoices require a change reason before updates are saved.
+                      </div>
+                    ) : null}
+
                     <div>
                       <label className="block text-xs font-semibold text-gray-700 mb-2">
                         Invoice Number
@@ -14061,6 +14816,9 @@ export default function AdsPage() {
                             advertiser_id: event.target.value,
                             ad_ids: [],
                           })
+                        }
+                        disabled={
+                          isLockedInvoiceEdit || isRepairOnlyInvoiceEdit || isEditingCreditRecord
                         }
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
@@ -14112,9 +14870,7 @@ export default function AdsPage() {
                           </div>
                           <div className="mt-2 text-xs text-blue-800">
                             {isCreditComposer
-                              ? `Balance after top-up: ${formatCurrency(
-                                  selectedAdvertiserCredits + invoicePreviewAmount,
-                                )}`
+                              ? `Balance after save: ${formatCurrency(creditBalanceAfterSave)}`
                               : invoicePreviewAmount <= 0
                                 ? "Enter an invoice total to check credit coverage."
                                 : creditsCoverInvoiceTotal
@@ -14133,6 +14889,7 @@ export default function AdsPage() {
                           type="number"
                           step="0.01"
                           value={invoice.amount}
+                          disabled={isLockedInvoiceEdit}
                           onChange={(event) => {
                             const nextAmountText = event.target.value;
                             if (isCreditComposer) {
@@ -14230,7 +14987,12 @@ export default function AdsPage() {
                         onChange={(event) =>
                           setInvoice({ ...invoice, status: event.target.value })
                         }
-                        disabled={isCreditComposer || isInvoicePaidViaCredits(invoice)}
+                        disabled={
+                          isCreditComposer ||
+                          isInvoicePaidViaCredits(invoice) ||
+                          isLockedInvoiceEdit ||
+                          isRepairOnlyInvoiceEdit
+                        }
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
                         <option value="Paid">Paid</option>
@@ -14245,8 +15007,31 @@ export default function AdsPage() {
                         <p className="mt-2 text-xs text-blue-700">
                           Credit-paid invoices stay marked as Paid.
                         </p>
+                      ) : isRepairOnlyInvoiceEdit ? (
+                        <p className="mt-2 text-xs text-rose-700">
+                          Reconciliation repairs keep the current advertiser, status, and recorded payment locked.
+                        </p>
+                      ) : isLockedInvoiceEdit ? (
+                        <p className="mt-2 text-xs text-amber-700">
+                          Paid or partially paid invoices keep their current status.
+                        </p>
                       ) : null}
                     </div>
+
+                    {isEditingExistingInvoice ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-2">
+                          Change Reason
+                        </label>
+                        <textarea
+                          value={invoiceChangeReason}
+                          onChange={(event) => setInvoiceChangeReason(event.target.value)}
+                          rows={3}
+                          placeholder="Explain why this invoice or credit record is being updated."
+                          className="w-full rounded-lg border border-gray-200 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="flex gap-3">
                       <button
@@ -14257,18 +15042,23 @@ export default function AdsPage() {
                       >
                         {invoiceSaving
                           ? "Submitting..."
-                          : isCreditComposer
+                          : isEditingCreditRecord
+                            ? "Save Credit Record"
+                            : isCreditComposer
                             ? "Add Credits"
                             : "Save Invoice"}
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          setInvoice({
-                            ...createBlankInvoice(),
-                            status: isCreditComposer ? "Paid" : "Pending",
-                          })
-                        }
+                        onClick={() => {
+                          setInvoiceChangeReason("");
+                          setInvoice(
+                            {
+                              ...createBlankInvoice(),
+                              status: isCreditComposer ? "Paid" : "Pending",
+                            },
+                          );
+                        }}
                         disabled={invoiceSaving}
                         className="rounded-lg border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
@@ -14280,7 +15070,11 @@ export default function AdsPage() {
 
                 <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-10 h-fit sticky top-8">
                   <div className="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    {isCreditComposer ? "Credit Preview" : "Invoice Preview"}
+                    {isEditingCreditRecord
+                      ? "Credit Record Preview"
+                      : isCreditComposer
+                        ? "Credit Preview"
+                        : "Invoice Preview"}
                   </div>
 
                   <div className="flex items-start justify-between mb-10 pb-8 border-b border-gray-200">

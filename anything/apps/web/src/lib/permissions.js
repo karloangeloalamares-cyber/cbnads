@@ -53,6 +53,7 @@ const permissionMatrix = {
     "billing:view",
     "billing:edit",
     "billing:mark_paid",
+    "billing:delete",
     "whatsapp:view",
     "notifications:view",
   ]),
