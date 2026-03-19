@@ -19,6 +19,7 @@ import {
   getCreditInvoiceRestrictedChanges,
   getInvoiceMutationGuardrail,
   getReconciliationInvoiceRestrictedChanges,
+  getSolaCreditInvoiceRestrictedChanges,
   getSolaSettledInvoiceRestrictedChanges,
   getSettledInvoiceRestrictedChanges,
   hasInvoiceRecordedPayment,
@@ -30,6 +31,7 @@ import {
 import {
   invoicePaymentProviderRequiresNote,
   invoicePaymentProviderRequiresReference,
+  isSolaInvoicePaymentProvider,
   normalizeInvoicePaymentProvider,
 } from "../../../lib/invoicePayment.js";
 import { can } from "../../../lib/permissions.js";
@@ -335,15 +337,62 @@ export async function PUT(request) {
 
     const reconciliationRequired = isInvoiceReconciliationRequired(currentInvoiceWithItems);
 
+    const nextPaymentProvider = normalizeInvoicePaymentProvider(
+      payment_provider !== undefined ? payment_provider : currentInvoice.payment_provider,
+    );
+    const nextPaymentReference =
+      payment_reference !== undefined
+        ? String(payment_reference || "").trim()
+        : String(currentInvoice.payment_reference || "").trim();
+    const nextPaymentNote =
+      payment_note !== undefined
+        ? String(payment_note || "").trim()
+        : String(currentInvoice.payment_note || "").trim();
+    const nextRecordedPaidDate =
+      paid_date !== undefined
+        ? String(paid_date || "").trim()
+        : String(currentInvoice.paid_date || "").trim();
+
     if (isCreditInvoiceRecord(currentInvoice)) {
-      const restrictedChanges = getCreditInvoiceRestrictedChanges(currentInvoiceWithItems, body);
+      const restrictedChanges = isSolaInvoicePaymentProvider(currentInvoice.payment_provider)
+        ? getSolaCreditInvoiceRestrictedChanges(currentInvoiceWithItems, body)
+        : getCreditInvoiceRestrictedChanges(currentInvoiceWithItems, body);
       if (restrictedChanges.length > 0) {
         return Response.json(
           {
-            error: `Credit records cannot change these fields: ${formatGuardrailFieldList(
-              restrictedChanges,
-            )}.`,
+            error: isSolaInvoicePaymentProvider(currentInvoice.payment_provider)
+              ? `Sola-settled credit records only allow non-financial metadata edits. Locked fields: ${formatGuardrailFieldList(
+                  restrictedChanges,
+                )}.`
+              : `Credit records cannot change these fields: ${formatGuardrailFieldList(
+                  restrictedChanges,
+                )}.`,
           },
+          { status: 400 },
+        );
+      }
+
+      if (!nextPaymentProvider) {
+        return Response.json(
+          { error: "Paid credit records require a payment provider." },
+          { status: 400 },
+        );
+      }
+      if (
+        invoicePaymentProviderRequiresReference(nextPaymentProvider) &&
+        !nextPaymentReference
+      ) {
+        return Response.json(
+          { error: "This payment provider requires a transaction or reference number." },
+          { status: 400 },
+        );
+      }
+      if (
+        invoicePaymentProviderRequiresNote(nextPaymentProvider) &&
+        !nextPaymentNote
+      ) {
+        return Response.json(
+          { error: "Other payment methods require a payment note." },
           { status: 400 },
         );
       }
@@ -377,6 +426,19 @@ export async function PUT(request) {
       if (currentInvoice.advertiser_id) {
         await recalculateAdvertiserSpend(currentInvoice.advertiser_id);
       }
+
+      const metadataPatch = {
+        updated_at: new Date().toISOString(),
+        paid_date: nextRecordedPaidDate || getTodayInAppTimeZone(),
+        payment_provider: nextPaymentProvider,
+        payment_reference: nextPaymentReference || null,
+        payment_note: nextPaymentNote || null,
+      };
+      const { error: creditMetadataError } = await supabase
+        .from(table("invoices"))
+        .update(metadataPatch)
+        .eq("id", id);
+      if (creditMetadataError) throw creditMetadataError;
 
       const { data: updatedInvoice, error: updatedInvoiceError } = await supabase
         .from(table("invoices"))
@@ -436,18 +498,6 @@ export async function PUT(request) {
 
     const nextAmountPaid =
       amount_paid !== undefined ? toNumber(amount_paid, 0) : toNumber(currentInvoice.amount_paid, 0);
-    const nextPaymentProvider = normalizeInvoicePaymentProvider(
-      payment_provider !== undefined ? payment_provider : currentInvoice.payment_provider,
-    );
-    const nextPaymentReference =
-      payment_reference !== undefined
-        ? String(payment_reference || "").trim()
-        : String(currentInvoice.payment_reference || "").trim();
-    const nextPaymentNote =
-      payment_note !== undefined
-        ? String(payment_note || "").trim()
-        : String(currentInvoice.payment_note || "").trim();
-
     let normalizedItems = Array.isArray(items)
       ? items.map((item) => {
           const quantity = toNumber(item?.quantity, 1) || 1;

@@ -40,6 +40,10 @@ const numberOrZero = (value) => {
 
 const normalizeText = (value) => String(value || '').trim().toLowerCase();
 const normalizeId = (value) => String(value || '').trim();
+const normalizeSortOrder = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
 const sameId = (left, right) => {
   const normalizedLeft = normalizeId(left);
   const normalizedRight = normalizeId(right);
@@ -845,6 +849,28 @@ const baseDb = (users = []) => {
   };
 };
 
+const sortProductRecords = (products = []) =>
+  [...(Array.isArray(products) ? products : [])]
+    .map((product, index) => ({
+      product,
+      index,
+      sortOrder: normalizeSortOrder(product?.sort_order),
+    }))
+    .sort((left, right) => {
+      const leftOrder = left.sortOrder ?? left.index;
+      const rightOrder = right.sortOrder ?? right.index;
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ product }, index) => ({
+      ...product,
+      sort_order: normalizeSortOrder(product?.sort_order) ?? index,
+    }));
+
 const readLegacyUsersFromDbStorage = () => {
   const s = storage();
   if (!s) {
@@ -900,7 +926,7 @@ const normalizeDb = (rawValue) => {
     version: DB_VERSION,
     users: normalizeUsers(raw.users ?? fallbackUsers),
     advertisers: Array.isArray(raw.advertisers) ? raw.advertisers : [],
-    products: Array.isArray(raw.products) ? raw.products : [],
+    products: sortProductRecords(Array.isArray(raw.products) ? raw.products : []),
     ads: Array.isArray(raw.ads) ? raw.ads : [],
     pending_ads: Array.isArray(raw.pending_ads) ? raw.pending_ads : [],
     invoices: Array.isArray(raw.invoices) ? raw.invoices : [],
@@ -1100,6 +1126,7 @@ const fromProductRow = (row) => ({
   placement: row.placement || 'WhatsApp',
   price: toMoney(row.price),
   description: row.description || '',
+  sort_order: normalizeSortOrder(row.sort_order) ?? 0,
   created_at: row.created_at || nowIso(),
   updated_at: row.updated_at || nowIso(),
 });
@@ -1110,6 +1137,7 @@ const toProductRow = (input) => ({
   placement: String(input.placement || 'WhatsApp').trim() || 'WhatsApp',
   price: toMoney(input.price),
   description: String(input.description || '').trim(),
+  sort_order: normalizeSortOrder(input.sort_order) ?? 0,
   created_at: input.created_at || nowIso(),
   updated_at: input.updated_at || nowIso(),
 });
@@ -2200,32 +2228,84 @@ export const upsertProduct = async (input) => {
   let saved = null;
   await updateDb((db) => {
     const now = nowIso();
+    const existingIndex = db.products.findIndex((item) => item.id === input.id);
+    const nextSortOrder =
+      normalizeSortOrder(input.sort_order) ??
+      (existingIndex >= 0
+        ? normalizeSortOrder(db.products[existingIndex]?.sort_order) ?? existingIndex
+        : db.products.length);
     const payload = {
       id: input.id || createId('prd'),
       product_name: (input.product_name || '').trim(),
       placement: (input.placement || 'WhatsApp').trim() || 'WhatsApp',
       price: toMoney(input.price),
       description: (input.description || '').trim(),
+      sort_order: nextSortOrder,
       created_at: input.created_at || now,
       updated_at: now,
     };
 
     const index = db.products.findIndex((item) => item.id === payload.id);
     if (index === -1) {
-      db.products.unshift(payload);
+      db.products.push(payload);
     } else {
       payload.created_at = db.products[index].created_at ?? payload.created_at;
       db.products[index] = { ...db.products[index], ...payload };
     }
-    saved = payload;
+    db.products = sortProductRecords(db.products).map((item, itemIndex) => ({
+      ...item,
+      sort_order: itemIndex,
+    }));
+    saved =
+      db.products.find((item) => item.id === payload.id) ||
+      payload;
     return db;
   });
   return saved;
 };
 
+export const reorderProducts = async (orderedIds = []) => {
+  await updateDb((db) => {
+    const orderList = Array.isArray(orderedIds)
+      ? orderedIds.map((id) => normalizeId(id)).filter(Boolean)
+      : [];
+    if (orderList.length === 0) {
+      return db;
+    }
+
+    const existingById = new Map(
+      db.products.map((item) => [normalizeId(item.id), item]),
+    );
+    const nextProducts = [];
+
+    for (const productId of orderList) {
+      const product = existingById.get(productId);
+      if (!product) {
+        continue;
+      }
+      nextProducts.push(product);
+      existingById.delete(productId);
+    }
+
+    nextProducts.push(...sortProductRecords(Array.from(existingById.values())));
+
+    db.products = nextProducts.map((item, index) => ({
+      ...item,
+      sort_order: index,
+      updated_at: nowIso(),
+    }));
+    return db;
+  });
+};
+
 export const deleteProduct = async (productId) => {
   await updateDb((db) => {
-    db.products = db.products.filter((item) => item.id !== productId);
+    db.products = db.products
+      .filter((item) => item.id !== productId)
+      .map((item, index) => ({
+        ...item,
+        sort_order: index,
+      }));
     db.ads = db.ads.map((ad) =>
       ad.product_id === productId ? { ...ad, product_id: '', product_name: ad.product_name || '' } : ad
     );

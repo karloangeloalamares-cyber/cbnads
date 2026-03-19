@@ -8,6 +8,8 @@ export function meta() {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { createPortal } from "react-dom";
+import { closestCenter, DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import {
   Bell,
   LogOut,
@@ -22,6 +24,7 @@ import {
   Search,
   Download,
   Filter,
+  GripVertical,
   Clock,
   Clock3,
   CheckCircle,
@@ -117,6 +120,7 @@ import {
   invalidateDbCache,
   getReconciliationReport,
   readDb,
+  reorderProducts,
   rejectPendingAd,
   resolveSupabaseSessionUser,
   saveAdminSettings,
@@ -488,6 +492,148 @@ const formatProductsDate = (value) => {
 
   return parsed.toLocaleDateString("en-US");
 };
+
+const getProductSortOrder = (product, fallbackIndex = 0) => {
+  const parsed = Number(product?.sort_order);
+  return Number.isFinite(parsed) ? parsed : fallbackIndex;
+};
+
+const sortProductsForDisplay = (products = []) =>
+  [...(Array.isArray(products) ? products : [])]
+    .map((product, index) => ({
+      product,
+      index,
+      sortOrder: getProductSortOrder(product, index),
+    }))
+    .sort((left, right) => {
+      if (left.sortOrder !== right.sortOrder) {
+        return left.sortOrder - right.sortOrder;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ product }) => product);
+
+function ProductSortableRow({
+  item,
+  canEditProducts,
+  isMenuOpen,
+  productMenuCoordinates,
+  productMenuRef,
+  openProductMenu,
+  openProductEdit,
+  openProductDelete,
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: String(item.id || ""),
+    disabled: !canEditProducts,
+  });
+
+  const rowStyle = {
+    transform: transform
+      ? `translate3d(${Math.round(transform.x)}px, ${Math.round(transform.y)}px, 0)`
+      : undefined,
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={rowStyle}
+      className={`grid grid-cols-[56px_minmax(0,1.9fr)_140px_140px_140px_80px] items-center border-t border-gray-200 ${
+        isDragging ? "z-20 rounded-lg border border-gray-300 bg-white shadow-lg" : "bg-white"
+      }`}
+    >
+      <div className="px-4 py-3.5 text-xs text-gray-400">
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          disabled={!canEditProducts}
+          aria-label={`Drag to reorder ${item.product_name}`}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white ${
+            canEditProducts
+              ? "cursor-grab text-gray-500 hover:border-gray-300 hover:text-gray-700 active:cursor-grabbing"
+              : "cursor-default text-gray-300"
+          }`}
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical size={16} />
+        </button>
+      </div>
+
+      <div className="px-6 py-3.5 text-xs text-gray-900">{item.product_name}</div>
+
+      <div className="px-6 py-3.5">
+        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
+          {item.placement || "N/A"}
+        </span>
+      </div>
+
+      <div className="px-6 py-3.5 text-xs font-semibold text-gray-900">
+        {formatCurrency(item.price)}
+      </div>
+
+      <div className="px-6 py-3.5 text-xs text-gray-500">
+        {formatProductsDate(item.created_at)}
+      </div>
+
+      <div
+        className="relative px-6 py-3.5 text-right"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={(event) => openProductMenu(item.id, event)}
+          data-product-menu-trigger="true"
+          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+        >
+          <MoreVertical size={18} className="text-gray-500" />
+        </button>
+
+        {isMenuOpen && typeof document !== "undefined"
+          ? createPortal(
+              <div
+                ref={productMenuRef}
+                className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
+                style={{
+                  top: `${productMenuCoordinates.top}px`,
+                  left: `${productMenuCoordinates.left}px`,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => openProductEdit(item)}
+                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                >
+                  <Edit2 size={16} className="text-gray-400" />
+                  Edit
+                </button>
+                <div className="border-t border-gray-100 my-1" />
+                <button
+                  type="button"
+                  onClick={() => openProductDelete(item)}
+                  className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
+                >
+                  <Trash2 size={16} className="text-red-500" />
+                  Delete
+                </button>
+              </div>,
+              document.body,
+            )
+          : null}
+      </div>
+    </div>
+  );
+}
 
 const normalizeInvoiceStatus = (value) => {
   const status = String(value || "").trim();
@@ -3597,7 +3743,7 @@ export default function AdsPage() {
   }, [adsShowAdvancedFilters]);
 
   const allAdvertisers = db.advertisers || [];
-  const products = db.products || [];
+  const products = useMemo(() => sortProductsForDisplay(db.products || []), [db.products]);
   const allAds = db.ads || [];
   const allPending = db.pending_ads || [];
   const allInvoices = db.invoices || [];
@@ -3896,6 +4042,7 @@ export default function AdsPage() {
   const settledInvoiceSourceRecord = persistedEditingInvoice || invoice;
   const isEditingCreditRecord =
     isEditingExistingInvoice && isCreditInvoiceRecord(settledInvoiceSourceRecord);
+  const isCreditInvoiceFlow = isCreditComposer || isEditingCreditRecord;
   const isReconcileLockedInvoiceEdit =
     isEditingExistingInvoice &&
     !isEditingCreditRecord &&
@@ -3908,21 +4055,26 @@ export default function AdsPage() {
   const isRepairOnlyInvoiceEdit = isReconcileLockedInvoiceEdit;
   const isSolaSettledInvoiceEdit =
     isLockedInvoiceEdit && isSolaSettledInvoice(settledInvoiceSourceRecord);
+  const isSolaCreditRecordEdit =
+    isEditingCreditRecord &&
+    isSolaInvoicePaymentProvider(
+      settledInvoiceSourceRecord?.payment_provider || invoice?.payment_provider,
+    );
   const shouldCaptureInvoicePaymentDetails =
-    !isCreditComposer &&
-    !isInvoicePaidViaCredits(invoice) &&
-    (normalizeInvoiceStatus(invoice.status) === "Paid" ||
-      normalizeInvoiceStatus(invoice.status) === "Partial" ||
-      (Number(invoice.amount_paid ?? 0) || 0) > 0);
+    isCreditInvoiceFlow ||
+    (!isInvoicePaidViaCredits(invoice) &&
+      (normalizeInvoiceStatus(invoice.status) === "Paid" ||
+        normalizeInvoiceStatus(invoice.status) === "Partial" ||
+        (Number(invoice.amount_paid ?? 0) || 0) > 0));
   const isInvoicePaymentMetadataLocked =
-    isEditingCreditRecord ||
     isRepairOnlyInvoiceEdit ||
     isInvoicePaidViaCredits(invoice) ||
-    isSolaSettledInvoiceEdit;
+    isSolaSettledInvoiceEdit ||
+    isSolaCreditRecordEdit;
   const invoicePaymentProviderLabel = getInvoicePaymentProviderLabel(invoice.payment_provider);
 
   const invoicePreviewItems = useMemo(() => {
-    if (isCreditComposer) {
+    if (isCreditInvoiceFlow) {
       return [
         {
           key: "credit-top-up",
@@ -3969,7 +4121,7 @@ export default function AdsPage() {
       },
     ];
   }, [
-    isCreditComposer,
+    isCreditInvoiceFlow,
     invoice.items,
     invoice.amount,
     invoice.total,
@@ -4006,21 +4158,21 @@ export default function AdsPage() {
           0,
       ) || 0
     : 0;
-  const creditBalanceAfterSave = isCreditComposer
+  const creditBalanceAfterSave = isCreditInvoiceFlow
     ? selectedAdvertiserCredits + invoicePreviewAmount - persistedEditingCreditAmount
     : selectedAdvertiserCredits;
   const creditsCoverInvoiceTotal =
-    !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
+    !isCreditInvoiceFlow && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
   const creditsInsufficientForInvoice =
-    !isCreditComposer && invoicePreviewAmount > 0 && selectedAdvertiserCredits < invoicePreviewAmount;
+    !isCreditInvoiceFlow && invoicePreviewAmount > 0 && selectedAdvertiserCredits < invoicePreviewAmount;
   const canApplyCreditsToInvoice =
-    !isCreditComposer &&
+    !isCreditInvoiceFlow &&
     Boolean(String(invoice?.id || "").trim()) &&
     !isInvoicePaidViaCredits(invoice) &&
     invoicePreviewStatus === "Pending" &&
     creditsCoverInvoiceTotal;
   const canSendLowCreditReminder =
-    !isCreditComposer &&
+    !isCreditInvoiceFlow &&
     Boolean(String(invoice?.id || "").trim()) &&
     !isInvoicePaidViaCredits(invoice) &&
     (invoicePreviewStatus === "Pending" || (invoicePreviewStatus === "Paid" && (Number(invoice?.amount_paid ?? 0) || 0) <= 0)) &&
@@ -4096,8 +4248,11 @@ export default function AdsPage() {
       .map((adId) => ads.find((item) => String(item.id) === String(adId)))
       .filter(Boolean);
     const total = Number(invoicePreviewModal.total || invoicePreviewModal.amount || 0) || 0;
+    const isCreditPreviewInvoice = isCreditInvoiceRecord(invoicePreviewModal);
     const primaryDescription =
-      invoiceItems.length === 1
+      isCreditPreviewInvoice
+        ? "Prepaid credit top-up"
+        : invoiceItems.length === 1
         ? invoiceItems[0].description || "Advertising services"
         : linkedAds.length === 1
           ? linkedAds[0].product_name
@@ -4127,6 +4282,7 @@ export default function AdsPage() {
       items: invoiceItems,
       total,
       primaryDescription,
+      isCreditPreviewInvoice,
       attentionLine,
       contactEmail,
       paymentProvider,
@@ -5156,6 +5312,13 @@ export default function AdsPage() {
   );
 
   const filteredProducts = useMemo(() => products, [products]);
+  const productDragSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+  );
 
   const filteredInvoices = useMemo(() => {
     const baseFiltered = invoices.filter((item) => {
@@ -8461,6 +8624,10 @@ export default function AdsPage() {
           Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0,
         );
         const reason = String(invoice.notes || "").trim();
+        const paymentProvider = normalizeInvoicePaymentProvider(invoice.payment_provider);
+        const paymentReference = String(invoice.payment_reference || "").trim();
+        const paymentNote = String(invoice.payment_note || "").trim();
+        const paidDate = String(invoice.paid_date || getTodayInAppTimeZone()).trim();
 
         if (!advertiserId) {
           throw new Error("Advertiser required");
@@ -8470,6 +8637,18 @@ export default function AdsPage() {
         }
         if (!reason) {
           throw new Error("Reason required");
+        }
+        if (!paymentProvider) {
+          throw new Error("Select how this credit record was paid.");
+        }
+        if (
+          invoicePaymentProviderRequiresReference(paymentProvider) &&
+          !paymentReference
+        ) {
+          throw new Error("Enter the transaction or reference number.");
+        }
+        if (invoicePaymentProviderRequiresNote(paymentProvider) && !paymentNote) {
+          throw new Error("Add a payment note for other payment methods.");
         }
 
         if (isEditingCreditRecord) {
@@ -8488,6 +8667,10 @@ export default function AdsPage() {
                 ...invoice,
                 issue_date: issueDate,
                 status: "Paid",
+                paid_date: paidDate,
+                payment_provider: paymentProvider,
+                payment_reference: paymentReference,
+                payment_note: paymentNote,
               },
               existingInvoice,
               changeReason,
@@ -8512,6 +8695,11 @@ export default function AdsPage() {
           advertiserId,
           amount: absoluteAmount,
           reason,
+          paidDate,
+          paymentProvider,
+          paymentReference,
+          paymentNote,
+          requirePaymentDetails: true,
         });
 
         if (
@@ -9793,6 +9981,11 @@ export default function AdsPage() {
     advertiserId,
     amount,
     reason,
+    paidDate = "",
+    paymentProvider = "",
+    paymentReference = "",
+    paymentNote = "",
+    requirePaymentDetails = false,
   }) => {
     const normalizedAdvertiserId = String(advertiserId || "").trim();
     if (!normalizedAdvertiserId) {
@@ -9812,6 +10005,11 @@ export default function AdsPage() {
         body: JSON.stringify({
           amount,
           reason,
+          paid_date: paidDate,
+          payment_provider: paymentProvider,
+          payment_reference: paymentReference,
+          payment_note: paymentNote,
+          require_payment_details: requirePaymentDetails,
         }),
       },
     );
@@ -10016,6 +10214,7 @@ export default function AdsPage() {
       amount: "",
       total: "",
       status: "Paid",
+      paid_date: getTodayInAppTimeZone(),
       notes: "",
     });
     setInvoiceChangeReason("");
@@ -10209,6 +10408,32 @@ export default function AdsPage() {
   const openProductCreate = () => {
     setProduct(blankProduct);
     setProductCreateOpen(true);
+  };
+
+  const handleProductSortEnd = async ({ active, over }) => {
+    if (!canEditProducts || !active?.id || !over?.id || active.id === over.id) {
+      return;
+    }
+
+    try {
+      const orderedIds = filteredProducts
+        .map((item) => String(item.id || "").trim())
+        .filter(Boolean);
+      const oldIndex = orderedIds.indexOf(String(active.id));
+      const newIndex = orderedIds.indexOf(String(over.id));
+
+      if (oldIndex === -1 || newIndex === -1 || oldIndex === newIndex) {
+        return;
+      }
+
+      await reorderProducts(arrayMove(orderedIds, oldIndex, newIndex));
+      setDb(readDb());
+      appToast.success({ title: "Product order saved." });
+    } catch (error) {
+      appToast.error({
+        title: error instanceof Error ? error.message : "Failed to reorder products.",
+      });
+    }
   };
 
   const saveNewProduct = async (type) => {
@@ -13752,92 +13977,50 @@ export default function AdsPage() {
                 </div>
               ) : (
                 <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
-                          Product Name
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
-                          Placement
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
-                          Price
-                        </th>
-                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-700">
-                          Created
-                        </th>
-                        <th className="px-6 py-3 text-right text-[11px] font-semibold text-gray-700">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {filteredProducts.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-3.5 text-xs text-gray-900">
-                            {item.product_name}
-                          </td>
-                          <td className="px-6 py-3.5">
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                              {item.placement || "N/A"}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3.5 text-xs font-semibold text-gray-900">
-                            {formatCurrency(item.price)}
-                          </td>
-                          <td className="px-6 py-3.5 text-xs text-gray-500">
-                            {formatProductsDate(item.created_at)}
-                          </td>
-                          <td
-                            className="px-6 py-3.5 text-right relative"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={(event) => openProductMenu(item.id, event)}
-                              data-product-menu-trigger="true"
-                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                            >
-                              <MoreVertical size={18} className="text-gray-500" />
-                            </button>
+                  {canEditProducts ? (
+                    <div className="border-b border-gray-200 bg-gray-50 px-6 py-3 text-xs text-gray-500">
+                      Drag products by the handle to change their order.
+                    </div>
+                  ) : null}
+                  <div className="min-w-[860px]">
+                    <div className="grid grid-cols-[56px_minmax(0,1.9fr)_140px_140px_140px_80px] bg-gray-50 text-[11px] font-semibold text-gray-700">
+                      <div className="px-4 py-3">Order</div>
+                      <div className="px-6 py-3">Product Name</div>
+                      <div className="px-6 py-3">Placement</div>
+                      <div className="px-6 py-3">Price</div>
+                      <div className="px-6 py-3">Created</div>
+                      <div className="px-6 py-3 text-right">Actions</div>
+                    </div>
 
-                            {openProductMenuId === item.id && typeof document !== "undefined"
-                              ? createPortal(
-                                  <div
-                                    ref={productMenuRef}
-                                    className="fixed w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[200] py-1"
-                                    style={{
-                                      top: `${productMenuCoordinates.top}px`,
-                                      left: `${productMenuCoordinates.left}px`,
-                                    }}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => openProductEdit(item)}
-                                      className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                    >
-                                      <Edit2 size={16} className="text-gray-400" />
-                                      Edit
-                                    </button>
-                                    <div className="border-t border-gray-100 my-1" />
-                                    <button
-                                      type="button"
-                                      onClick={() => openProductDelete(item)}
-                                      className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-3 transition-colors"
-                                    >
-                                      <Trash2 size={16} className="text-red-500" />
-                                      Delete
-                                    </button>
-                                  </div>,
-                                  document.body,
-                                )
-                              : null}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                    <DndContext
+                      sensors={productDragSensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={(event) => {
+                        void handleProductSortEnd(event);
+                      }}
+                    >
+                      <SortableContext
+                        items={filteredProducts.map((item) => String(item.id || ""))}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <div>
+                          {filteredProducts.map((item) => (
+                            <ProductSortableRow
+                              key={item.id}
+                              item={item}
+                              canEditProducts={canEditProducts}
+                              isMenuOpen={openProductMenuId === item.id}
+                              productMenuCoordinates={productMenuCoordinates}
+                              productMenuRef={productMenuRef}
+                              openProductMenu={openProductMenu}
+                              openProductEdit={openProductEdit}
+                              openProductDelete={openProductDelete}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  </div>
                 </div>
               )}
 
@@ -14778,7 +14961,9 @@ export default function AdsPage() {
                   </h2>
                   <p className="text-sm text-gray-500 mb-8">
                     {isEditingCreditRecord
-                      ? "Update the credit record total or metadata. Advertiser, linked items, and paid state stay locked."
+                      ? isSolaCreditRecordEdit
+                        ? "Update metadata on this Sola-settled credit record. Advertiser, credited amount, and settlement proof stay locked."
+                        : "Update the credit record total or metadata. Advertiser and paid state stay locked."
                       : isCreditComposer
                       ? "Create a CRE-prefixed billing record and add prepaid credits to an advertiser."
                       : "Select an advertiser and include linked ads for billing"}
@@ -14786,8 +14971,16 @@ export default function AdsPage() {
 
                   <div className="space-y-6">
                     {isEditingCreditRecord ? (
-                      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-                        Editing a credit record requires a reason. The advertiser, linked items, and paid state cannot change.
+                      <div
+                        className={`rounded-lg px-4 py-3 text-sm ${
+                          isSolaCreditRecordEdit
+                            ? "border border-amber-200 bg-amber-50 text-amber-900"
+                            : "border border-blue-200 bg-blue-50 text-blue-900"
+                        }`}
+                      >
+                        {isSolaCreditRecordEdit
+                          ? "Editing a Sola-settled credit record requires a reason. The advertiser, credited amount, and settlement proof stay locked."
+                          : "Editing a credit record requires a reason. The advertiser and paid state cannot change."}
                       </div>
                     ) : isReconcileLockedInvoiceEdit ? (
                       <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
@@ -14849,13 +15042,13 @@ export default function AdsPage() {
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
-                                {isCreditComposer ? "Current Credit Balance" : "Prepaid Credits"}
+                                {isCreditInvoiceFlow ? "Current Credit Balance" : "Prepaid Credits"}
                               </div>
                               <div className="mt-1 text-sm font-semibold text-blue-900">
                                 {formatCurrency(selectedAdvertiserCredits)}
                               </div>
                             </div>
-                            {!isCreditComposer && canApplyCreditsToInvoice ? (
+                            {!isCreditInvoiceFlow && canApplyCreditsToInvoice ? (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -14866,7 +15059,7 @@ export default function AdsPage() {
                               >
                                 {invoiceCreditsApplying ? "Applying..." : "Apply Credit"}
                               </button>
-                            ) : !isCreditComposer && canSendLowCreditReminder ? (
+                            ) : !isCreditInvoiceFlow && canSendLowCreditReminder ? (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -14882,7 +15075,7 @@ export default function AdsPage() {
                             ) : null}
                           </div>
                           <div className="mt-2 text-xs text-blue-800">
-                            {isCreditComposer
+                            {isCreditInvoiceFlow
                               ? `Balance after save: ${formatCurrency(creditBalanceAfterSave)}`
                               : invoicePreviewAmount <= 0
                                 ? "Enter an invoice total to check credit coverage."
@@ -14902,15 +15095,16 @@ export default function AdsPage() {
                           type="number"
                           step="0.01"
                           value={invoice.amount}
-                          disabled={isLockedInvoiceEdit}
+                          disabled={isLockedInvoiceEdit || isSolaCreditRecordEdit}
                           onChange={(event) => {
                             const nextAmountText = event.target.value;
-                            if (isCreditComposer) {
+                            if (isCreditInvoiceFlow) {
                               setInvoice({
                                 ...invoice,
                                 amount: nextAmountText,
                                 total: nextAmountText,
                                 status: "Paid",
+                                paid_date: invoice.paid_date || getTodayInAppTimeZone(),
                               });
                               return;
                             }
@@ -14978,7 +15172,7 @@ export default function AdsPage() {
                       </div>
                     </div>
 
-                    {isCreditComposer ? (
+                    {isCreditInvoiceFlow ? (
                       <div>
                         <label className="block text-xs font-semibold text-gray-700 mb-2">
                           Reason
@@ -15004,7 +15198,7 @@ export default function AdsPage() {
                         Status
                       </label>
                       <select
-                        value={isCreditComposer ? "Paid" : normalizeInvoiceStatus(invoice.status)}
+                        value={isCreditInvoiceFlow ? "Paid" : normalizeInvoiceStatus(invoice.status)}
                         onChange={(event) =>
                           setInvoice((current) => {
                             const nextStatus = event.target.value;
@@ -15038,7 +15232,7 @@ export default function AdsPage() {
                           })
                         }
                         disabled={
-                          isCreditComposer ||
+                          isCreditInvoiceFlow ||
                           isInvoicePaidViaCredits(invoice) ||
                           isRepairOnlyInvoiceEdit ||
                           isSolaSettledInvoiceEdit
@@ -15050,9 +15244,9 @@ export default function AdsPage() {
                         <option value="Pending">Ready for Payment</option>
                         <option value="Overdue">Overdue</option>
                       </select>
-                      {isCreditComposer ? (
+                      {isCreditInvoiceFlow ? (
                         <p className="mt-2 text-xs text-blue-700">
-                          Credit top-up records stay marked as Paid.
+                          Credit top-up records stay marked as Paid after credits are issued.
                         </p>
                       ) : isInvoicePaidViaCredits(invoice) ? (
                         <p className="mt-2 text-xs text-blue-700">
@@ -15099,7 +15293,7 @@ export default function AdsPage() {
                               </option>
                             ))}
                           </select>
-                          {isSolaSettledInvoiceEdit ? (
+                          {isSolaSettledInvoiceEdit || isSolaCreditRecordEdit ? (
                             <p className="mt-2 text-xs text-amber-700">
                               Payment provider is locked to {invoicePaymentProviderLabel}.
                             </p>
@@ -15156,7 +15350,11 @@ export default function AdsPage() {
                             }
                             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                           />
-                          {invoice.payment_provider &&
+                          {(isSolaSettledInvoiceEdit || isSolaCreditRecordEdit) ? (
+                            <p className="mt-2 text-xs text-amber-700">
+                              Transaction reference is locked for Sola-settled payments.
+                            </p>
+                          ) : invoice.payment_provider &&
                           invoicePaymentProviderRequiresReference(invoice.payment_provider) ? (
                             <p className="mt-2 text-xs text-gray-500">
                               A reference is required for this payment provider.
@@ -15180,6 +15378,11 @@ export default function AdsPage() {
                             disabled={isInvoicePaymentMetadataLocked}
                             className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                           />
+                          {isSolaSettledInvoiceEdit || isSolaCreditRecordEdit ? (
+                            <p className="mt-2 text-xs text-amber-700">
+                              Paid date is locked for Sola-settled payments.
+                            </p>
+                          ) : null}
                         </div>
 
                         <div className="md:col-span-2">
@@ -15247,6 +15450,7 @@ export default function AdsPage() {
                             {
                               ...createBlankInvoice(),
                               status: isCreditComposer ? "Paid" : "Pending",
+                              paid_date: isCreditComposer ? getTodayInAppTimeZone() : "",
                             },
                           );
                         }}
@@ -15285,7 +15489,7 @@ export default function AdsPage() {
                     </div>
                     <div className="text-right">
                       <div className="text-xs text-gray-500 mb-2">
-                        {invoice.invoice_number || (isCreditComposer ? "New Credit Entry" : "New Invoice")}
+                        {invoice.invoice_number || (isCreditInvoiceFlow ? "New Credit Entry" : "New Invoice")}
                       </div>
                       <div
                         className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold border ${getInvoiceStatusColor(
@@ -15331,7 +15535,7 @@ export default function AdsPage() {
                       </div>
                       <div>
                         <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                          {isCreditComposer
+                          {isCreditInvoiceFlow
                             ? "Credit Amount"
                             : isInvoicePaidViaCredits(invoice)
                               ? "Amount Covered"
@@ -15409,7 +15613,7 @@ export default function AdsPage() {
                       Thank you for your business
                     </div>
                     <div className="text-xs text-gray-500 leading-relaxed">
-                      {isCreditComposer
+                      {isCreditInvoiceFlow
                         ? "These credits will be added to the advertiser balance when you save."
                         : "Payment is due upon receipt. Please include invoice number in transfer description."}
                     </div>

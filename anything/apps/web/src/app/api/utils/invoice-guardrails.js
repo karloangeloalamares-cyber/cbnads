@@ -321,6 +321,56 @@ export const getCreditInvoiceRestrictedChanges = (currentInvoice, body = {}) => 
   return violations;
 };
 
+export const getSolaCreditInvoiceRestrictedChanges = (currentInvoice, body = {}) => {
+  const violations = getCreditInvoiceRestrictedChanges(currentInvoice, body);
+
+  if (
+    body.amount !== undefined ||
+    body.total !== undefined
+  ) {
+    const currentTotal = normalizeMoney(currentInvoice?.total ?? currentInvoice?.amount);
+    const nextTotal =
+      body.total !== undefined
+        ? normalizeMoney(body.total)
+        : normalizeMoney(body.amount);
+
+    if (nextTotal !== currentTotal) {
+      violations.push("total amount");
+    }
+  }
+
+  if (
+    valueChanged(body.payment_provider, currentInvoice?.payment_provider, (value) =>
+      String(value || "").trim().toLowerCase(),
+    )
+  ) {
+    violations.push("payment provider");
+  }
+  if (
+    valueChanged(body.payment_reference, currentInvoice?.payment_reference, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment reference");
+  }
+  if (
+    valueChanged(body.payment_note, currentInvoice?.payment_note, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment note");
+  }
+  if (
+    valueChanged(body.paid_date, currentInvoice?.paid_date, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("paid date");
+  }
+
+  return violations;
+};
+
 export const formatGuardrailFieldList = (fields = []) =>
   fields
     .map((field) => String(field || "").trim())

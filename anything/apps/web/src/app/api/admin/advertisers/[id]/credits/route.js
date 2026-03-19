@@ -3,6 +3,11 @@ import { advertiserResponse, db, table, toNumber } from "../../../../utils/supab
 import { isCreditRuleViolation } from "../../../../utils/prepaid-credits.js";
 import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../../../utils/invoice-atomic.js";
 import { getTodayInAppTimeZone } from "../../../../../../lib/timezone.js";
+import {
+  invoicePaymentProviderRequiresNote,
+  invoicePaymentProviderRequiresReference,
+  normalizeInvoicePaymentProvider,
+} from "../../../../../../lib/invoicePayment.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -42,6 +47,11 @@ export async function POST(request, { params }) {
     const body = await request.json();
     const amount = toNumber(body?.amount, 0);
     const reason = String(body?.reason || "").trim();
+    const paymentProvider = normalizeInvoicePaymentProvider(body?.payment_provider);
+    const paymentReference = String(body?.payment_reference || "").trim();
+    const paymentNote = String(body?.payment_note || "").trim();
+    const paidDate = String(body?.paid_date || "").trim() || getTodayInAppTimeZone();
+    const requirePaymentDetails = body?.require_payment_details === true;
 
     if (!amount) {
       return Response.json({ error: "A non-zero amount is required" }, { status: 400 });
@@ -49,6 +59,27 @@ export async function POST(request, { params }) {
 
     if (!reason) {
       return Response.json({ error: "A reason is required" }, { status: 400 });
+    }
+
+    if (amount > 0 && requirePaymentDetails) {
+      if (!paymentProvider) {
+        return Response.json(
+          { error: "Paid credit records require a payment provider." },
+          { status: 400 },
+        );
+      }
+      if (invoicePaymentProviderRequiresReference(paymentProvider) && !paymentReference) {
+        return Response.json(
+          { error: "This payment provider requires a transaction or reference number." },
+          { status: 400 },
+        );
+      }
+      if (invoicePaymentProviderRequiresNote(paymentProvider) && !paymentNote) {
+        return Response.json(
+          { error: "Other payment methods require a payment note." },
+          { status: 400 },
+        );
+      }
     }
 
     const entryType = amount > 0 ? "manual_credit_add" : "manual_credit_deduct";
@@ -128,7 +159,10 @@ export async function POST(request, { params }) {
           amount: total,
           total,
           amount_paid: total,
-          paid_date: today,
+          paid_date: paidDate || today,
+          payment_provider: paymentProvider || null,
+          payment_reference: paymentReference || null,
+          payment_note: paymentNote || null,
           bill_to:
             String(advertiser?.business_name || "").trim() ||
             String(advertiser?.advertiser_name || "").trim() ||

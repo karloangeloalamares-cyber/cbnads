@@ -7,6 +7,7 @@ import {
   getCreditInvoiceRestrictedChanges,
   getInvoiceMutationGuardrail,
   getReconciliationInvoiceRestrictedChanges,
+  getSolaCreditInvoiceRestrictedChanges,
   getSolaSettledInvoiceRestrictedChanges,
   getSettledInvoiceRestrictedChanges,
   hasExternalInvoiceSettlement,
@@ -123,6 +124,34 @@ describe("invoice guardrails", () => {
         amount_paid: 90,
       }),
     ).toEqual(["advertiser", "status", "amount paid"]);
+  });
+
+  it("keeps Sola credit invoices locked to totals and settlement proof", () => {
+    const currentInvoice = {
+      invoice_number: "CRE-20260319-AB12",
+      advertiser_id: "adv-1",
+      advertiser_name: "Acme Co",
+      status: "Paid",
+      total: 100,
+      amount_paid: 100,
+      payment_provider: "sola",
+      payment_reference: "xref-1",
+      payment_note: "Captured by webhook",
+      paid_date: "2026-03-19",
+    };
+
+    expect(
+      getSolaCreditInvoiceRestrictedChanges(currentInvoice, {
+        notes: "Updated internal note",
+      }),
+    ).toEqual([]);
+
+    expect(
+      getSolaCreditInvoiceRestrictedChanges(currentInvoice, {
+        total: 120,
+        payment_reference: "xref-2",
+      }),
+    ).toEqual(["total amount", "payment reference"]);
   });
 
   it("limits reconciliation repairs to links, totals, and metadata", () => {
