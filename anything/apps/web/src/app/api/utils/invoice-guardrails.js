@@ -12,12 +12,24 @@ const valueChanged = (nextValue, currentValue, normalize = (value) => value) => 
   return normalize(nextValue) !== normalize(currentValue);
 };
 
-const arrayChanged = (nextValue, currentValue) => {
+const arrayChanged = (nextValue, currentValue, normalize = (value) => value) => {
   if (!Array.isArray(nextValue)) {
     return false;
   }
-  return JSON.stringify(nextValue) !== JSON.stringify(Array.isArray(currentValue) ? currentValue : []);
+  return JSON.stringify(normalize(nextValue)) !== JSON.stringify(
+    normalize(Array.isArray(currentValue) ? currentValue : []),
+  );
 };
+
+const normalizeComparableInvoiceItems = (items) =>
+  (Array.isArray(items) ? items : []).map((item) => ({
+    ad_id: String(item?.ad_id || "").trim(),
+    product_id: String(item?.product_id || "").trim(),
+    description: String(item?.description || "").trim(),
+    quantity: Math.max(1, Number(item?.quantity) || 1),
+    unit_price: normalizeMoney(item?.unit_price),
+    amount: normalizeMoney(item?.amount ?? item?.unit_price),
+  }));
 
 export const normalizeFinancialChangeReason = (value) => String(value || "").trim();
 
@@ -146,7 +158,7 @@ export const isInvoiceReconciliationRequired = (invoice) =>
 export const getSettledInvoiceRestrictedChanges = (currentInvoice, body = {}) => {
   const violations = [];
 
-  if (arrayChanged(body.items, currentInvoice?.items)) {
+  if (arrayChanged(body.items, currentInvoice?.items, normalizeComparableInvoiceItems)) {
     violations.push("line items");
   }
   if (arrayChanged(body.ad_ids, currentInvoice?.ad_ids)) {

@@ -100,6 +100,42 @@ describe("invoice guardrails", () => {
     ).toEqual(["amount paid", "payment reference"]);
   });
 
+  it("ignores editor-only invoice item metadata when comparing settled invoice items", () => {
+    const currentInvoice = {
+      status: "Paid",
+      total: 1500,
+      amount_paid: 1500,
+      items: [
+        {
+          ad_id: "ad-1",
+          product_id: "prod-1",
+          description: "Testing Credit Application",
+          quantity: 1,
+          unit_price: 1500,
+          amount: 1500,
+        },
+      ],
+    };
+
+    expect(
+      getSettledInvoiceRestrictedChanges(currentInvoice, {
+        items: [
+          {
+            id: "item-1",
+            invoice_id: "inv-1",
+            ad_id: "ad-1",
+            product_id: "prod-1",
+            description: "Testing Credit Application",
+            quantity: "1",
+            unit_price: "1500.00",
+            amount: "1500.00",
+            created_at: "2026-03-19T00:00:00.000Z",
+          },
+        ],
+      }),
+    ).toEqual([]);
+  });
+
   it("keeps credit invoices locked to their advertiser, paid state, and accounting fields", () => {
     const currentInvoice = {
       advertiser_id: "adv-1",

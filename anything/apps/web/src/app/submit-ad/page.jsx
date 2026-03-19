@@ -299,8 +299,15 @@ export default function SubmitAdPage() {
 
                 {!isDedicatedMultiWeek ? (
                   <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    Public sign-ups at <code>/account/signup</code> are disabled. Submit your ad first,
-                    then use the guided account setup step here or ask an admin to enable advertiser access.
+                    <div className="font-semibold text-amber-950">How account setup works</div>
+                    <p className="mt-1">
+                      New advertiser accounts are created after your first ad request. Complete
+                      this form, and we&apos;ll guide you through account setup on the next step.
+                    </p>
+                    <p className="mt-1 text-amber-800">
+                      If a CBN admin is already helping you, they can also activate your
+                      advertiser access.
+                    </p>
                   </div>
                 ) : null}
 

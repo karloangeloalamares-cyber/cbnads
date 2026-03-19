@@ -1,7 +1,8 @@
 ﻿import { useRef } from "react";
+import { List } from "lucide-react";
 import { MediaUploadSection } from "./MediaUploadSection";
 import { EmojiPicker } from "@/components/EmojiPicker";
-import { insertAtCursor, wrapSelection } from "@/utils/whatsappFormatter";
+import { insertAtCursor, toggleBulletList, wrapSelection } from "@/utils/whatsappFormatter";
 
 export function AdDetailsSection({
   formData,
@@ -37,6 +38,20 @@ export function AdDetailsSection({
       if (textareaRef.current) {
         textareaRef.current.focus();
         textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
+  };
+
+  const handleBulletList = () => {
+    if (!textareaRef.current) return;
+
+    const { newText, selectionStart, selectionEnd } = toggleBulletList(textareaRef.current);
+    onChange("ad_text", newText);
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(selectionStart, selectionEnd);
       }
     }, 0);
   };
@@ -141,6 +156,14 @@ export function AdDetailsSection({
             >
               <span className="text-xs">{"</>"}</span>
             </button>
+            <button
+              type="button"
+              onClick={handleBulletList}
+              className="w-8 h-8 flex items-center justify-center hover:bg-gray-100 rounded-lg text-gray-600 transition-colors"
+              title="Bullet list"
+            >
+              <List size={16} />
+            </button>
             <div className="w-px h-6 bg-gray-200 mx-1" />
             <EmojiPicker onEmojiSelect={handleEmojiSelect} />
           </div>
@@ -154,7 +177,7 @@ export function AdDetailsSection({
           onPaste={handleAdTextPaste}
           rows={4}
           maxLength={MAX_AD_TEXT_LENGTH}
-          placeholder="Enter your ad copy... Use *bold*, _italic_, ~strikethrough~, or ```code```"
+          placeholder="Enter your ad copy... Use *bold*, _italic_, ~strikethrough~, ```code```, or bullet lists"
           className="w-full px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-y"
         />
       </div>

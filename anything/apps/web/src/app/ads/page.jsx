@@ -384,6 +384,95 @@ const blankSubmissionEditForm = {
   notes: "",
 };
 
+const normalizeComparableCreateAdValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeComparableCreateAdValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((accumulator, key) => {
+        accumulator[key] = normalizeComparableCreateAdValue(value[key]);
+        return accumulator;
+      }, {});
+  }
+
+  if (value == null) {
+    return "";
+  }
+
+  return value;
+};
+
+const serializeCreateAdState = (value) =>
+  JSON.stringify({
+    id: String(value?.id || ""),
+    ad_name: String(value?.ad_name || ""),
+    advertiser_id: String(value?.advertiser_id || ""),
+    product_id: String(value?.product_id || ""),
+    placement: String(value?.placement || ""),
+    post_type: String(value?.post_type || ""),
+    status: String(value?.status || ""),
+    payment: String(value?.payment || ""),
+    payment_mode: String(value?.payment_mode || ""),
+    post_date: String(value?.post_date || ""),
+    post_date_from: String(value?.post_date_from || ""),
+    post_date_to: String(value?.post_date_to || ""),
+    custom_dates: normalizeComparableCreateAdValue(value?.custom_dates || []),
+    post_time: String(value?.post_time || ""),
+    price: String(value?.price || ""),
+    ad_text: String(value?.ad_text || ""),
+    media: normalizeComparableCreateAdValue(value?.media || []),
+    notes: String(value?.notes || ""),
+    multi_week_weeks: String(value?.multi_week_weeks || ""),
+    series_week_start: String(value?.series_week_start || ""),
+    multi_week_overrides: normalizeComparableCreateAdValue(value?.multi_week_overrides || []),
+  });
+
+const serializeInvoiceComposerState = ({ invoice, invoiceChangeReason, billingComposerMode }) =>
+  JSON.stringify({
+    billingComposerMode: String(billingComposerMode || "invoice"),
+    invoiceChangeReason: String(invoiceChangeReason || ""),
+    invoice: {
+      id: String(invoice?.id || ""),
+      invoice_number: String(invoice?.invoice_number || ""),
+      advertiser_id: String(invoice?.advertiser_id || ""),
+      amount: String(invoice?.amount || ""),
+      due_date: String(invoice?.due_date || ""),
+      status: String(invoice?.status || ""),
+      ad_ids: normalizeComparableCreateAdValue(invoice?.ad_ids || []),
+      items: normalizeComparableCreateAdValue(invoice?.items || []),
+      contact_name: String(invoice?.contact_name || ""),
+      contact_email: String(invoice?.contact_email || ""),
+      bill_to: String(invoice?.bill_to || ""),
+      issue_date: String(invoice?.issue_date || ""),
+      discount: String(invoice?.discount || ""),
+      tax: String(invoice?.tax || ""),
+      total: String(invoice?.total || ""),
+      amount_paid: String(invoice?.amount_paid || ""),
+      paid_via_credits: Boolean(invoice?.paid_via_credits),
+      paid_date: String(invoice?.paid_date || ""),
+      payment_provider: String(invoice?.payment_provider || ""),
+      payment_reference: String(invoice?.payment_reference || ""),
+      payment_note: String(invoice?.payment_note || ""),
+      notes: String(invoice?.notes || ""),
+    },
+  });
+
+const serializeAdvertiserState = (value) =>
+  JSON.stringify({
+    id: String(value?.id || ""),
+    advertiser_name: String(value?.advertiser_name || ""),
+    contact_name: String(value?.contact_name || ""),
+    email: String(value?.email || ""),
+    phone: String(value?.phone || ""),
+    phone_number: String(value?.phone_number || ""),
+    business_name: String(value?.business_name || ""),
+    credits: String(value?.credits || ""),
+    status: String(value?.status || "active"),
+  });
+
 const toSubmissionEditForm = (item) => ({
   advertiser_name: item?.advertiser_name || "",
   contact_name: item?.contact_name || "",
@@ -3105,6 +3194,20 @@ export default function AdsPage() {
     phone_number: "",
     status: "active",
   });
+  const advertiserCreateInitialSnapshotRef = useRef(
+    serializeAdvertiserState({
+      advertiser_name: "",
+      contact_name: "",
+      email: "",
+      phone_number: "",
+      status: "active",
+    }),
+  );
+  const previousAdvertiserCreateOpenRef = useRef(false);
+  const advertiserEditInitialSnapshotRef = useRef(serializeAdvertiserState(blankAdvertiser));
+  const previousAdvertiserEditOpenRef = useRef(false);
+  const [advertiserCreateLeaveModalOpen, setAdvertiserCreateLeaveModalOpen] = useState(false);
+  const [advertiserEditLeaveModalOpen, setAdvertiserEditLeaveModalOpen] = useState(false);
   const [productCreateOpen, setProductCreateOpen] = useState(false);
   const [openProductMenuId, setOpenProductMenuId] = useState(null);
   const [productMenuCoordinates, setProductMenuCoordinates] = useState({
@@ -3180,16 +3283,28 @@ export default function AdsPage() {
   const [createAdCheckingAvailability, setCreateAdCheckingAvailability] = useState(false);
   const [createAdFullyBookedDates, setCreateAdFullyBookedDates] = useState([]);
   const createAdStateRef = useRef(blankAd);
+  const createAdInitialSnapshotRef = useRef(serializeCreateAdState(blankAd));
+  const previousViewRef = useRef("");
   const createAdAvailabilityRequestIdRef = useRef(0);
   const [createAdSubmitting, setCreateAdSubmitting] = useState(false);
   const [createAdSubmitMode, setCreateAdSubmitMode] = useState("");
+  const [createAdLeaveModalOpen, setCreateAdLeaveModalOpen] = useState(false);
   const [createAdErrors, setCreateAdErrors] = useState({});
   const [product, setProduct] = useState(blankProduct);
   const [invoice, setInvoice] = useState(() => createBlankInvoice());
   const [invoiceChangeReason, setInvoiceChangeReason] = useState("");
+  const invoiceComposerInitialSnapshotRef = useRef(
+    serializeInvoiceComposerState({
+      invoice: createBlankInvoice(),
+      invoiceChangeReason: "",
+      billingComposerMode: "invoice",
+    }),
+  );
+  const previousInvoiceComposerViewRef = useRef("");
   const [invoiceSaving, setInvoiceSaving] = useState(false);
   const [invoiceCreditsApplying, setInvoiceCreditsApplying] = useState(false);
   const [invoiceLowCreditSending, setInvoiceLowCreditSending] = useState(false);
+  const [invoiceLeaveModalOpen, setInvoiceLeaveModalOpen] = useState(false);
   const [pendingInvoiceActionIds, setPendingInvoiceActionIds] = useState([]);
   const [settingsActiveTab, setSettingsActiveTab] = useState("profile");
   const [settingsProfileName, setSettingsProfileName] = useState("");
@@ -3350,6 +3465,64 @@ export default function AdsPage() {
   useEffect(() => {
     createAdStateRef.current = ad;
   }, [ad]);
+
+  useEffect(() => {
+    if (view === "createAd" && previousViewRef.current !== "createAd") {
+      createAdInitialSnapshotRef.current = serializeCreateAdState(ad);
+      setCreateAdLeaveModalOpen(false);
+    }
+
+    if (view !== "createAd") {
+      setCreateAdLeaveModalOpen(false);
+    }
+
+    previousViewRef.current = view;
+  }, [ad, view]);
+
+  useEffect(() => {
+    const isInvoiceComposerOpen = activeSection === "Billing" && view === "newInvoice";
+
+    if (isInvoiceComposerOpen && previousInvoiceComposerViewRef.current !== "newInvoice") {
+      invoiceComposerInitialSnapshotRef.current = serializeInvoiceComposerState({
+        invoice,
+        invoiceChangeReason,
+        billingComposerMode,
+      });
+      setInvoiceLeaveModalOpen(false);
+    }
+
+    if (!isInvoiceComposerOpen) {
+      setInvoiceLeaveModalOpen(false);
+    }
+
+    previousInvoiceComposerViewRef.current = isInvoiceComposerOpen ? "newInvoice" : "";
+  }, [activeSection, billingComposerMode, invoice, invoiceChangeReason, view]);
+
+  useEffect(() => {
+    if (advertiserCreateOpen && !previousAdvertiserCreateOpenRef.current) {
+      advertiserCreateInitialSnapshotRef.current = serializeAdvertiserState(advertiserCreateForm);
+      setAdvertiserCreateLeaveModalOpen(false);
+    }
+
+    if (!advertiserCreateOpen) {
+      setAdvertiserCreateLeaveModalOpen(false);
+    }
+
+    previousAdvertiserCreateOpenRef.current = advertiserCreateOpen;
+  }, [advertiserCreateForm, advertiserCreateOpen]);
+
+  useEffect(() => {
+    if (advertiserEditModal && !previousAdvertiserEditOpenRef.current) {
+      advertiserEditInitialSnapshotRef.current = serializeAdvertiserState(advertiserEditModal);
+      setAdvertiserEditLeaveModalOpen(false);
+    }
+
+    if (!advertiserEditModal) {
+      setAdvertiserEditLeaveModalOpen(false);
+    }
+
+    previousAdvertiserEditOpenRef.current = Boolean(advertiserEditModal);
+  }, [advertiserEditModal]);
 
   useEffect(() => {
     const applySignal = (signal) => {
@@ -4072,6 +4245,57 @@ export default function AdsPage() {
     isSolaSettledInvoiceEdit ||
     isSolaCreditRecordEdit;
   const invoicePaymentProviderLabel = getInvoicePaymentProviderLabel(invoice.payment_provider);
+  const invoiceComposerHasUnsavedChanges = useMemo(
+    () =>
+      serializeInvoiceComposerState({
+        invoice,
+        invoiceChangeReason,
+        billingComposerMode,
+      }) !== invoiceComposerInitialSnapshotRef.current,
+    [billingComposerMode, invoice, invoiceChangeReason],
+  );
+  const invoiceLeavePrimaryActionLabel = isEditingCreditRecord
+    ? "Save credit record"
+    : isCreditComposer
+      ? "Add credits"
+      : isEditingExistingInvoice
+        ? "Save invoice"
+        : "Save invoice";
+  const invoiceLeaveDiscardActionLabel = isEditingCreditRecord
+    ? "Discard changes"
+    : isCreditComposer
+      ? "Delete credit entry"
+      : isEditingExistingInvoice
+        ? "Discard changes"
+        : "Delete invoice draft";
+  const invoiceLeaveTitle = isEditingCreditRecord
+    ? "Leave without saving this credit record?"
+    : isCreditComposer
+      ? "Leave without saving this credit entry?"
+      : isEditingExistingInvoice
+        ? "Leave without saving this invoice?"
+        : "Leave this invoice draft?";
+  const invoiceLeaveMessage = isEditingCreditRecord
+    ? "You have unsaved changes to this credit record. Save them now or discard them before you leave."
+    : isCreditComposer
+      ? "You have unsaved credit changes. Add the credits now or discard this entry before you leave."
+      : isEditingExistingInvoice
+        ? "You have unsaved changes to this invoice. Save them now or discard them before you leave."
+        : "You have unsaved invoice details. Save the invoice now or discard this draft before you leave.";
+  const advertiserCreateHasUnsavedChanges = useMemo(
+    () =>
+      serializeAdvertiserState(advertiserCreateForm) !==
+      advertiserCreateInitialSnapshotRef.current,
+    [advertiserCreateForm],
+  );
+  const advertiserEditHasUnsavedChanges = useMemo(
+    () =>
+      advertiserEditModal
+        ? serializeAdvertiserState(advertiserEditModal) !==
+          advertiserEditInitialSnapshotRef.current
+        : false,
+    [advertiserEditModal],
+  );
 
   const invoicePreviewItems = useMemo(() => {
     if (isCreditInvoiceFlow) {
@@ -4165,18 +4389,15 @@ export default function AdsPage() {
     !isCreditInvoiceFlow && invoicePreviewAmount > 0 && selectedAdvertiserCredits >= invoicePreviewAmount;
   const creditsInsufficientForInvoice =
     !isCreditInvoiceFlow && invoicePreviewAmount > 0 && selectedAdvertiserCredits < invoicePreviewAmount;
-  const canApplyCreditsToInvoice =
+  const canManageInvoiceCredits =
     !isCreditInvoiceFlow &&
-    Boolean(String(invoice?.id || "").trim()) &&
     !isInvoicePaidViaCredits(invoice) &&
     invoicePreviewStatus === "Pending" &&
-    creditsCoverInvoiceTotal;
+    invoicePreviewAmount > 0;
+  const canApplyCreditsToInvoice =
+    canManageInvoiceCredits && creditsCoverInvoiceTotal;
   const canSendLowCreditReminder =
-    !isCreditInvoiceFlow &&
-    Boolean(String(invoice?.id || "").trim()) &&
-    !isInvoicePaidViaCredits(invoice) &&
-    (invoicePreviewStatus === "Pending" || (invoicePreviewStatus === "Paid" && (Number(invoice?.amount_paid ?? 0) || 0) <= 0)) &&
-    creditsInsufficientForInvoice;
+    canManageInvoiceCredits && creditsInsufficientForInvoice;
   const dashboardStats = useMemo(() => {
     const now = getTodayDateInAppTimeZone();
     const paidAds = ads.filter((item) => item.payment === "Paid");
@@ -5967,6 +6188,25 @@ export default function AdsPage() {
     return updatedInvoice || data?.invoice || null;
   };
 
+  const requestInvoiceCreate = async (payload) => {
+    const response = await fetchWithSessionAuth("/api/invoices/create", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || "Failed to create invoice.");
+    }
+    const nextDb = await refreshDbFromSupabase();
+    const createdInvoice = (nextDb?.invoices || []).find(
+      (item) => String(item?.id || "").trim() === String(data?.invoice?.id || "").trim(),
+    );
+    return createdInvoice || data?.invoice || null;
+  };
+
   const requestInvoiceDelete = async ({ invoiceId, reason }) => {
     const response = await fetchWithSessionAuth("/api/invoices", {
       method: "DELETE",
@@ -5996,6 +6236,27 @@ export default function AdsPage() {
       draftInvoice?.advertiser_name ||
       existingInvoice?.advertiser_name ||
       "";
+    const isLockedMetadataOnlyInvoiceEdit =
+      Boolean(existingInvoice?.id) &&
+      !isCreditInvoiceRecord(existingInvoice) &&
+      !isInvoiceReconciliationRequired(existingInvoice) &&
+      hasInvoiceRecordedPayment(existingInvoice);
+    const draftAdIds = Array.isArray(draftInvoice?.ad_ids) ? draftInvoice.ad_ids : null;
+    const existingAdIds = Array.isArray(existingInvoice?.ad_ids) ? existingInvoice.ad_ids : [];
+    const draftItems = Array.isArray(draftInvoice?.items) ? draftInvoice.items : null;
+    const existingItems = Array.isArray(existingInvoice?.items) ? existingInvoice.items : [];
+    const nextAdIds =
+      isLockedMetadataOnlyInvoiceEdit && Array.isArray(draftAdIds) && draftAdIds.length === 0
+        ? existingAdIds
+        : Array.isArray(draftAdIds)
+          ? draftAdIds
+          : existingAdIds;
+    const nextItems =
+      isLockedMetadataOnlyInvoiceEdit && Array.isArray(draftItems) && draftItems.length === 0
+        ? existingItems
+        : Array.isArray(draftItems)
+          ? draftItems
+          : existingItems;
 
     return {
       id: draftInvoice?.id || existingInvoice?.id,
@@ -6031,18 +6292,113 @@ export default function AdsPage() {
       payment_reference:
         draftInvoice?.payment_reference ?? existingInvoice?.payment_reference ?? "",
       payment_note: draftInvoice?.payment_note ?? existingInvoice?.payment_note ?? "",
-      ad_ids: Array.isArray(draftInvoice?.ad_ids)
-        ? draftInvoice.ad_ids
-        : Array.isArray(existingInvoice?.ad_ids)
-          ? existingInvoice.ad_ids
-          : [],
-      items: Array.isArray(draftInvoice?.items)
-        ? draftInvoice.items
-        : Array.isArray(existingInvoice?.items)
-          ? existingInvoice.items
-          : [],
+      ad_ids: nextAdIds,
+      items: nextItems,
       change_reason: changeReason,
     };
+  };
+
+  const buildInvoiceCreateItems = (draftInvoice) => {
+    if (Array.isArray(draftInvoice?.items) && draftInvoice.items.length > 0) {
+      return draftInvoice.items;
+    }
+
+    const linkedAds = (
+      Array.isArray(draftInvoice?.ad_ids)
+        ? draftInvoice.ad_ids
+        : []
+    )
+      .map((adId) => ads.find((item) => String(item?.id || "").trim() === String(adId || "").trim()))
+      .filter(Boolean);
+
+    if (linkedAds.length > 0) {
+      return linkedAds.flatMap((linkedAd) =>
+        buildInvoiceItemsFromAd({
+          adRecord: linkedAd,
+          unitPrice: Number(linkedAd?.price || 0) || 0,
+        }),
+      );
+    }
+
+    const explicitAmount = Number(draftInvoice?.total ?? draftInvoice?.amount ?? 0) || 0;
+    if (explicitAmount > 0) {
+      return [
+        {
+          id: createId(),
+          invoice_id: null,
+          ad_id: null,
+          product_id: null,
+          description: String(draftInvoice?.notes || "").trim() || "Advertising services",
+          quantity: 1,
+          unit_price: explicitAmount,
+          amount: explicitAmount,
+        },
+      ];
+    }
+
+    return [];
+  };
+
+  const buildInvoiceCreatePayload = ({ draftInvoice }) => {
+    const advertiserId = String(draftInvoice?.advertiser_id || "").trim();
+    const advertiserName =
+      advertisers.find((item) => String(item?.id || "").trim() === advertiserId)
+        ?.advertiser_name ||
+      draftInvoice?.advertiser_name ||
+      "";
+    const nextItems = buildInvoiceCreateItems(draftInvoice);
+
+    return {
+      advertiser_id: advertiserId,
+      advertiser_name: advertiserName,
+      contact_name: draftInvoice?.contact_name ?? "",
+      contact_email: draftInvoice?.contact_email ?? "",
+      bill_to: draftInvoice?.bill_to ?? "",
+      issue_date: draftInvoice?.issue_date || getTodayInAppTimeZone(),
+      status: normalizeInvoiceStatus(draftInvoice?.status || "Pending"),
+      discount: draftInvoice?.discount ?? 0,
+      tax: draftInvoice?.tax ?? 0,
+      notes: draftInvoice?.notes ?? "",
+      amount: draftInvoice?.total ?? draftInvoice?.amount ?? 0,
+      total: draftInvoice?.total ?? draftInvoice?.amount ?? 0,
+      amount_paid: draftInvoice?.amount_paid ?? 0,
+      paid_date: draftInvoice?.paid_date ?? "",
+      payment_provider: draftInvoice?.payment_provider ?? "",
+      payment_reference: draftInvoice?.payment_reference ?? "",
+      payment_note: draftInvoice?.payment_note ?? "",
+      items: nextItems,
+      apply_credits: false,
+    };
+  };
+
+  const closeInvoiceComposer = () => {
+    if (invoiceSaving) {
+      return;
+    }
+
+    invoiceComposerInitialSnapshotRef.current = serializeInvoiceComposerState({
+      invoice: createBlankInvoice(),
+      invoiceChangeReason: "",
+      billingComposerMode: "invoice",
+    });
+    setInvoiceLeaveModalOpen(false);
+    setView("list");
+    setBillingComposerMode("invoice");
+    setInvoice(createBlankInvoice());
+    setInvoiceChangeReason("");
+  };
+
+  const requestCloseInvoiceComposer = () => {
+    if (invoiceSaving) {
+      return;
+    }
+
+    if (!invoiceComposerHasUnsavedChanges) {
+      closeInvoiceComposer();
+      return;
+    }
+
+    setInvoiceLeaveModalOpen(true);
   };
 
   const ensureAdvertiserAccountInvite = async (advertiserId) => {
@@ -8758,24 +9114,34 @@ export default function AdsPage() {
               changeReason,
             }),
           )
-        : await upsertInvoice({
-            ...(existingInvoice || {}),
-            ...invoice,
-            ad_ids:
-              Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
-                ? invoice.ad_ids
-                : Array.isArray(existingInvoice?.ad_ids)
-                  ? existingInvoice.ad_ids
-                  : [],
-            items:
-              Array.isArray(invoice.items) && invoice.items.length > 0
-                ? invoice.items
-                : Array.isArray(existingInvoice?.items)
-                  ? existingInvoice.items
-                  : [],
-            issue_date: issueDate,
-            status: normalizeInvoiceStatus(invoice.status),
-          });
+        : hasSupabaseConfig
+          ? await requestInvoiceCreate(
+              buildInvoiceCreatePayload({
+                draftInvoice: {
+                  ...invoice,
+                  issue_date: issueDate,
+                  status: normalizeInvoiceStatus(invoice.status),
+                },
+              }),
+            )
+          : await upsertInvoice({
+              ...(existingInvoice || {}),
+              ...invoice,
+              ad_ids:
+                Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
+                  ? invoice.ad_ids
+                  : Array.isArray(existingInvoice?.ad_ids)
+                    ? existingInvoice.ad_ids
+                    : [],
+              items:
+                Array.isArray(invoice.items) && invoice.items.length > 0
+                  ? invoice.items
+                  : Array.isArray(existingInvoice?.items)
+                    ? existingInvoice.items
+                    : [],
+              issue_date: issueDate,
+              status: normalizeInvoiceStatus(invoice.status),
+            });
       const previousInvoiceStatus = hasExistingInvoice
         ? normalizeInvoiceStatus(existingInvoice?.status || "")
         : "";
@@ -8975,6 +9341,8 @@ export default function AdsPage() {
     if (createAdSubmitting) {
       return;
     }
+    createAdInitialSnapshotRef.current = serializeCreateAdState(blankAd);
+    setCreateAdLeaveModalOpen(false);
     setView("list");
     createAdStateRef.current = blankAd;
     setAd(blankAd);
@@ -8983,6 +9351,24 @@ export default function AdsPage() {
     setCreateAdAvailabilityError(null);
     setCreateAdFullyBookedDates([]);
     closeAdvertiserCreate();
+  };
+
+  const createAdHasUnsavedChanges = useMemo(
+    () => serializeCreateAdState(ad) !== createAdInitialSnapshotRef.current,
+    [ad],
+  );
+
+  const requestCloseCreateAd = () => {
+    if (createAdSubmitting) {
+      return;
+    }
+
+    if (!createAdHasUnsavedChanges) {
+      closeCreateAd();
+      return;
+    }
+
+    setCreateAdLeaveModalOpen(true);
   };
 
   const setCreateAdPostType = (postType) => {
@@ -9973,8 +10359,48 @@ export default function AdsPage() {
   };
 
   const closeAdvertiserCreate = () => {
+    advertiserCreateInitialSnapshotRef.current = serializeAdvertiserState({
+      advertiser_name: "",
+      contact_name: "",
+      email: "",
+      phone_number: "",
+      status: "active",
+    });
+    setAdvertiserCreateLeaveModalOpen(false);
     setAdvertiserCreateOpen(false);
     setAdvertiserCreateSource("advertisers");
+  };
+
+  const requestCloseAdvertiserCreate = () => {
+    if (advertiserCreateLoading) {
+      return;
+    }
+
+    if (!advertiserCreateHasUnsavedChanges) {
+      closeAdvertiserCreate();
+      return;
+    }
+
+    setAdvertiserCreateLeaveModalOpen(true);
+  };
+
+  const closeAdvertiserEdit = () => {
+    advertiserEditInitialSnapshotRef.current = serializeAdvertiserState(blankAdvertiser);
+    setAdvertiserEditLeaveModalOpen(false);
+    setAdvertiserEditModal(null);
+  };
+
+  const requestCloseAdvertiserEdit = () => {
+    if (advertiserActionLoading) {
+      return;
+    }
+
+    if (!advertiserEditHasUnsavedChanges) {
+      closeAdvertiserEdit();
+      return;
+    }
+
+    setAdvertiserEditLeaveModalOpen(true);
   };
 
   const requestAdvertiserCreditsAdjustment = async ({
@@ -10025,12 +10451,93 @@ export default function AdsPage() {
     return { data, nextDb, updatedAdvertiser };
   };
 
-  const applyCreditsToInvoice = async () => {
-    const invoiceId = String(invoice?.id || "").trim();
-    if (!invoiceId) {
-      appToast.error({ title: "Save the invoice before applying credits." });
-      return;
+  const saveInvoiceForCreditAction = async ({ actionLabel }) => {
+    const issueDate = invoice.issue_date || getTodayInAppTimeZone();
+    if (!invoice.advertiser_id) {
+      throw new Error("Advertiser required");
     }
+
+    const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
+    const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
+    const explicitAmountValue =
+      Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
+    const hasPositiveAmount = explicitAmountValue > 0;
+    if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
+      throw new Error("Link at least one ad, add line items, or enter a positive amount.");
+    }
+
+    let existingInvoice = null;
+    if (invoice.id) {
+      const refreshedDb = await refreshDbFromSupabase();
+      existingInvoice =
+        (Array.isArray(refreshedDb?.invoices) ? refreshedDb.invoices : []).find(
+          (item) => String(item?.id || "") === String(invoice.id || ""),
+        ) || null;
+      if (!existingInvoice) {
+        throw new Error("Invoice not found.");
+      }
+
+      const changeReason = String(invoiceChangeReason || "").trim();
+      if (!changeReason) {
+        throw new Error(`Add a change reason before ${actionLabel}.`);
+      }
+    }
+
+    const savedInvoice = existingInvoice
+      ? await requestInvoiceUpdate(
+          buildInvoiceUpdatePayload({
+            draftInvoice: {
+              ...invoice,
+              issue_date: issueDate,
+              status: "Pending",
+            },
+            existingInvoice,
+            changeReason: String(invoiceChangeReason || "").trim(),
+          }),
+        )
+      : hasSupabaseConfig
+        ? await requestInvoiceCreate(
+            buildInvoiceCreatePayload({
+              draftInvoice: {
+                ...invoice,
+                issue_date: issueDate,
+                status: "Pending",
+              },
+            }),
+          )
+        : await upsertInvoice({
+            ...(existingInvoice || {}),
+            ...invoice,
+            ad_ids:
+              Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0
+                ? invoice.ad_ids
+                : Array.isArray(existingInvoice?.ad_ids)
+                  ? existingInvoice.ad_ids
+                  : [],
+            items:
+              Array.isArray(invoice.items) && invoice.items.length > 0
+                ? invoice.items
+                : Array.isArray(existingInvoice?.items)
+                  ? existingInvoice.items
+                  : [],
+            issue_date: issueDate,
+            status: "Pending",
+          });
+
+    if (savedInvoice) {
+      setInvoice({
+        ...createBlankInvoice(),
+        ...savedInvoice,
+        issue_date: savedInvoice.issue_date || issueDate,
+        status: normalizeInvoiceStatus(savedInvoice.status),
+        ad_ids: toStringArray(savedInvoice.ad_ids),
+      });
+    }
+
+    return savedInvoice;
+  };
+
+  const applyCreditsToInvoice = async () => {
     if (!hasSupabaseConfig) {
       appToast.error({ title: "Supabase configuration is required to apply credits." });
       return;
@@ -10040,37 +10547,13 @@ export default function AdsPage() {
     }
     setInvoiceCreditsApplying(true);
     try {
-      const issueDate = invoice.issue_date || getTodayInAppTimeZone();
-      const changeReason = String(invoiceChangeReason || "").trim();
-      if (!changeReason) {
-        throw new Error("Add a change reason before applying credits.");
-      }
-      if (!invoice.advertiser_id) {
-        throw new Error("Advertiser required");
-      }
-
-      let existingInvoice = null;
-      const refreshedDbBefore = await refreshDbFromSupabase();
-      existingInvoice =
-        (Array.isArray(refreshedDbBefore?.invoices) ? refreshedDbBefore.invoices : []).find(
-          (item) => String(item?.id || "") === invoiceId,
-        ) || null;
-
-      if (!existingInvoice) {
+      const syncedInvoice = await saveInvoiceForCreditAction({
+        actionLabel: "redeeming credits",
+      });
+      const invoiceId = String(syncedInvoice?.id || "").trim();
+      if (!invoiceId) {
         throw new Error("Invoice not found.");
       }
-
-      const syncedInvoice = await requestInvoiceUpdate(
-        buildInvoiceUpdatePayload({
-          draftInvoice: {
-            ...invoice,
-            issue_date: issueDate,
-            status: normalizeInvoiceStatus(invoice.status),
-          },
-          existingInvoice,
-          changeReason,
-        }),
-      );
 
       const response = await fetchWithSessionAuth("/api/admin/invoices/apply-credits", {
         method: "POST",
@@ -10138,11 +10621,6 @@ export default function AdsPage() {
   };
 
   const sendLowCreditReminder = async () => {
-    const invoiceId = String(invoice?.id || "").trim();
-    if (!invoiceId) {
-      appToast.error({ title: "Save the invoice before sending this reminder." });
-      return;
-    }
     if (!hasSupabaseConfig) {
       appToast.error({ title: "Supabase configuration is required to send reminders." });
       return;
@@ -10152,6 +10630,14 @@ export default function AdsPage() {
     }
     setInvoiceLowCreditSending(true);
     try {
+      const savedInvoice = await saveInvoiceForCreditAction({
+        actionLabel: "emailing the advertiser",
+      });
+      const invoiceId = String(savedInvoice?.id || "").trim();
+      if (!invoiceId) {
+        throw new Error("Invoice not found.");
+      }
+
       const response = await fetchWithSessionAuth(
         "/api/admin/invoices/send-low-credit-reminder",
         {
@@ -10179,7 +10665,7 @@ export default function AdsPage() {
         setInvoice({
           ...createBlankInvoice(),
           ...refreshedInvoice,
-          issue_date: getTodayInAppTimeZone(),
+          issue_date: refreshedInvoice.issue_date || getTodayInAppTimeZone(),
           status: normalizeInvoiceStatus(refreshedInvoice.status),
           ad_ids: toStringArray(refreshedInvoice.ad_ids),
         });
@@ -10300,7 +10786,7 @@ export default function AdsPage() {
       });
       setDb(readDb());
       appToast.success({ title: "Advertiser saved." });
-      setAdvertiserEditModal(null);
+      closeAdvertiserEdit();
     } catch (error) {
       appToast.error({
         title: error instanceof Error ? error.message : "Failed to save advertiser",
@@ -10331,7 +10817,7 @@ export default function AdsPage() {
 
   const saveNewAdvertiser = async (type) => {
     if (type === "cancel") {
-      closeAdvertiserCreate();
+      requestCloseAdvertiserCreate();
       return;
     }
 
@@ -12583,7 +13069,7 @@ export default function AdsPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={closeAdvertiserCreate}
+                        onClick={requestCloseAdvertiserCreate}
                         className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                       >
                         <X size={18} />
@@ -12692,7 +13178,7 @@ export default function AdsPage() {
                     <div className="px-6 py-5 border-t border-gray-200 flex items-center justify-end gap-3">
                       <button
                         type="button"
-                        onClick={() => saveNewAdvertiser("cancel")}
+                        onClick={requestCloseAdvertiserCreate}
                         className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all"
                       >
                         Cancel
@@ -12716,7 +13202,7 @@ export default function AdsPage() {
                     <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm pb-4 pt-6 -mt-6 mb-8 flex items-center justify-between gap-4 border-b border-gray-100/50">
                       <button
                         type="button"
-                        onClick={closeCreateAd}
+                        onClick={requestCloseCreateAd}
                         disabled={createAdSubmitting}
                         className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -12726,7 +13212,7 @@ export default function AdsPage() {
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={closeCreateAd}
+                          onClick={requestCloseCreateAd}
                           disabled={createAdSubmitting}
                           className="px-4 py-2 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
@@ -12951,6 +13437,55 @@ export default function AdsPage() {
             </div>
           )}
 
+          <Modal
+            isOpen={createAdLeaveModalOpen}
+            onClose={() => setCreateAdLeaveModalOpen(false)}
+            size="sm"
+          >
+            <div className="p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {ad.id ? "Leave without saving changes?" : "Leave this ad draft?"}
+                </h3>
+                <p className="mt-2 text-sm text-gray-600">
+                  {ad.id
+                    ? "You have unsaved changes on this ad. Save them now or discard them before you leave."
+                    : "You have unsaved work. Save this ad as a draft, or delete the draft and leave the editor."}
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateAdLeaveModalOpen(false);
+                    void saveCreateAd(ad.id ? "save" : "draft");
+                  }}
+                  disabled={createAdSubmitting}
+                  className="w-full rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {ad.id ? "Save changes" : "Save as draft"}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeCreateAd}
+                  disabled={createAdSubmitting}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {ad.id ? "Discard changes" : "Delete draft"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCreateAdLeaveModalOpen(false)}
+                  disabled={createAdSubmitting}
+                  className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          </Modal>
+
           {activeSection === "Ads" && view === "createSeries" && canEditAds && (
             <div className="flex-1 overflow-auto bg-gray-50 -m-8">
               {advertiserCreateOpen && advertiserCreateSource === "createSeries" ? (
@@ -12965,7 +13500,7 @@ export default function AdsPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={closeAdvertiserCreate}
+                        onClick={requestCloseAdvertiserCreate}
                         className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                       >
                         <X size={18} />
@@ -13074,7 +13609,7 @@ export default function AdsPage() {
                     <div className="px-6 py-5 border-t border-gray-200 flex items-center justify-end gap-3">
                       <button
                         type="button"
-                        onClick={() => void saveNewAdvertiser("cancel")}
+                        onClick={requestCloseAdvertiserCreate}
                         className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors"
                         disabled={advertiserCreateLoading}
                       >
@@ -13138,7 +13673,7 @@ export default function AdsPage() {
                     <div className="max-w-[1200px] mx-auto flex items-center justify-between relative">
                       <button
                         type="button"
-                        onClick={() => saveNewAdvertiser("cancel")}
+                        onClick={requestCloseAdvertiserCreate}
                         className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
                       >
                         <ArrowLeft size={18} />
@@ -13152,7 +13687,7 @@ export default function AdsPage() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => saveNewAdvertiser("cancel")}
+                          onClick={requestCloseAdvertiserCreate}
                           className="px-5 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-full hover:bg-gray-50 transition-colors"
                         >
                           Cancel
@@ -13694,7 +14229,7 @@ export default function AdsPage() {
                       <h2 className="text-xl font-semibold text-gray-900">Edit Advertiser</h2>
                       <button
                         type="button"
-                        onClick={() => setAdvertiserEditModal(null)}
+                        onClick={requestCloseAdvertiserEdit}
                         className="p-1 hover:bg-gray-100 rounded transition-colors"
                       >
                         <X size={20} />
@@ -13804,7 +14339,7 @@ export default function AdsPage() {
                       <div className="flex gap-3 pt-4">
                         <button
                           type="button"
-                          onClick={() => setAdvertiserEditModal(null)}
+                          onClick={requestCloseAdvertiserEdit}
                           className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                           Cancel
@@ -13821,6 +14356,100 @@ export default function AdsPage() {
                   </div>
                 </div>
               ) : null}
+
+              <Modal
+                isOpen={advertiserCreateLeaveModalOpen}
+                onClose={() => setAdvertiserCreateLeaveModalOpen(false)}
+                size="sm"
+              >
+                <div className="p-6">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Leave without saving this advertiser?
+                    </h3>
+                    <p className="mt-2 text-sm text-gray-600">
+                      You have unsaved advertiser details. Save them now or discard this draft before you leave.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdvertiserCreateLeaveModalOpen(false);
+                        void saveNewAdvertiser("save");
+                      }}
+                      disabled={advertiserCreateLoading}
+                      className="w-full rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save advertiser
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeAdvertiserCreate}
+                      disabled={advertiserCreateLoading}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Delete draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdvertiserCreateLeaveModalOpen(false)}
+                      disabled={advertiserCreateLoading}
+                      className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Keep editing
+                    </button>
+                  </div>
+                </div>
+              </Modal>
+
+              <Modal
+                isOpen={advertiserEditLeaveModalOpen}
+                onClose={() => setAdvertiserEditLeaveModalOpen(false)}
+                size="sm"
+              >
+                <div className="p-6">
+                  <div className="mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Leave without saving changes?
+                    </h3>
+                    <p className="mt-2 text-sm text-gray-600">
+                      You have unsaved changes to this advertiser. Save them now or discard them before you leave.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdvertiserEditLeaveModalOpen(false);
+                        void saveAdvertiserModal();
+                      }}
+                      disabled={advertiserActionLoading}
+                      className="w-full rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save changes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeAdvertiserEdit}
+                      disabled={advertiserActionLoading}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Discard changes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdvertiserEditLeaveModalOpen(false)}
+                      disabled={advertiserActionLoading}
+                      className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Keep editing
+                    </button>
+                  </div>
+                </div>
+              </Modal>
 
               {advertiserDeleteModal ? (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -14935,12 +15564,7 @@ export default function AdsPage() {
             <div className="max-w-[1400px] mx-auto">
               <button
                 type="button"
-                onClick={() => {
-                  setView("list");
-                  setBillingComposerMode("invoice");
-                  setInvoice(createBlankInvoice());
-                  setInvoiceChangeReason("");
-                }}
+                onClick={requestCloseInvoiceComposer}
                 disabled={invoiceSaving}
                 className="mb-6 flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-all hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -15057,7 +15681,7 @@ export default function AdsPage() {
                                 disabled={invoiceCreditsApplying}
                                 className="inline-flex items-center justify-center self-center rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                               >
-                                {invoiceCreditsApplying ? "Applying..." : "Apply Credit"}
+                                {invoiceCreditsApplying ? "Redeeming..." : "Redeem Credit"}
                               </button>
                             ) : !isCreditInvoiceFlow && canSendLowCreditReminder ? (
                               <button
@@ -15068,9 +15692,7 @@ export default function AdsPage() {
                                 disabled={invoiceLowCreditSending}
                                 className="inline-flex items-center justify-center self-center rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
                               >
-                                {invoiceLowCreditSending
-                                  ? "Sending..."
-                                  : "Send Low Credit Reminder"}
+                                {invoiceLowCreditSending ? "Emailing..." : "Email Advertiser"}
                               </button>
                             ) : null}
                           </div>
@@ -15622,6 +16244,49 @@ export default function AdsPage() {
               </div>
             </div>
           )}
+
+          <Modal
+            isOpen={invoiceLeaveModalOpen}
+            onClose={() => setInvoiceLeaveModalOpen(false)}
+            size="sm"
+          >
+            <div className="p-6">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">{invoiceLeaveTitle}</h3>
+                <p className="mt-2 text-sm text-gray-600">{invoiceLeaveMessage}</p>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInvoiceLeaveModalOpen(false);
+                    void saveInvoiceForm();
+                  }}
+                  disabled={invoiceSaving}
+                  className="w-full rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {invoiceLeavePrimaryActionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={closeInvoiceComposer}
+                  disabled={invoiceSaving}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {invoiceLeaveDiscardActionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceLeaveModalOpen(false)}
+                  disabled={invoiceSaving}
+                  className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          </Modal>
 
           {activeSection === "Reconciliation" && (
             <div className="max-w-[1200px] mx-auto">

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Eye, X } from "lucide-react";
+import { Modal } from "@/components/Modal";
 import { FormHeader } from "@/components/SubmitAdForm/FormHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
@@ -78,6 +79,39 @@ const buildInitialFormData = ({ advertiser, user }) => ({
   ),
 });
 
+const serializeAdvertiserCreateState = ({
+  formData,
+  customDate = "",
+  customTime = "",
+  showMultiWeekWorkspace = false,
+}) =>
+  JSON.stringify({
+    advertiser_name: String(formData?.advertiser_name || ""),
+    contact_name: String(formData?.contact_name || ""),
+    email: String(formData?.email || ""),
+    phone_number: String(formData?.phone_number || ""),
+    ad_name: String(formData?.ad_name || ""),
+    product_id: String(formData?.product_id || ""),
+    post_type: String(formData?.post_type || ""),
+    post_date_from: String(formData?.post_date_from || ""),
+    post_date_to: String(formData?.post_date_to || ""),
+    custom_dates: Array.isArray(formData?.custom_dates) ? formData.custom_dates : [],
+    post_time: String(formData?.post_time || ""),
+    reminder_minutes: String(formData?.reminder_minutes || ""),
+    ad_text: String(formData?.ad_text || ""),
+    media: Array.isArray(formData?.media) ? formData.media : [],
+    placement: String(formData?.placement || ""),
+    notes: String(formData?.notes || ""),
+    multi_week_weeks: String(formData?.multi_week_weeks || ""),
+    series_week_start: String(formData?.series_week_start || ""),
+    multi_week_overrides: Array.isArray(formData?.multi_week_overrides)
+      ? formData.multi_week_overrides
+      : [],
+    customDate: String(customDate || ""),
+    customTime: String(customTime || ""),
+    showMultiWeekWorkspace: Boolean(showMultiWeekWorkspace),
+  });
+
 export default function AdvertiserCreateAdSection({
   advertiser = null,
   products = [],
@@ -102,8 +136,18 @@ export default function AdvertiserCreateAdSection({
   const [checkingAvailability, setCheckingAvailability] = useState(false);
   const [pastTimeError, setPastTimeError] = useState(null);
   const [fullyBookedDates, setFullyBookedDates] = useState([]);
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [leaveIntent, setLeaveIntent] = useState("page");
   const formDataRef = useRef(formData);
   const availabilityRequestIdRef = useRef(0);
+  const initialSnapshotRef = useRef(
+    serializeAdvertiserCreateState({
+      formData: initialForm,
+      customDate: "",
+      customTime: "",
+      showMultiWeekWorkspace: false,
+    }),
+  );
 
   const identityReady =
     String(initialForm.advertiser_name || "").trim() &&
@@ -135,6 +179,16 @@ export default function AdvertiserCreateAdSection({
   );
   const isDedicatedMultiWeek = showMultiWeekWorkspace;
   const useSplitLayout = true;
+  const hasUnsavedChanges = useMemo(
+    () =>
+      serializeAdvertiserCreateState({
+        formData,
+        customDate,
+        customTime,
+        showMultiWeekWorkspace,
+      }) !== initialSnapshotRef.current,
+    [customDate, customTime, formData, showMultiWeekWorkspace],
+  );
 
   useEffect(() => {
     if (!showPreview || !isMultiWeekPreview) {
@@ -151,6 +205,12 @@ export default function AdvertiserCreateAdSection({
     setFormData((current) => {
       const nextIdentity = buildInitialFormData({ advertiser, user });
       if (isFormBlank(current)) {
+        initialSnapshotRef.current = serializeAdvertiserCreateState({
+          formData: nextIdentity,
+          customDate: "",
+          customTime: "",
+          showMultiWeekWorkspace: false,
+        });
         return nextIdentity;
       }
 
@@ -166,6 +226,12 @@ export default function AdvertiserCreateAdSection({
 
   const resetForm = () => {
     const next = buildInitialFormData({ advertiser, user });
+    initialSnapshotRef.current = serializeAdvertiserCreateState({
+      formData: next,
+      customDate: "",
+      customTime: "",
+      showMultiWeekWorkspace: false,
+    });
     formDataRef.current = next;
     availabilityRequestIdRef.current += 1;
     setFormData(next);
@@ -176,6 +242,9 @@ export default function AdvertiserCreateAdSection({
     setPastTimeError(null);
     setFullyBookedDates([]);
     setShowPreview(false);
+    setShowMultiWeekWorkspace(false);
+    setLeaveModalOpen(false);
+    setLeaveIntent("page");
   };
 
   const handleChange = (field, value) => {
@@ -551,8 +620,49 @@ export default function AdvertiserCreateAdSection({
     if (loading) {
       return;
     }
+
+    if (hasUnsavedChanges) {
+      setLeaveIntent("page");
+      setLeaveModalOpen(true);
+      return;
+    }
+
     resetForm();
     navigateBackWithFallback({ fallback: onBack });
+  };
+
+  const discardAndExitCreateFlow = () => {
+    if (loading) {
+      return;
+    }
+
+    resetForm();
+    navigateBackWithFallback({ fallback: onBack });
+  };
+
+  const exitMultiWeekWorkspace = () => {
+    if (loading) {
+      return;
+    }
+
+    setShowMultiWeekWorkspace(false);
+    handleChange("post_type", "One-Time Post");
+    setLeaveModalOpen(false);
+    setLeaveIntent("page");
+  };
+
+  const requestExitMultiWeekWorkspace = () => {
+    if (loading) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setLeaveIntent("workspace");
+      setLeaveModalOpen(true);
+      return;
+    }
+
+    exitMultiWeekWorkspace();
   };
 
   const requestAdvertiserSubmit = () => {
@@ -611,10 +721,7 @@ export default function AdvertiserCreateAdSection({
                     <div className="flex items-center gap-2 self-start">
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowMultiWeekWorkspace(false);
-                          handleChange("post_type", "One-Time Post");
-                        }}
+                        onClick={requestExitMultiWeekWorkspace}
                         className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50"
                       >
                         Cancel
@@ -821,6 +928,57 @@ export default function AdvertiserCreateAdSection({
           </div>
         </div>
       </div>
+
+      <Modal isOpen={leaveModalOpen} onClose={() => setLeaveModalOpen(false)} size="sm">
+        <div className="p-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {leaveIntent === "workspace"
+                ? "Leave this multi-week booking draft?"
+                : "Leave without submitting this request?"}
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              {leaveIntent === "workspace"
+                ? "You have unsaved booking details. Submit the booking now, or discard this draft before leaving the workspace."
+                : "You have unsaved ad details. Submit this request now, or discard it before you leave."}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setLeaveModalOpen(false);
+                requestAdvertiserSubmit();
+              }}
+              disabled={submitDisabled}
+              className="w-full rounded-lg bg-black px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isDedicatedMultiWeek ? "Submit booking" : "Submit request"}
+            </button>
+            <button
+              type="button"
+              onClick={
+                leaveIntent === "workspace"
+                  ? exitMultiWeekWorkspace
+                  : discardAndExitCreateFlow
+              }
+              disabled={loading}
+              className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Discard draft
+            </button>
+            <button
+              type="button"
+              onClick={() => setLeaveModalOpen(false)}
+              disabled={loading}
+              className="w-full rounded-lg bg-gray-100 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Keep editing
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {showPreview ? (
         <div

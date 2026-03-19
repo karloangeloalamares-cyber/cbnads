@@ -89,6 +89,57 @@ export function insertAtCursor(textarea, textToInsert) {
   };
 }
 
+export function toggleBulletList(textarea) {
+  const start = Number.isFinite(textarea.selectionStart) ? textarea.selectionStart : 0;
+  const end = Number.isFinite(textarea.selectionEnd) ? textarea.selectionEnd : start;
+  const text = textarea.value;
+
+  const lineStart = start > 0 ? text.lastIndexOf("\n", start - 1) + 1 : 0;
+  const nextLineBreak = text.indexOf("\n", end);
+  const lineEnd = nextLineBreak === -1 ? text.length : nextLineBreak;
+  const selectedBlock = text.slice(lineStart, lineEnd);
+  const lines = selectedBlock.split("\n");
+  const bulletPattern = /^(\s*)• /;
+  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+  const shouldRemoveBullets =
+    nonEmptyLines.length > 0 && nonEmptyLines.every((line) => bulletPattern.test(line));
+
+  const updatedLines = lines.map((line) => {
+    if (!line.trim()) {
+      if (lines.length === 1) {
+        return shouldRemoveBullets ? line : "• ";
+      }
+      return line;
+    }
+
+    if (shouldRemoveBullets) {
+      return line.replace(bulletPattern, "$1");
+    }
+
+    const indentation = line.match(/^\s*/)?.[0] || "";
+    return `${indentation}• ${line.slice(indentation.length)}`;
+  });
+
+  const updatedBlock = updatedLines.join("\n");
+  const newText = `${text.slice(0, lineStart)}${updatedBlock}${text.slice(lineEnd)}`;
+
+  if (start === end && lines.length === 1) {
+    const delta = updatedLines[0].length - lines[0].length;
+    const nextCursorPos = Math.max(lineStart, start + delta);
+    return {
+      newText,
+      selectionStart: nextCursorPos,
+      selectionEnd: nextCursorPos,
+    };
+  }
+
+  return {
+    newText,
+    selectionStart: lineStart,
+    selectionEnd: lineStart + updatedBlock.length,
+  };
+}
+
 export function wrapSelection(textarea, wrapChar) {
   const start = textarea.selectionStart;
   const end = textarea.selectionEnd;

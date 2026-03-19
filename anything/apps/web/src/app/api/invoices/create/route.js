@@ -92,6 +92,7 @@ export async function POST(request) {
       payment_provider,
       payment_reference,
       payment_note,
+      apply_credits = false,
     } = body;
 
     if (!advertiser_name) {
@@ -207,7 +208,7 @@ export async function POST(request) {
       items: invoiceItemsPayload,
       adIds: linkedAdIds,
       updateAdsPayment: String(normalizedStatus).toLowerCase() === "paid" ? "Paid" : "Pending",
-      applyCredits: String(normalizedStatus).toLowerCase() === "pending",
+      applyCredits: apply_credits === true,
       actorUserId: auth.user.id,
       creditNote: "Prepaid credits applied automatically during invoice creation.",
     });

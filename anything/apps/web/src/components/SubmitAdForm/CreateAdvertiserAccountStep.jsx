@@ -47,8 +47,8 @@ export function CreateAdvertiserAccountStep({
           and track future submissions.
         </p>
         <p className="mt-2 text-xs text-gray-500">
-          Public sign-ups are disabled, so complete account setup here instead of using
-          <code className="ml-1">/account/signup</code>.
+          Account setup starts here after your first ad request. Create your login below
+          to track submissions, ads, and billing.
         </p>
       </div>
 
