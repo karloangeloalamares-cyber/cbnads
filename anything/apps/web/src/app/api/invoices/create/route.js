@@ -13,6 +13,19 @@ import {
 } from "../../../../lib/invoicePayment.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
 
+const firstPresentMoneyValue = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+    return value;
+  }
+  return undefined;
+};
+
 const validateInvoiceSettlement = ({
   status,
   total,
@@ -141,7 +154,7 @@ export async function POST(request) {
       };
     });
 
-    const explicitTotal = Number(body?.total ?? amount);
+    const explicitTotal = Number(firstPresentMoneyValue(body?.total, amount));
     if (invoiceItemsPayload.length > 0 && Number.isFinite(explicitTotal) && explicitTotal > 0) {
       const currentSubtotal = sumInvoiceItemAmounts(invoiceItemsPayload);
       const currentTotal = currentSubtotal - normalizedDiscount + normalizedTax;

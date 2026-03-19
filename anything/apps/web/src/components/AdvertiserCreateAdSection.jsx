@@ -178,7 +178,6 @@ export default function AdvertiserCreateAdSection({
     [formData, isMultiWeekPreview, previewWeekCount, previewWeekIndex],
   );
   const isDedicatedMultiWeek = showMultiWeekWorkspace;
-  const useSplitLayout = true;
   const hasUnsavedChanges = useMemo(
     () =>
       serializeAdvertiserCreateState({
@@ -679,7 +678,7 @@ export default function AdvertiserCreateAdSection({
       <div className={`min-h-screen ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
         <div className="flex max-w-none mx-auto">
           <div className={`flex-1 px-5 py-8 sm:px-6 sm:py-10 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
-            <div className={`${useSplitLayout ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
+            <div className="max-w-[1380px] mx-auto mb-6 flex items-center justify-between">
               <button
                 type="button"
                 onClick={exitCreateFlow}
@@ -704,8 +703,8 @@ export default function AdvertiserCreateAdSection({
               </div>
             </div>
 
-            <div className={useSplitLayout ? "max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
-              <div className={useSplitLayout ? "min-w-0" : ""}>
+            <div className="max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start">
+              <div className="min-w-0">
               {isDedicatedMultiWeek ? (
                 <div className="mb-8 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-7">
                   <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -811,7 +810,7 @@ export default function AdvertiserCreateAdSection({
                 id="advertiser-create-ad-form"
                 onSubmit={handleSubmit}
                 noValidate
-                className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
+                className="space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8"
               >
                 <AdvertiserInfoSection
                   formData={formData}
@@ -878,52 +877,27 @@ export default function AdvertiserCreateAdSection({
                 ) : null}
               </form>
               </div>
-              {useSplitLayout ? (
-                <div className="hidden lg:flex sticky top-8 min-h-[720px] rounded-[32px] border border-gray-200 bg-white p-5 shadow-sm xl:p-6">
-                  <div className="flex w-full flex-col rounded-[26px] bg-[#F7F4EE] px-5 py-5">
-                    <div className="mb-5">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
-                        Live Preview
-                      </div>
-                      {isDedicatedMultiWeek ? (
-                        <div className="mt-2 text-sm font-semibold text-gray-900">
-                          {`Week ${previewWeekIndex + 1}`}
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-sm font-semibold text-gray-900">
-                          Main create-ad preview
-                        </div>
-                      )}
-                      <p className="mt-1 text-xs leading-5 text-gray-600">
-                        {isDedicatedMultiWeek
-                          ? "Switch weeks to review copy, media, and schedule overrides before you submit the full series."
-                          : "Your mobile ad preview updates as you fill in the form."}
-                      </p>
-                    </div>
-                    {isDedicatedMultiWeek ? (
-                      <div className="mb-5 grid grid-cols-2 gap-2">
-                        {Array.from({ length: previewWeekCount }).map((_, index) => (
-                          <button
-                            key={index}
-                            type="button"
-                            onClick={() => setPreviewWeekIndex(index)}
-                            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                              previewWeekIndex === index
-                                ? "border-gray-900 bg-gray-900 text-white"
-                                : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
-                            }`}
-                          >
-                            {`Week ${index + 1}`}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="flex-1 rounded-[28px] bg-white px-3 py-5 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-                      <AdPreview formData={previewData} />
-                    </div>
+              <div className="hidden lg:flex sticky top-8 min-h-[720px] flex-col items-center justify-start">
+                {isDedicatedMultiWeek ? (
+                  <div className="mb-4 grid w-full max-w-[332px] grid-cols-2 gap-2">
+                    {Array.from({ length: previewWeekCount }).map((_, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        onClick={() => setPreviewWeekIndex(index)}
+                        className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                          previewWeekIndex === index
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                        }`}
+                      >
+                        {`Week ${index + 1}`}
+                      </button>
+                    ))}
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+                <AdPreview formData={previewData} sticky={false} />
+              </div>
             </div>
           </div>
         </div>

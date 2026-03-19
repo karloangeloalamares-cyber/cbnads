@@ -389,49 +389,26 @@ export default function SubmitAdPage() {
                 </form>
                 </div>
                 {useSplitLayout ? (
-                  <div className="hidden lg:flex sticky top-8 min-h-[720px] rounded-[32px] border border-gray-200 bg-white p-5 shadow-sm xl:p-6">
-                    <div className="flex w-full flex-col rounded-[26px] bg-[#F7F4EE] px-5 py-5">
-                      <div className="mb-5">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
-                          Live Preview
-                        </div>
-                        {isDedicatedMultiWeek ? (
-                          <div className="mt-2 text-sm font-semibold text-gray-900">
-                            {`Week ${previewWeekIndex + 1}`}
-                          </div>
-                        ) : (
-                          <div className="mt-2 text-sm font-semibold text-gray-900">
-                            Main submit-ad preview
-                          </div>
-                        )}
-                        <p className="mt-1 text-xs leading-5 text-gray-600">
-                          {isDedicatedMultiWeek
-                            ? "Switch weeks to review copy, media, and schedule overrides before you submit the full series."
-                            : "Your mobile ad preview updates as you fill in the form."}
-                        </p>
+                  <div className="hidden lg:flex sticky top-8 min-h-[720px] flex-col items-center justify-start">
+                    {isDedicatedMultiWeek ? (
+                      <div className="mb-4 grid w-full max-w-[332px] grid-cols-2 gap-2">
+                        {Array.from({ length: previewWeekCount }).map((_, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            onClick={() => setPreviewWeekIndex(index)}
+                            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                              previewWeekIndex === index
+                                ? "border-gray-900 bg-gray-900 text-white"
+                                : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                            }`}
+                          >
+                            {`Week ${index + 1}`}
+                          </button>
+                        ))}
                       </div>
-                      {isDedicatedMultiWeek ? (
-                        <div className="mb-5 grid grid-cols-2 gap-2">
-                          {Array.from({ length: previewWeekCount }).map((_, index) => (
-                            <button
-                              key={index}
-                              type="button"
-                              onClick={() => setPreviewWeekIndex(index)}
-                              className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                                previewWeekIndex === index
-                                  ? "border-gray-900 bg-gray-900 text-white"
-                                  : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
-                              }`}
-                            >
-                              {`Week ${index + 1}`}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                      <div className="flex-1 rounded-[28px] bg-white px-3 py-5 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-                        <AdPreview formData={previewData} />
-                      </div>
-                    </div>
+                    ) : null}
+                    <AdPreview formData={previewData} sticky={false} />
                   </div>
                 ) : null}
               </div>

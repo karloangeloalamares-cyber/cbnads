@@ -73,7 +73,6 @@ import InvoiceSortableHeader from "@/components/InvoiceSortableHeader";
 import { AdvertiserInfoSection } from "@/components/SubmitAdForm/AdvertiserInfoSection";
 import { AdDetailsSection } from "@/components/SubmitAdForm/AdDetailsSection";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
-import { LivePreviewRail } from "@/components/preview/LivePreviewRail";
 import { NotesSection } from "@/components/SubmitAdForm/NotesSection";
 import { PostTypeSection } from "@/components/SubmitAdForm/PostTypeSection";
 import { ScheduleSection } from "@/components/SubmitAdForm/ScheduleSection";
@@ -772,6 +771,30 @@ const getInvoiceStatusColor = (status) => {
 const isInvoicePaidViaCredits = (invoice) => invoice?.paid_via_credits === true;
 const isCreditInvoiceRecord = (invoice) =>
   String(invoice?.invoice_number || "").trim().toUpperCase().startsWith("CRE-");
+const getInvoiceDisplayTotal = (invoice) =>
+  Number(invoice?.total ?? invoice?.amount ?? invoice?.amount_paid ?? 0) || 0;
+const getDraftInvoiceNumericAmount = (invoice) => {
+  const totalText = String(invoice?.total ?? "").trim();
+  if (totalText) {
+    return Number.parseFloat(totalText) || 0;
+  }
+  const amountText = String(invoice?.amount ?? "").trim();
+  if (amountText) {
+    return Number.parseFloat(amountText) || 0;
+  }
+  return 0;
+};
+const getDraftInvoiceAmountField = (invoice, fallback = 0) => {
+  const totalText = String(invoice?.total ?? "").trim();
+  if (totalText) {
+    return totalText;
+  }
+  const amountText = String(invoice?.amount ?? "").trim();
+  if (amountText) {
+    return amountText;
+  }
+  return fallback;
+};
 const getInvoiceAssociationSummary = (invoice) => {
   const items = Array.isArray(invoice?.items) ? invoice.items : [];
   const linkedAdIds = new Set();
@@ -5618,8 +5641,8 @@ export default function AdsPage() {
           bValue = Array.isArray(b.ad_ids) ? b.ad_ids.length : 0;
           break;
         case "total":
-          aValue = Number(a.amount) || 0;
-          bValue = Number(b.amount) || 0;
+          aValue = getInvoiceDisplayTotal(a);
+          bValue = getInvoiceDisplayTotal(b);
           break;
         default:
           aValue = "";
@@ -6273,18 +6296,8 @@ export default function AdsPage() {
       discount: draftInvoice?.discount ?? existingInvoice?.discount ?? 0,
       tax: draftInvoice?.tax ?? existingInvoice?.tax ?? 0,
       notes: draftInvoice?.notes ?? existingInvoice?.notes ?? "",
-      amount:
-        draftInvoice?.total ??
-        draftInvoice?.amount ??
-        existingInvoice?.total ??
-        existingInvoice?.amount ??
-        0,
-      total:
-        draftInvoice?.total ??
-        draftInvoice?.amount ??
-        existingInvoice?.total ??
-        existingInvoice?.amount ??
-        0,
+      amount: getDraftInvoiceAmountField(draftInvoice, getDraftInvoiceAmountField(existingInvoice, 0)),
+      total: getDraftInvoiceAmountField(draftInvoice, getDraftInvoiceAmountField(existingInvoice, 0)),
       amount_paid: draftInvoice?.amount_paid ?? existingInvoice?.amount_paid ?? 0,
       paid_date: draftInvoice?.paid_date ?? existingInvoice?.paid_date ?? "",
       payment_provider:
@@ -6320,7 +6333,7 @@ export default function AdsPage() {
       );
     }
 
-    const explicitAmount = Number(draftInvoice?.total ?? draftInvoice?.amount ?? 0) || 0;
+    const explicitAmount = getDraftInvoiceNumericAmount(draftInvoice);
     if (explicitAmount > 0) {
       return [
         {
@@ -6359,8 +6372,8 @@ export default function AdsPage() {
       discount: draftInvoice?.discount ?? 0,
       tax: draftInvoice?.tax ?? 0,
       notes: draftInvoice?.notes ?? "",
-      amount: draftInvoice?.total ?? draftInvoice?.amount ?? 0,
-      total: draftInvoice?.total ?? draftInvoice?.amount ?? 0,
+      amount: getDraftInvoiceAmountField(draftInvoice, 0),
+      total: getDraftInvoiceAmountField(draftInvoice, 0),
       amount_paid: draftInvoice?.amount_paid ?? 0,
       paid_date: draftInvoice?.paid_date ?? "",
       payment_provider: draftInvoice?.payment_provider ?? "",
@@ -8976,9 +8989,7 @@ export default function AdsPage() {
 
       if (isCreditComposer) {
         const advertiserId = String(invoice.advertiser_id || "").trim();
-        const absoluteAmount = Math.abs(
-          Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0,
-        );
+        const absoluteAmount = Math.abs(getDraftInvoiceNumericAmount(invoice));
         const reason = String(invoice.notes || "").trim();
         const paymentProvider = normalizeInvoicePaymentProvider(invoice.payment_provider);
         const paymentReference = String(invoice.payment_reference || "").trim();
@@ -9085,8 +9096,7 @@ export default function AdsPage() {
       }
       const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
       const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
-      const explicitAmountValue =
-        Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
+      const explicitAmountValue = getDraftInvoiceNumericAmount(invoice);
       const hasPositiveAmount = explicitAmountValue > 0;
       if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
         throw new Error("Link at least one ad, add line items, or enter a positive amount.");
@@ -10459,8 +10469,7 @@ export default function AdsPage() {
 
     const hasLineItems = Array.isArray(invoice.items) && invoice.items.length > 0;
     const hasLinkedAds = Array.isArray(invoice.ad_ids) && invoice.ad_ids.length > 0;
-    const explicitAmountValue =
-      Number.parseFloat(String(invoice.total ?? invoice.amount ?? "").trim()) || 0;
+    const explicitAmountValue = getDraftInvoiceNumericAmount(invoice);
     const hasPositiveAmount = explicitAmountValue > 0;
     if (!hasPositiveAmount && !hasLineItems && !hasLinkedAds) {
       throw new Error("Link at least one ad, add line items, or enter a positive amount.");
@@ -13425,13 +13434,10 @@ export default function AdsPage() {
                   </div>
                 </div>
 
-                <div className="hidden lg:block w-[380px] xl:w-[420px] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0">
-                  <LivePreviewRail
-                    title="Main create-ad preview"
-                    description="Your mobile ad preview updates as you fill in the form."
-                  >
-                    <AdPreview formData={createAdPreviewData} />
-                  </LivePreviewRail>
+                <div className="hidden lg:flex w-[380px] xl:w-[420px] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0 items-start justify-center">
+                  <div className="sticky top-8">
+                    <AdPreview formData={createAdPreviewData} sticky={false} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -15070,7 +15076,7 @@ export default function AdsPage() {
                               </td>
                               <td className="px-6 py-4">
                                 <span className="text-xs font-semibold text-gray-900">
-                                  {formatCurrency(item.amount)}
+                                  {formatCurrency(getInvoiceDisplayTotal(item))}
                                 </span>
                               </td>
                               <td

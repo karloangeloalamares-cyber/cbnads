@@ -58,6 +58,19 @@ const isCreditInvoiceError = (error) =>
     String(error?.message || ""),
   );
 
+const firstPresentMoneyValue = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) {
+      continue;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+    return value;
+  }
+  return undefined;
+};
+
 const validateInvoiceSettlement = ({
   status,
   total,
@@ -397,7 +410,10 @@ export async function PUT(request) {
         );
       }
 
-      const nextCreditTotal = toNumber(total ?? amount ?? currentInvoice.total ?? currentInvoice.amount, 0);
+      const nextCreditTotal = toNumber(
+        firstPresentMoneyValue(total, amount, currentInvoice.total, currentInvoice.amount),
+        0,
+      );
       const { error: creditUpdateError } = await supabase.rpc(
         "cbnads_web_update_credit_invoice_atomic",
         {
@@ -515,7 +531,7 @@ export async function PUT(request) {
       : [];
 
     let computedTotal = toNumber(currentInvoice.total, 0);
-    const explicitTotal = Number(total ?? amount);
+    const explicitTotal = Number(firstPresentMoneyValue(total, amount));
     if (normalizedItems.length > 0) {
       const currentSubtotal = sumInvoiceItemAmounts(normalizedItems);
       const currentTotal = currentSubtotal - normalizedDiscount + normalizedTax;
