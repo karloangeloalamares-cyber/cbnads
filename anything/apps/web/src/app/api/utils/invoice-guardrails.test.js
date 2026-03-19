@@ -7,9 +7,11 @@ import {
   getCreditInvoiceRestrictedChanges,
   getInvoiceMutationGuardrail,
   getReconciliationInvoiceRestrictedChanges,
+  getSolaSettledInvoiceRestrictedChanges,
   getSettledInvoiceRestrictedChanges,
   hasExternalInvoiceSettlement,
   hasInvoiceRecordedPayment,
+  isSolaSettledInvoice,
   isInvoiceReconciliationRequired,
   isCreditInvoiceRecord,
   normalizeFinancialChangeReason,
@@ -34,7 +36,7 @@ describe("invoice guardrails", () => {
     expect(hasExternalInvoiceSettlement({ status: "Pending", amount_paid: 0, paid_via_credits: false })).toBe(false);
   });
 
-  it("blocks structural edits on settled invoices but allows metadata-only edits", () => {
+  it("blocks structural edits on settled invoices but allows payment metadata edits", () => {
     const currentInvoice = {
       advertiser_id: "adv-1",
       advertiser_name: "Acme Co",
@@ -43,22 +45,58 @@ describe("invoice guardrails", () => {
       tax: 0,
       total: 100,
       amount_paid: 100,
+      payment_provider: "stripe",
+      payment_reference: "pi_123",
     };
 
     expect(
       getSettledInvoiceRestrictedChanges(currentInvoice, {
         issue_date: "2026-03-19",
         notes: "Updated internal note",
+        amount_paid: 100,
+        status: "Paid",
+        payment_provider: "paypal",
+        payment_reference: "PAY-123",
       }),
     ).toEqual([]);
 
     expect(
       getSettledInvoiceRestrictedChanges(currentInvoice, {
         total: 150,
-        status: "Pending",
         items: [{ description: "Changed item" }],
       }),
-    ).toEqual(["line items", "status", "total amount"]);
+    ).toEqual(["line items", "total amount"]);
+  });
+
+  it("keeps Sola-settled invoices locked to recorded settlement fields", () => {
+    const currentInvoice = {
+      advertiser_id: "adv-1",
+      advertiser_name: "Acme Co",
+      status: "Paid",
+      discount: 0,
+      tax: 0,
+      total: 100,
+      amount_paid: 100,
+      payment_provider: "sola",
+      payment_reference: "xref-1",
+      payment_note: "Captured by webhook",
+      paid_date: "2026-03-19",
+    };
+
+    expect(isSolaSettledInvoice(currentInvoice)).toBe(true);
+
+    expect(
+      getSolaSettledInvoiceRestrictedChanges(currentInvoice, {
+        notes: "Internal note change",
+      }),
+    ).toEqual([]);
+
+    expect(
+      getSolaSettledInvoiceRestrictedChanges(currentInvoice, {
+        amount_paid: 80,
+        payment_reference: "xref-2",
+      }),
+    ).toEqual(["amount paid", "payment reference"]);
   });
 
   it("keeps credit invoices locked to their advertiser, paid state, and accounting fields", () => {

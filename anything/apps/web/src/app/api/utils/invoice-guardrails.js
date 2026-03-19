@@ -1,4 +1,5 @@
 import { toNumber } from "./supabase-db.js";
+import { isSolaInvoicePaymentProvider } from "../../../lib/invoicePayment.js";
 
 const normalizeText = (value) => String(value || "").trim().toLowerCase();
 
@@ -63,6 +64,9 @@ export const hasExternalInvoiceSettlement = (invoice) => {
   const amountPaid = normalizeMoney(invoice?.amount_paid);
   return !Boolean(invoice?.paid_via_credits) && (amountPaid > 0 || status === "paid" || status === "partial");
 };
+
+export const isSolaSettledInvoice = (invoice) =>
+  hasExternalInvoiceSettlement(invoice) && isSolaInvoicePaymentProvider(invoice?.payment_provider);
 
 export const getInvoiceMutationGuardrail = (invoice) => {
   const total = normalizeMoney(invoice?.total ?? invoice?.amount);
@@ -162,9 +166,6 @@ export const getSettledInvoiceRestrictedChanges = (currentInvoice, body = {}) =>
   ) {
     violations.push("advertiser name");
   }
-  if (valueChanged(body.status, currentInvoice?.status, normalizeText)) {
-    violations.push("status");
-  }
   if (valueChanged(body.discount, currentInvoice?.discount, normalizeMoney)) {
     violations.push("discount");
   }
@@ -187,9 +188,47 @@ export const getSettledInvoiceRestrictedChanges = (currentInvoice, body = {}) =>
     if (nextTotal !== currentTotal) {
       violations.push("total amount");
     }
-    if (valueChanged(body.amount_paid, currentInvoice?.amount_paid, normalizeMoney)) {
-      violations.push("amount paid");
-    }
+  }
+
+  return violations;
+};
+
+export const getSolaSettledInvoiceRestrictedChanges = (currentInvoice, body = {}) => {
+  const violations = getSettledInvoiceRestrictedChanges(currentInvoice, body);
+
+  if (valueChanged(body.status, currentInvoice?.status, normalizeText)) {
+    violations.push("status");
+  }
+  if (valueChanged(body.amount_paid, currentInvoice?.amount_paid, normalizeMoney)) {
+    violations.push("amount paid");
+  }
+  if (
+    valueChanged(body.payment_provider, currentInvoice?.payment_provider, (value) =>
+      String(value || "").trim().toLowerCase(),
+    )
+  ) {
+    violations.push("payment provider");
+  }
+  if (
+    valueChanged(body.payment_reference, currentInvoice?.payment_reference, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment reference");
+  }
+  if (
+    valueChanged(body.payment_note, currentInvoice?.payment_note, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment note");
+  }
+  if (
+    valueChanged(body.paid_date, currentInvoice?.paid_date, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("paid date");
   }
 
   return violations;
@@ -217,6 +256,27 @@ export const getReconciliationInvoiceRestrictedChanges = (currentInvoice, body =
   }
   if (valueChanged(body.amount_paid, currentInvoice?.amount_paid, normalizeMoney)) {
     violations.push("amount paid");
+  }
+  if (
+    valueChanged(body.payment_provider, currentInvoice?.payment_provider, (value) =>
+      String(value || "").trim().toLowerCase(),
+    )
+  ) {
+    violations.push("payment provider");
+  }
+  if (
+    valueChanged(body.payment_reference, currentInvoice?.payment_reference, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment reference");
+  }
+  if (
+    valueChanged(body.payment_note, currentInvoice?.payment_note, (value) =>
+      String(value || "").trim(),
+    )
+  ) {
+    violations.push("payment note");
   }
 
   return violations;

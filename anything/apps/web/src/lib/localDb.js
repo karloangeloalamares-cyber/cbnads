@@ -6,6 +6,11 @@ import {
   getTodayInAppTimeZone,
   normalizeDateKey,
 } from '@/lib/timezone';
+import {
+  invoicePaymentProviderRequiresNote,
+  invoicePaymentProviderRequiresReference,
+  normalizeInvoicePaymentProvider,
+} from '@/lib/invoicePayment';
 import { normalizeUSPhoneNumber } from '@/lib/phone';
 import { isInternalRole, normalizeAppRole } from '@/lib/permissions';
 import { formatPostTypeLabel, normalizePostTypeValue } from '@/lib/postType';
@@ -1312,6 +1317,9 @@ const fromInvoiceRow = (row) => {
     notes: row.notes || '',
     amount_paid: toMoney(row.amount_paid),
     paid_via_credits: Boolean(row.paid_via_credits),
+    payment_provider: row.payment_provider || '',
+    payment_reference: row.payment_reference || '',
+    payment_note: row.payment_note || '',
     deleted_at: row.deleted_at || null,
     is_recurring: Boolean(row.is_recurring),
     recurring_period: row.recurring_period || '',
@@ -1341,6 +1349,9 @@ const toInvoiceRow = (input) => ({
   notes: String(input.notes || '').trim(),
   amount_paid: toMoney(input.amount_paid),
   paid_via_credits: Boolean(input.paid_via_credits),
+  payment_provider: String(input.payment_provider || '').trim(),
+  payment_reference: String(input.payment_reference || '').trim(),
+  payment_note: String(input.payment_note || '').trim(),
   deleted_at: input.deleted_at || null,
   is_recurring: Boolean(input.is_recurring),
   recurring_period: String(input.recurring_period || '').trim(),
@@ -2653,15 +2664,55 @@ export const upsertInvoice = async (input) => {
     }
 
     const status = input.status || 'Unpaid';
-    if (existing?.paid_via_credits && normalizeText(status) !== 'paid') {
+    const normalizedStatus = normalizeText(status);
+    if (existing?.paid_via_credits && normalizedStatus !== 'paid') {
       throw new Error('Credit-paid invoices must remain marked as Paid.');
     }
-    const amountPaid =
-      normalizeText(status) === 'paid' ? total : toMoney(input.amount_paid);
     const paidViaCredits =
       input.paid_via_credits !== undefined
         ? Boolean(input.paid_via_credits)
         : Boolean(existing?.paid_via_credits);
+    const isPaidStatus = normalizedStatus === 'paid';
+    const isPartialStatus = normalizedStatus === 'partial';
+    const shouldCapturePaymentMetadata = !paidViaCredits && (isPaidStatus || isPartialStatus);
+    const paymentProvider = shouldCapturePaymentMetadata
+      ? normalizeInvoicePaymentProvider(
+          input.payment_provider ?? existing?.payment_provider ?? '',
+        )
+      : '';
+    const paymentReference = shouldCapturePaymentMetadata
+      ? String(input.payment_reference ?? existing?.payment_reference ?? '').trim()
+      : '';
+    const paymentNote = shouldCapturePaymentMetadata
+      ? String(input.payment_note ?? existing?.payment_note ?? '').trim()
+      : '';
+    const amountPaid = isPaidStatus
+      ? total
+      : isPartialStatus
+        ? toMoney(input.amount_paid ?? existing?.amount_paid)
+        : '0.00';
+
+    if (shouldCapturePaymentMetadata) {
+      if (!paymentProvider) {
+        throw new Error('Paid or partial invoices require a payment provider.');
+      }
+      if (
+        invoicePaymentProviderRequiresReference(paymentProvider) &&
+        !paymentReference
+      ) {
+        throw new Error('This payment provider requires a transaction or reference number.');
+      }
+      if (invoicePaymentProviderRequiresNote(paymentProvider) && !paymentNote) {
+        throw new Error('Other payment methods require a payment note.');
+      }
+    }
+
+    if (isPartialStatus) {
+      const partialAmount = numberOrZero(amountPaid);
+      if (!(partialAmount > 0 && partialAmount < numberOrZero(total))) {
+        throw new Error('Partial invoices require an amount paid greater than 0 and less than the total.');
+      }
+    }
 
     const payload = {
       id: invoiceId,
@@ -2674,7 +2725,10 @@ export const upsertInvoice = async (input) => {
       amount: total,
       due_date: toDateOnly(input.due_date),
       status,
-      paid_date: normalizeText(status) === 'paid' ? toDateOnly(input.paid_date || now.slice(0, 10)) : '',
+      paid_date:
+        shouldCapturePaymentMetadata
+          ? toDateOnly(input.paid_date || existing?.paid_date || now.slice(0, 10))
+          : '',
       ad_ids: adIds,
       items: items.map((item) => ({
         ...item,
@@ -2694,6 +2748,9 @@ export const upsertInvoice = async (input) => {
       notes: String(input.notes || '').trim(),
       amount_paid: amountPaid,
       paid_via_credits: paidViaCredits,
+      payment_provider: paymentProvider,
+      payment_reference: paymentReference,
+      payment_note: paymentNote,
       created_at: existing?.created_at || now,
       updated_at: now,
     };

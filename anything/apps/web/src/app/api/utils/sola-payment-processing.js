@@ -91,6 +91,7 @@ export const applySolaPaymentPayload = async ({ request, supabase, payload }) =>
   const invoiceTotal = Math.max(0, toNumber(invoice.total ?? invoice.amount, 0));
   const existingAmountPaid = Math.max(0, toNumber(invoice.amount_paid, 0));
   const webhookAmount = readSolaWebhookAmount(payload);
+  const transactionRef = String(payload?.xRefNum || payload?.xrefnum || "").trim() || null;
   const nextAmountPaid = Math.max(existingAmountPaid, webhookAmount);
   const appliedAmountPaid = Math.min(nextAmountPaid, invoiceTotal || nextAmountPaid);
   const nextStatus =
@@ -107,6 +108,10 @@ export const applySolaPaymentPayload = async ({ request, supabase, payload }) =>
     .update({
       amount_paid: appliedAmountPaid,
       status: nextStatus,
+      paid_date: nextStatus === "Paid" || nextStatus === "Partial" ? nowIso.slice(0, 10) : null,
+      payment_provider: "sola",
+      payment_reference: transactionRef,
+      payment_note: "Captured via Sola webhook.",
       updated_at: nowIso,
     })
     .eq("id", invoice.id);
@@ -150,7 +155,7 @@ export const applySolaPaymentPayload = async ({ request, supabase, payload }) =>
     invoice_number: invoice.invoice_number,
     status: nextStatus,
     amount_paid: appliedAmountPaid,
-    transaction_ref: String(payload?.xRefNum || payload?.xrefnum || "").trim() || null,
+    transaction_ref: transactionRef,
     notifications: notificationResult,
   };
 };

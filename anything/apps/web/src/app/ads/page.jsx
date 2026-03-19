@@ -98,6 +98,14 @@ import {
   INVOICE_COMPANY_NAME,
 } from "@/lib/invoiceCompany";
 import {
+  getInvoicePaymentProviderLabel,
+  INVOICE_PAYMENT_PROVIDER_OPTIONS,
+  invoicePaymentProviderRequiresNote,
+  invoicePaymentProviderRequiresReference,
+  isSolaInvoicePaymentProvider,
+  normalizeInvoicePaymentProvider,
+} from "@/lib/invoicePayment";
+import {
   createId,
   deleteAd,
   deleteAdvertiser,
@@ -342,6 +350,10 @@ const blankInvoice = {
   total: "",
   amount_paid: "0.00",
   paid_via_credits: false,
+  paid_date: "",
+  payment_provider: "",
+  payment_reference: "",
+  payment_note: "",
   notes: "",
 };
 
@@ -498,16 +510,21 @@ const getInvoiceStatusPriority = (value) => {
   if (status === "Pending") {
     return 0;
   }
-  if (status === "Paid") {
-    return 2;
+  if (status === "Partial") {
+    return 1;
   }
-  return 1;
+  if (status === "Paid") {
+    return 3;
+  }
+  return 2;
 };
 
 const getInvoiceStatusColor = (status) => {
   switch (normalizeInvoiceStatus(status)) {
     case "Paid":
       return "text-emerald-700 bg-emerald-50 border-emerald-100";
+    case "Partial":
+      return "text-sky-700 bg-sky-50 border-sky-100";
     case "Overdue":
       return "text-rose-700 bg-rose-50 border-rose-100";
     case "Pending":
@@ -564,6 +581,8 @@ const hasExternalInvoiceSettlement = (invoice) => {
     (amountPaid > 0 || normalizedStatus === "Paid" || normalizedStatus === "Partial")
   );
 };
+const isSolaSettledInvoice = (invoice) =>
+  hasExternalInvoiceSettlement(invoice) && isSolaInvoicePaymentProvider(invoice?.payment_provider);
 const getInvoiceMutationGuardrail = (invoice) => {
   const total = Number(invoice?.total ?? invoice?.amount ?? 0) || 0;
   const amountPaid = Number(invoice?.amount_paid ?? 0) || 0;
@@ -3874,18 +3893,33 @@ export default function AdsPage() {
 
   const isCreditComposer = billingComposerMode === "credit";
   const isEditingExistingInvoice = Boolean(String(invoice?.id || "").trim());
+  const settledInvoiceSourceRecord = persistedEditingInvoice || invoice;
   const isEditingCreditRecord =
-    isEditingExistingInvoice && isCreditInvoiceRecord(persistedEditingInvoice || invoice);
+    isEditingExistingInvoice && isCreditInvoiceRecord(settledInvoiceSourceRecord);
   const isReconcileLockedInvoiceEdit =
     isEditingExistingInvoice &&
     !isEditingCreditRecord &&
-    isInvoiceReconciliationRequired(persistedEditingInvoice || invoice);
+    isInvoiceReconciliationRequired(settledInvoiceSourceRecord);
   const isLockedInvoiceEdit =
     isEditingExistingInvoice &&
     !isEditingCreditRecord &&
     !isReconcileLockedInvoiceEdit &&
-    hasInvoiceRecordedPayment(persistedEditingInvoice || invoice);
+    hasInvoiceRecordedPayment(settledInvoiceSourceRecord);
   const isRepairOnlyInvoiceEdit = isReconcileLockedInvoiceEdit;
+  const isSolaSettledInvoiceEdit =
+    isLockedInvoiceEdit && isSolaSettledInvoice(settledInvoiceSourceRecord);
+  const shouldCaptureInvoicePaymentDetails =
+    !isCreditComposer &&
+    !isInvoicePaidViaCredits(invoice) &&
+    (normalizeInvoiceStatus(invoice.status) === "Paid" ||
+      normalizeInvoiceStatus(invoice.status) === "Partial" ||
+      (Number(invoice.amount_paid ?? 0) || 0) > 0);
+  const isInvoicePaymentMetadataLocked =
+    isEditingCreditRecord ||
+    isRepairOnlyInvoiceEdit ||
+    isInvoicePaidViaCredits(invoice) ||
+    isSolaSettledInvoiceEdit;
+  const invoicePaymentProviderLabel = getInvoicePaymentProviderLabel(invoice.payment_provider);
 
   const invoicePreviewItems = useMemo(() => {
     if (isCreditComposer) {
@@ -4080,6 +4114,8 @@ export default function AdsPage() {
       "";
     const contactEmail =
       invoicePreviewModal.contact_email || advertiser?.email || "";
+    const paymentProvider = normalizeInvoicePaymentProvider(invoicePreviewModal.payment_provider);
+    const paymentReference = String(invoicePreviewModal.payment_reference || "").trim();
 
     return {
       advertiser,
@@ -4093,6 +4129,9 @@ export default function AdsPage() {
       primaryDescription,
       attentionLine,
       contactEmail,
+      paymentProvider,
+      paymentProviderLabel: getInvoicePaymentProviderLabel(paymentProvider),
+      paymentReference,
     };
   }, [ads, advertisers, invoicePreviewModal]);
 
@@ -5823,6 +5862,12 @@ export default function AdsPage() {
         existingInvoice?.amount ??
         0,
       amount_paid: draftInvoice?.amount_paid ?? existingInvoice?.amount_paid ?? 0,
+      paid_date: draftInvoice?.paid_date ?? existingInvoice?.paid_date ?? "",
+      payment_provider:
+        draftInvoice?.payment_provider ?? existingInvoice?.payment_provider ?? "",
+      payment_reference:
+        draftInvoice?.payment_reference ?? existingInvoice?.payment_reference ?? "",
+      payment_note: draftInvoice?.payment_note ?? existingInvoice?.payment_note ?? "",
       ad_ids: Array.isArray(draftInvoice?.ad_ids)
         ? draftInvoice.ad_ids
         : Array.isArray(existingInvoice?.ad_ids)
@@ -7934,57 +7979,17 @@ export default function AdsPage() {
     }
   };
 
-  const markInvoiceAsPaid = async (item) => {
+  const markInvoiceAsPaid = (item) => {
     if (!canMarkInvoicePaid) {
       return;
     }
-    const normalizedInvoiceId = String(item?.id || "").trim();
-    if (!normalizedInvoiceId || pendingInvoiceActionIdsRef.current.has(normalizedInvoiceId)) {
-      return;
-    }
-
-    const toastId = getInvoiceActionToastId("paid", normalizedInvoiceId);
-    pendingInvoiceActionIdsRef.current.add(normalizedInvoiceId);
-    setPendingInvoiceActionIds((current) =>
-      current.includes(normalizedInvoiceId) ? current : [...current, normalizedInvoiceId],
-    );
     setOpenInvoiceMenuId(null);
-    appToast.info({
-      id: toastId,
-      title: "Updating invoice...",
-      description: "Please wait while the invoice is marked as paid.",
-      duration: Infinity,
+    openInvoiceEditor({
+      ...item,
+      status: "Paid",
+      amount_paid: item.total || item.amount || item.amount_paid || "0.00",
+      paid_date: item.paid_date || getTodayInAppTimeZone(),
     });
-    try {
-      await run(async () => {
-        await upsertInvoice({
-          ...item,
-          status: "Paid",
-          ad_ids: Array.isArray(item.ad_ids) ? item.ad_ids : [],
-        });
-        if (String(invoicePreviewModal?.id || "").trim() === normalizedInvoiceId) {
-          setInvoicePreviewModal((current) =>
-            current ? { ...current, status: "Paid" } : current,
-          );
-        }
-      }, "Invoice marked as paid.");
-
-      const paymentNotice = await sendPaidInvoiceNotice({
-        invoiceId: normalizedInvoiceId,
-      });
-      if (paymentNotice?.error) {
-        appToast.warning({
-          title: "Invoice marked as paid, but payment notifications were incomplete.",
-          description: paymentNotice.error,
-        });
-      }
-    } finally {
-      appToast.dismiss(toastId);
-      pendingInvoiceActionIdsRef.current.delete(normalizedInvoiceId);
-      setPendingInvoiceActionIds((current) =>
-        current.filter((itemId) => itemId !== normalizedInvoiceId),
-      );
-    }
   };
 
   const closeInvoiceDeleteModal = () => {
@@ -14052,6 +14057,7 @@ export default function AdsPage() {
                   >
                     <option value="All">All</option>
                     <option value="Paid">Paid</option>
+                    <option value="Partial">Partial</option>
                     <option value="Pending">Ready for Payment</option>
                     <option value="Overdue">Overdue</option>
                   </select>
@@ -14352,7 +14358,7 @@ export default function AdsPage() {
                                                   className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
                                                 >
                                                   <CheckCircle size={16} className="text-gray-400" />
-                                                  Mark as Paid
+                                                  Record Payment
                                                 </button>
                                               ) : null}
                                             </>
@@ -14492,6 +14498,21 @@ export default function AdsPage() {
                                 {formatCurrency(invoicePreviewDetails?.total || 0)}
                               </div>
                             </div>
+                            {invoicePreviewDetails?.paymentProvider ? (
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                  Paid Through
+                                </div>
+                                <div className="text-sm font-semibold text-gray-900">
+                                  {invoicePreviewDetails.paymentProviderLabel}
+                                </div>
+                                {invoicePreviewDetails.paymentReference ? (
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    Ref: {invoicePreviewDetails.paymentReference}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
 
@@ -14772,9 +14793,13 @@ export default function AdsPage() {
                       <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
                         This invoice is inconsistent. Repair its totals, linked ads, or line items here. Advertiser, status, and recorded payment stay locked until the record is consistent again.
                       </div>
+                    ) : isSolaSettledInvoiceEdit ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        This invoice was settled through Sola. Billing structure and settlement details stay locked here; only non-financial metadata edits are allowed.
+                      </div>
                     ) : isLockedInvoiceEdit ? (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                        This invoice has recorded payment. Only metadata edits are allowed. Amount, status, linked ads, and line items stay locked.
+                        This invoice has recorded payment. Amount, advertiser, linked ads, and line items stay locked, but you can still correct settlement metadata below.
                       </div>
                     ) : isEditingExistingInvoice ? (
                       <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
@@ -14804,32 +14829,20 @@ export default function AdsPage() {
                       </p>
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-2">
-                        Advertiser
-                      </label>
-                      <select
-                        value={invoice.advertiser_id}
-                        onChange={(event) =>
-                          setInvoice({
-                            ...invoice,
-                            advertiser_id: event.target.value,
-                            ad_ids: [],
-                          })
-                        }
-                        disabled={
-                          isLockedInvoiceEdit || isRepairOnlyInvoiceEdit || isEditingCreditRecord
-                        }
-                        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
-                      >
-                        <option value="">Select advertiser</option>
-                        {advertisers.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.advertiser_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <CreateAdAdvertiserField
+                      advertisers={advertisers}
+                      value={invoice.advertiser_id}
+                      onChange={(nextValue) =>
+                        setInvoice({
+                          ...invoice,
+                          advertiser_id: nextValue,
+                          ad_ids: [],
+                        })
+                      }
+                      disabled={
+                        isLockedInvoiceEdit || isRepairOnlyInvoiceEdit || isEditingCreditRecord
+                      }
+                    />
 
                       {selectedInvoiceAdvertiser ? (
                         <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3">
@@ -14928,6 +14941,10 @@ export default function AdsPage() {
                                   ...invoice,
                                   amount: nextAmountText,
                                   total: nextAmountText,
+                                  amount_paid:
+                                    normalizeInvoiceStatus(invoice.status) === "Paid"
+                                      ? nextAmountText
+                                      : invoice.amount_paid,
                                   items: rebalanceInvoiceItemsToAmount(invoiceItems, parsedAmount),
                                 });
                                 return;
@@ -14938,6 +14955,10 @@ export default function AdsPage() {
                               ...invoice,
                               amount: nextAmountText,
                               total: nextAmountText,
+                              amount_paid:
+                                normalizeInvoiceStatus(invoice.status) === "Paid"
+                                  ? nextAmountText
+                                  : invoice.amount_paid,
                             });
                           }}
                           placeholder="0.00"
@@ -14985,17 +15006,47 @@ export default function AdsPage() {
                       <select
                         value={isCreditComposer ? "Paid" : normalizeInvoiceStatus(invoice.status)}
                         onChange={(event) =>
-                          setInvoice({ ...invoice, status: event.target.value })
+                          setInvoice((current) => {
+                            const nextStatus = event.target.value;
+                            const totalValue = String(
+                              current.total || current.amount || "0.00",
+                            ).trim();
+                            const nextInvoice = {
+                              ...current,
+                              status: nextStatus,
+                            };
+
+                            if (nextStatus === "Paid") {
+                              nextInvoice.amount_paid = totalValue || "0.00";
+                              nextInvoice.paid_date =
+                                current.paid_date || getTodayInAppTimeZone();
+                            } else if (nextStatus === "Partial") {
+                              nextInvoice.paid_date =
+                                current.paid_date || getTodayInAppTimeZone();
+                              if (!(Number(current.amount_paid || 0) > 0)) {
+                                nextInvoice.amount_paid = "0.00";
+                              }
+                            } else {
+                              nextInvoice.amount_paid = "0.00";
+                              nextInvoice.paid_date = "";
+                              nextInvoice.payment_provider = "";
+                              nextInvoice.payment_reference = "";
+                              nextInvoice.payment_note = "";
+                            }
+
+                            return nextInvoice;
+                          })
                         }
                         disabled={
                           isCreditComposer ||
                           isInvoicePaidViaCredits(invoice) ||
-                          isLockedInvoiceEdit ||
-                          isRepairOnlyInvoiceEdit
+                          isRepairOnlyInvoiceEdit ||
+                          isSolaSettledInvoiceEdit
                         }
                         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
                       >
                         <option value="Paid">Paid</option>
+                        <option value="Partial">Partial</option>
                         <option value="Pending">Ready for Payment</option>
                         <option value="Overdue">Overdue</option>
                       </select>
@@ -15011,12 +15062,152 @@ export default function AdsPage() {
                         <p className="mt-2 text-xs text-rose-700">
                           Reconciliation repairs keep the current advertiser, status, and recorded payment locked.
                         </p>
+                      ) : isSolaSettledInvoiceEdit ? (
+                        <p className="mt-2 text-xs text-amber-700">
+                          Sola-settled invoices keep their settlement status and payment proof locked.
+                        </p>
                       ) : isLockedInvoiceEdit ? (
                         <p className="mt-2 text-xs text-amber-700">
-                          Paid or partially paid invoices keep their current status.
+                          Recorded payments keep the billing structure locked, but you can update payment metadata.
                         </p>
                       ) : null}
                     </div>
+
+                    {shouldCaptureInvoicePaymentDetails ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-2">
+                            Paid Through
+                          </label>
+                          <select
+                            value={normalizeInvoicePaymentProvider(invoice.payment_provider)}
+                            onChange={(event) =>
+                              setInvoice((current) => ({
+                                ...current,
+                                payment_provider: normalizeInvoicePaymentProvider(
+                                  event.target.value,
+                                ),
+                              }))
+                            }
+                            disabled={isInvoicePaymentMetadataLocked}
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                          >
+                            <option value="">Select provider</option>
+                            {INVOICE_PAYMENT_PROVIDER_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          {isSolaSettledInvoiceEdit ? (
+                            <p className="mt-2 text-xs text-amber-700">
+                              Payment provider is locked to {invoicePaymentProviderLabel}.
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-2">
+                            Amount Paid
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={
+                              normalizeInvoiceStatus(invoice.status) === "Paid"
+                                ? invoice.total || invoice.amount || "0.00"
+                                : invoice.amount_paid
+                            }
+                            disabled={
+                              normalizeInvoiceStatus(invoice.status) === "Paid" ||
+                              isInvoicePaymentMetadataLocked
+                            }
+                            onChange={(event) =>
+                              setInvoice((current) => ({
+                                ...current,
+                                amount_paid: event.target.value,
+                              }))
+                            }
+                            placeholder="0.00"
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all disabled:bg-gray-50 disabled:text-gray-600"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-2">
+                            Transaction / Reference #
+                          </label>
+                          <input
+                            type="text"
+                            value={invoice.payment_reference || ""}
+                            onChange={(event) =>
+                              setInvoice((current) => ({
+                                ...current,
+                                payment_reference: event.target.value,
+                              }))
+                            }
+                            disabled={isInvoicePaymentMetadataLocked}
+                            placeholder={
+                              invoice.payment_provider
+                                ? `Enter ${getInvoicePaymentProviderLabel(
+                                    invoice.payment_provider,
+                                  )} reference`
+                                : "Enter transaction or reference number"
+                            }
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                          />
+                          {invoice.payment_provider &&
+                          invoicePaymentProviderRequiresReference(invoice.payment_provider) ? (
+                            <p className="mt-2 text-xs text-gray-500">
+                              A reference is required for this payment provider.
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-2">
+                            Paid Date
+                          </label>
+                          <input
+                            type="date"
+                            value={invoice.paid_date || getTodayInAppTimeZone()}
+                            onChange={(event) =>
+                              setInvoice((current) => ({
+                                ...current,
+                                paid_date: event.target.value,
+                              }))
+                            }
+                            disabled={isInvoicePaymentMetadataLocked}
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                          />
+                        </div>
+
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-gray-700 mb-2">
+                            Payment Note
+                          </label>
+                          <input
+                            type="text"
+                            value={invoice.payment_note || ""}
+                            onChange={(event) =>
+                              setInvoice((current) => ({
+                                ...current,
+                                payment_note: event.target.value,
+                              }))
+                            }
+                            disabled={isInvoicePaymentMetadataLocked}
+                            placeholder="Optional internal note about the payment"
+                            className="w-full px-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 transition-all"
+                          />
+                          {invoice.payment_provider &&
+                          invoicePaymentProviderRequiresNote(invoice.payment_provider) ? (
+                            <p className="mt-2 text-xs text-gray-500">
+                              Add a short note describing this payment method.
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
 
                     {isEditingExistingInvoice ? (
                       <div>

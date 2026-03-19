@@ -9,6 +9,9 @@ export default function CreateAdAdvertiserField({
   value,
   onChange,
   onCreateNew,
+  label = "Advertiser",
+  required = true,
+  placeholder = "Select advertiser",
   disabled = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -17,10 +20,13 @@ export default function CreateAdAdvertiserField({
     top: 0,
     left: 0,
     width: 320,
+    maxHeight: 320,
   });
   const fieldRef = useRef(null);
   const menuRef = useRef(null);
   const searchInputRef = useRef(null);
+  const hasCreateAction = typeof onCreateNew === "function";
+  const menuChromeHeight = hasCreateAction ? 106 : 58;
 
   const selectedAdvertiser = useMemo(
     () =>
@@ -96,7 +102,8 @@ export default function CreateAdAdvertiserField({
       const rect = fieldRef.current.getBoundingClientRect();
       const viewportPadding = 12;
       const gap = 8;
-      const estimatedHeight = 320;
+      const preferredListHeight = 200;
+      const preferredMenuHeight = menuChromeHeight + preferredListHeight;
       const width = Math.min(
         Math.max(rect.width, 280),
         window.innerWidth - viewportPadding * 2,
@@ -108,16 +115,21 @@ export default function CreateAdAdvertiserField({
         Math.min(left, window.innerWidth - width - viewportPadding),
       );
 
-      let top = rect.bottom + gap;
-      if (top + estimatedHeight > window.innerHeight - viewportPadding) {
-        top = rect.top - estimatedHeight - gap;
-      }
-      top = Math.max(
-        viewportPadding,
-        Math.min(top, window.innerHeight - estimatedHeight - viewportPadding),
+      const availableBelow = Math.max(
+        window.innerHeight - rect.bottom - gap - viewportPadding,
+        0,
       );
+      const availableAbove = Math.max(rect.top - gap - viewportPadding, 0);
+      const shouldOpenAbove = availableBelow < 180 && availableAbove > availableBelow;
+      const availableHeight = shouldOpenAbove ? availableAbove : availableBelow;
+      const maxHeight = Math.max(Math.min(availableHeight, preferredMenuHeight), 0);
 
-      setMenuCoordinates({ top, left, width });
+      let top = rect.bottom + gap;
+      if (shouldOpenAbove) {
+        top = rect.top - maxHeight - gap;
+      }
+
+      setMenuCoordinates({ top, left, width, maxHeight });
     };
 
     updateMenuPosition();
@@ -134,7 +146,7 @@ export default function CreateAdAdvertiserField({
       window.removeEventListener("resize", updateMenuPosition);
       window.removeEventListener("scroll", updateMenuPosition, true);
     };
-  }, [isOpen]);
+  }, [isOpen, menuChromeHeight]);
 
   useEffect(() => {
     if (!isOpen || typeof document === "undefined") {
@@ -186,7 +198,7 @@ export default function CreateAdAdvertiserField({
       } ${disabled ? "opacity-60" : ""}`}
     >
       <label className="block text-xs font-semibold text-gray-700 mb-1">
-        Advertiser <span className="text-red-500">*</span>
+        {label} {required ? <span className="text-red-500">*</span> : null}
       </label>
       <button
         type="button"
@@ -202,7 +214,7 @@ export default function CreateAdAdvertiserField({
         aria-haspopup="listbox"
       >
         <span className={selectedAdvertiser ? "text-gray-900" : "text-gray-400"}>
-          {selectedAdvertiser?.advertiser_name || "Select advertiser"}
+          {selectedAdvertiser?.advertiser_name || placeholder}
         </span>
         <ChevronDown
           size={16}
@@ -214,11 +226,12 @@ export default function CreateAdAdvertiserField({
         ? createPortal(
             <div
               ref={menuRef}
-              className="fixed z-[220] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+              className="fixed z-[220] flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
               style={{
                 top: `${menuCoordinates.top}px`,
                 left: `${menuCoordinates.left}px`,
                 width: `${menuCoordinates.width}px`,
+                maxHeight: `${menuCoordinates.maxHeight}px`,
               }}
             >
               <div className="border-b border-gray-200 p-2">
@@ -238,16 +251,23 @@ export default function CreateAdAdvertiserField({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={handleCreateNew}
-                className="flex w-full items-center gap-2 border-b border-gray-200 px-4 py-3 text-left text-sm font-medium text-blue-600 transition-colors hover:bg-gray-50 hover:text-blue-700"
-              >
-                <Plus size={16} />
-                Create New Advertiser
-              </button>
+              {hasCreateAction ? (
+                <button
+                  type="button"
+                  onClick={handleCreateNew}
+                  className="flex w-full items-center gap-2 border-b border-gray-200 px-4 py-3 text-left text-sm font-medium text-blue-600 transition-colors hover:bg-gray-50 hover:text-blue-700"
+                >
+                  <Plus size={16} />
+                  Create New Advertiser
+                </button>
+              ) : null}
 
-              <div className="max-h-[200px] overflow-y-auto">
+              <div
+                className="overflow-y-auto"
+                style={{
+                  maxHeight: `${Math.max(menuCoordinates.maxHeight - menuChromeHeight, 0)}px`,
+                }}
+              >
                 {filteredAdvertisers.length === 0 ? (
                   <div className="px-4 py-6 text-sm text-gray-500">
                     No advertisers match your search.

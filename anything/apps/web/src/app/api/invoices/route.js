@@ -19,12 +19,19 @@ import {
   getCreditInvoiceRestrictedChanges,
   getInvoiceMutationGuardrail,
   getReconciliationInvoiceRestrictedChanges,
+  getSolaSettledInvoiceRestrictedChanges,
   getSettledInvoiceRestrictedChanges,
   hasInvoiceRecordedPayment,
+  isSolaSettledInvoice,
   isInvoiceReconciliationRequired,
   isCreditInvoiceRecord,
   normalizeFinancialChangeReason,
 } from "../utils/invoice-guardrails.js";
+import {
+  invoicePaymentProviderRequiresNote,
+  invoicePaymentProviderRequiresReference,
+  normalizeInvoicePaymentProvider,
+} from "../../../lib/invoicePayment.js";
 import { can } from "../../../lib/permissions.js";
 import { getTodayInAppTimeZone } from "../../../lib/timezone.js";
 
@@ -48,6 +55,66 @@ const isCreditInvoiceError = (error) =>
   /invoice_not_credit_record|invoice_total_must_be_positive|credit_invoice_amount_missing/i.test(
     String(error?.message || ""),
   );
+
+const validateInvoiceSettlement = ({
+  status,
+  total,
+  amountPaid,
+  paidViaCredits,
+  paymentProvider,
+  paymentReference,
+  paymentNote,
+}) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const normalizedProvider = normalizeInvoicePaymentProvider(paymentProvider);
+  const normalizedReference = String(paymentReference || "").trim();
+  const normalizedNote = String(paymentNote || "").trim();
+  const settled = normalizedStatus === "paid" || normalizedStatus === "partial";
+
+  if (paidViaCredits) {
+    if (normalizedProvider || normalizedReference || normalizedNote) {
+      return "Credit-paid invoices cannot store an external payment provider or reference.";
+    }
+    return null;
+  }
+
+  if (!settled) {
+    if (toNumber(amountPaid, 0) > 0) {
+      return "Pending or overdue invoices cannot carry a paid amount.";
+    }
+    if (normalizedProvider || normalizedReference || normalizedNote) {
+      return "Payment provider details can only be saved on paid or partial invoices.";
+    }
+    return null;
+  }
+
+  if (!normalizedProvider) {
+    return "Paid or partial invoices require a payment provider.";
+  }
+  if (
+    invoicePaymentProviderRequiresReference(normalizedProvider) &&
+    !normalizedReference
+  ) {
+    return "This payment provider requires a transaction or reference number.";
+  }
+  if (invoicePaymentProviderRequiresNote(normalizedProvider) && !normalizedNote) {
+    return "Other payment methods require a payment note.";
+  }
+
+  if (normalizedStatus === "paid" && Math.abs(toNumber(amountPaid, 0) - toNumber(total, 0)) > 0.009) {
+    return "Paid invoices must have amount paid equal to the invoice total.";
+  }
+
+  if (normalizedStatus === "partial") {
+    const normalizedAmountPaid = toNumber(amountPaid, 0);
+    const normalizedTotal = toNumber(total, 0);
+    if (!(normalizedAmountPaid > 0 && normalizedAmountPaid < normalizedTotal)) {
+      return "Partial invoices require an amount paid greater than 0 and less than the invoice total.";
+    }
+  }
+
+  return null;
+};
 
 const isInsufficientCreditsError = (error) =>
   /insufficient credits/i.test(String(error?.message || ""));
@@ -228,12 +295,16 @@ export async function PUT(request) {
       amount_paid,
       amount,
       total,
+      paid_date,
+      payment_provider,
+      payment_reference,
+      payment_note,
     } = body;
 
     const { data: currentInvoice, error: currentInvoiceError } = await supabase
       .from(table("invoices"))
       .select(
-        "id, invoice_number, advertiser_id, advertiser_name, status, total, amount, amount_paid, discount, tax, paid_via_credits, deleted_at, notes, issue_date, contact_name, contact_email, bill_to, ad_ids",
+        "id, invoice_number, advertiser_id, advertiser_name, status, total, amount, amount_paid, discount, tax, paid_via_credits, deleted_at, notes, issue_date, contact_name, contact_email, bill_to, ad_ids, paid_date, payment_provider, payment_reference, payment_note",
       )
       .eq("id", id)
       .maybeSingle();
@@ -329,7 +400,11 @@ export async function PUT(request) {
     if (hasInvoiceRecordedPayment(currentInvoice)) {
       const restrictedChanges = reconciliationRequired
         ? getReconciliationInvoiceRestrictedChanges(currentInvoiceWithItems, body)
-        : getSettledInvoiceRestrictedChanges(currentInvoiceWithItems, body);
+        : currentInvoiceWithItems.paid_via_credits === true
+          ? getSolaSettledInvoiceRestrictedChanges(currentInvoiceWithItems, body)
+        : isSolaSettledInvoice(currentInvoiceWithItems)
+          ? getSolaSettledInvoiceRestrictedChanges(currentInvoiceWithItems, body)
+          : getSettledInvoiceRestrictedChanges(currentInvoiceWithItems, body);
       if (restrictedChanges.length > 0) {
         return Response.json(
           {
@@ -337,6 +412,14 @@ export async function PUT(request) {
               ? `Reconciliation repairs cannot change these fields: ${formatGuardrailFieldList(
                   restrictedChanges,
                 )}.`
+              : currentInvoiceWithItems.paid_via_credits === true
+                ? `Credit-paid invoices only allow non-financial metadata edits. Locked fields: ${formatGuardrailFieldList(
+                    restrictedChanges,
+                  )}.`
+              : isSolaSettledInvoice(currentInvoiceWithItems)
+                ? `Sola-settled invoices only allow non-financial metadata edits. Locked fields: ${formatGuardrailFieldList(
+                    restrictedChanges,
+                  )}.`
               : `Settled invoices only allow metadata edits. Locked fields: ${formatGuardrailFieldList(
                   restrictedChanges,
                 )}.`,
@@ -353,6 +436,17 @@ export async function PUT(request) {
 
     const nextAmountPaid =
       amount_paid !== undefined ? toNumber(amount_paid, 0) : toNumber(currentInvoice.amount_paid, 0);
+    const nextPaymentProvider = normalizeInvoicePaymentProvider(
+      payment_provider !== undefined ? payment_provider : currentInvoice.payment_provider,
+    );
+    const nextPaymentReference =
+      payment_reference !== undefined
+        ? String(payment_reference || "").trim()
+        : String(currentInvoice.payment_reference || "").trim();
+    const nextPaymentNote =
+      payment_note !== undefined
+        ? String(payment_note || "").trim()
+        : String(currentInvoice.payment_note || "").trim();
 
     let normalizedItems = Array.isArray(items)
       ? items.map((item) => {
@@ -396,6 +490,23 @@ export async function PUT(request) {
       status !== undefined
         ? status
         : computeInvoiceStatus(computedTotal, nextAmountPaid, currentInvoice.status);
+    const settlementValidationError = validateInvoiceSettlement({
+      status: nextStatus,
+      total: computedTotal,
+      amountPaid: nextAmountPaid,
+      paidViaCredits: Boolean(currentInvoice.paid_via_credits),
+      paymentProvider: nextPaymentProvider,
+      paymentReference: nextPaymentReference,
+      paymentNote: nextPaymentNote,
+    });
+    if (settlementValidationError) {
+      return Response.json({ error: settlementValidationError }, { status: 400 });
+    }
+    const nextNormalizedStatus = String(nextStatus || "").trim().toLowerCase();
+    const nextPaidDate =
+      nextNormalizedStatus === "paid" || nextNormalizedStatus === "partial"
+        ? paid_date || currentInvoice.paid_date || getTodayInAppTimeZone()
+        : null;
 
     const patch = {
       updated_at: new Date().toISOString(),
@@ -403,6 +514,10 @@ export async function PUT(request) {
       amount: computedTotal,
       amount_paid: nextAmountPaid,
       status: nextStatus,
+      paid_date: nextPaidDate,
+      payment_provider: nextPaymentProvider || null,
+      payment_reference: nextPaymentReference || null,
+      payment_note: nextPaymentNote || null,
     };
     if (issue_date !== undefined) {
       patch.issue_date = issue_date || getTodayInAppTimeZone();

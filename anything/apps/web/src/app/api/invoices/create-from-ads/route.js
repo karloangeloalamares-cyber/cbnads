@@ -7,7 +7,64 @@ import {
 } from "../../utils/invoice-helpers.js";
 import { createInvoiceAtomic, resolveInvoiceRequestKey } from "../../utils/invoice-atomic.js";
 import { recalculateAdvertiserSpend } from "../../utils/recalculate-advertiser-spend.js";
+import {
+  invoicePaymentProviderRequiresNote,
+  invoicePaymentProviderRequiresReference,
+  normalizeInvoicePaymentProvider,
+} from "../../../../lib/invoicePayment.js";
 import { getTodayInAppTimeZone } from "../../../../lib/timezone.js";
+
+const validateInvoiceSettlement = ({
+  status,
+  total,
+  amountPaid,
+  paymentProvider,
+  paymentReference,
+  paymentNote,
+}) => {
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  const normalizedProvider = normalizeInvoicePaymentProvider(paymentProvider);
+  const normalizedReference = String(paymentReference || "").trim();
+  const normalizedNote = String(paymentNote || "").trim();
+
+  if (normalizedStatus !== "paid" && normalizedStatus !== "partial") {
+    if (toNumber(amountPaid, 0) > 0) {
+      return "Pending or overdue invoices cannot carry a paid amount.";
+    }
+    if (normalizedProvider || normalizedReference || normalizedNote) {
+      return "Payment provider details can only be saved on paid or partial invoices.";
+    }
+    return null;
+  }
+
+  if (!normalizedProvider) {
+    return "Paid or partial invoices require a payment provider.";
+  }
+  if (
+    invoicePaymentProviderRequiresReference(normalizedProvider) &&
+    !normalizedReference
+  ) {
+    return "This payment provider requires a transaction or reference number.";
+  }
+  if (invoicePaymentProviderRequiresNote(normalizedProvider) && !normalizedNote) {
+    return "Other payment methods require a payment note.";
+  }
+  if (
+    normalizedStatus === "paid" &&
+    Math.abs(toNumber(amountPaid, 0) - toNumber(total, 0)) > 0.009
+  ) {
+    return "Paid invoices must have amount paid equal to the invoice total.";
+  }
+  if (normalizedStatus === "partial") {
+    const normalizedAmountPaid = toNumber(amountPaid, 0);
+    const normalizedTotal = toNumber(total, 0);
+    if (!(normalizedAmountPaid > 0 && normalizedAmountPaid < normalizedTotal)) {
+      return "Partial invoices require an amount paid greater than 0 and less than the invoice total.";
+    }
+  }
+
+  return null;
+};
 
 export async function POST(request) {
   try {
@@ -131,6 +188,26 @@ export async function POST(request) {
     const total = subtotal - discount + tax;
     const status = invoiceData.status || "Pending";
     const normalizedStatus = String(status).trim() || "Pending";
+    const normalizedPaymentProvider = normalizeInvoicePaymentProvider(
+      invoiceData.paymentProvider || invoiceData.payment_provider,
+    );
+    const normalizedAmountPaid =
+      String(normalizedStatus).toLowerCase() === "paid"
+        ? total
+        : String(normalizedStatus).toLowerCase() === "partial"
+          ? toNumber(invoiceData.amountPaid ?? invoiceData.amount_paid, 0)
+          : 0;
+    const settlementValidationError = validateInvoiceSettlement({
+      status: normalizedStatus,
+      total,
+      amountPaid: normalizedAmountPaid,
+      paymentProvider: normalizedPaymentProvider,
+      paymentReference: invoiceData.paymentReference || invoiceData.payment_reference,
+      paymentNote: invoiceData.paymentNote || invoiceData.payment_note,
+    });
+    if (settlementValidationError) {
+      return Response.json({ error: settlementValidationError }, { status: 400 });
+    }
     const requestKey = resolveInvoiceRequestKey({
       request,
       bodyKey: invoiceData.idempotency_key || invoiceData.idempotencyKey,
@@ -152,7 +229,18 @@ export async function POST(request) {
         tax,
         total,
         amount: total,
-        amount_paid: String(normalizedStatus).toLowerCase() === "paid" ? total : 0,
+        amount_paid: normalizedAmountPaid,
+        paid_date:
+          String(normalizedStatus).toLowerCase() === "paid" ||
+          String(normalizedStatus).toLowerCase() === "partial"
+            ? invoiceData.paidDate || invoiceData.paid_date || getTodayInAppTimeZone()
+            : null,
+        payment_provider: normalizedPaymentProvider || null,
+        payment_reference:
+          String(invoiceData.paymentReference || invoiceData.payment_reference || "").trim() ||
+          null,
+        payment_note:
+          String(invoiceData.paymentNote || invoiceData.payment_note || "").trim() || null,
         notes: invoiceData.notes || null,
         source_request_key: requestKey,
         created_at: nowIso,
