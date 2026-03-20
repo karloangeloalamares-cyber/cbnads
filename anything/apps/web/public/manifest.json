@@ -1,17 +1,41 @@
 {
     "name": "CBN Ads",
     "short_name": "CBN Ads",
+    "id": "/",
     "description": "Advertising management platform for CBN Unfiltered",
     "start_url": "/",
     "scope": "/",
     "display": "standalone",
-    "orientation": "portrait-primary",
+    "display_override": [
+        "window-controls-overlay",
+        "standalone",
+        "browser"
+    ],
+    "orientation": "any",
     "background_color": "#ffffff",
     "theme_color": "#111827",
     "lang": "en",
+    "prefer_related_applications": false,
     "categories": [
         "business",
         "productivity"
+    ],
+    "shortcuts": [
+        {
+            "name": "Submit Ad",
+            "short_name": "Submit",
+            "url": "/submit-ad"
+        },
+        {
+            "name": "Dashboard",
+            "short_name": "Dashboard",
+            "url": "/ads?section=Dashboard"
+        },
+        {
+            "name": "Sign In",
+            "short_name": "Sign In",
+            "url": "/account/signin"
+        }
     ],
     "icons": [
         {

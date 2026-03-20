@@ -2,8 +2,8 @@
 
 export default function SignUpPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-8">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
+    <div className="min-h-app-screen safe-top-pad safe-bottom-pad flex items-center justify-center bg-gray-50 px-4 py-6 sm:p-8">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-sm sm:p-8">
         <div className="mb-6">
           <img
             src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"

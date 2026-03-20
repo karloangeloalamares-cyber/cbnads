@@ -1,6 +1,7 @@
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from 'react-router';
 import './global.css';
 import AppToaster from "@/components/AppToaster";
+import AppShellStatus from "@/components/pwa/AppShellStatus";
 
 const DEFAULT_SITE_URL = 'https://cbnads.com';
 const SITE_URL = String(
@@ -23,8 +24,8 @@ export const links = () => [];
 
 function AppHydrationFallback() {
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(17,24,39,0.08),_transparent_42%),linear-gradient(180deg,_#f8fafc_0%,_#eef2f7_100%)] px-6 py-10 text-slate-900">
-      <div className="mx-auto flex min-h-[calc(100vh-5rem)] max-w-5xl items-center">
+    <div className="min-h-app-screen bg-[radial-gradient(circle_at_top,_rgba(17,24,39,0.08),_transparent_42%),linear-gradient(180deg,_#f8fafc_0%,_#eef2f7_100%)] px-6 py-10 text-slate-900">
+      <div className="mx-auto flex min-h-[calc(var(--app-viewport-height)-5rem)] max-w-5xl items-center">
         <div className="grid w-full gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-6">
             <div className="inline-flex items-center gap-3 rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 shadow-sm backdrop-blur">
@@ -107,7 +108,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en">
       <head>
         <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         {/* SEO - Issue #9 */}
         <link rel="canonical" href={SITE_URL} />
         <meta name="description" content={SITE_DESCRIPTION} />
@@ -143,7 +144,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="CBN Ads" />
       </head>
-      <body>
+      <body className="min-h-app-screen bg-slate-50 text-slate-900">
+        <AppShellStatus />
         {children}
         <AppToaster />
         <ScrollRestoration />

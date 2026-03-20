@@ -15,7 +15,9 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
+  X,
 } from "lucide-react";
+import { useResponsiveViewport } from "@/hooks/useResponsiveViewport";
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
 import { can, getVisibleSectionsForRole, normalizeAppRole } from "@/lib/permissions";
 
@@ -44,7 +46,7 @@ export default function Sidebar({
   onClearAdsUnread,
 }) {
   const [isMinimized, setIsMinimized] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const { isPhone, isTablet } = useResponsiveViewport();
   const normalizedRole = normalizeAppRole(userRole);
   const isInternal = normalizedRole !== "advertiser";
   const canViewSettings = can(normalizedRole, "settings:view");
@@ -76,16 +78,8 @@ export default function Sidebar({
   const menuItems = menuItemsCatalog.filter((item) => visibleSections.has(item.id));
 
   useEffect(() => {
-    const syncViewport = () => {
-      const width = window.innerWidth;
-      setIsMobileViewport(width < 768);
-      setIsMinimized(width >= 768 && width < 1280);
-    };
-
-    syncViewport();
-    window.addEventListener("resize", syncViewport);
-    return () => window.removeEventListener("resize", syncViewport);
-  }, []);
+    setIsMinimized(isTablet);
+  }, [isTablet]);
 
   const handleNavigate = (item) => {
     if (isInternal && item.id === "Submissions" && unreadCount > 0) {
@@ -99,7 +93,7 @@ export default function Sidebar({
       onNavigate(item.id);
     }
 
-    if (isMobileViewport && onClose) {
+    if (isPhone && onClose) {
       onClose();
     }
   };
@@ -107,46 +101,63 @@ export default function Sidebar({
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-black/40 transition-opacity md:hidden ${mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-40 bg-slate-950/45 transition-opacity md:hidden ${mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
         onClick={onClose}
       />
-      <div
-        className={`fixed inset-y-0 left-0 z-50 bg-[#F7F8FA] border-r border-gray-200 h-screen flex flex-col transition-all duration-300 md:static md:z-auto ${isMinimized ? "md:w-[72px]" : "md:w-[220px]"} w-[220px] ${mobileOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
+      <aside
+        className={`safe-pb fixed inset-y-0 left-0 z-50 flex h-app-screen w-[min(19.5rem,calc(100vw-0.75rem))] flex-col border-r border-gray-200 bg-[#F7F8FA] shadow-xl transition-all duration-300 md:static md:z-auto md:shadow-none ${isMinimized ? "md:w-[88px]" : "md:w-[240px]"} ${mobileOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
       >
-      <div className="p-6 flex items-center justify-between">
+      <div className="safe-top-pad flex items-center justify-between border-b border-gray-200 px-4 pb-4">
         {!isMinimized && (
           <>
-            <img
-              src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
-              alt="Logo"
-              className="w-10 h-10 rounded-lg"
-            />
-            <button
-              onClick={() => setIsMinimized(true)}
-              className="p-1 hover:bg-gray-200 rounded transition-colors"
-              title="Minimize sidebar"
-              type="button"
-              disabled={isMobileViewport}
-            >
-              <ChevronLeft size={18} className="text-gray-600" />
-            </button>
+            <div className="flex min-w-0 items-center gap-3">
+              <img
+                src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
+                alt="Logo"
+                className="h-10 w-10 rounded-xl"
+              />
+              <div className="min-w-0 md:hidden">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+                  Navigation
+                </p>
+                <p className="truncate text-sm font-semibold text-gray-900">CBN Ads</p>
+              </div>
+            </div>
+            {isPhone ? (
+              <button
+                onClick={onClose}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-50"
+                type="button"
+                aria-label="Close navigation"
+              >
+                <X size={18} />
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsMinimized(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-600 transition-colors hover:bg-gray-200"
+                title="Minimize sidebar"
+                type="button"
+              >
+                <ChevronLeft size={18} className="text-gray-600" />
+              </button>
+            )}
           </>
         )}
 
         {isMinimized && (
           <button
             onClick={() => setIsMinimized(false)}
-            className="p-1 hover:bg-gray-200 rounded transition-colors mx-auto"
+            className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl text-gray-600 transition-colors hover:bg-gray-200"
             title="Expand sidebar"
             type="button"
-            disabled={isMobileViewport}
           >
             <ChevronRight size={18} className="text-gray-600" />
           </button>
         )}
       </div>
 
-      <nav className="flex-1 px-3">
+      <nav className="flex-1 overflow-y-auto px-3 py-4">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = item.id === activeItem;
@@ -200,12 +211,12 @@ export default function Sidebar({
       </nav>
 
       {canViewSettings ? (
-        <div className="p-3 border-t border-gray-200">
+        <div className="border-t border-gray-200 p-3">
           <div className="relative group">
             <button
               onClick={() => {
                 if (onNavigate) onNavigate("Settings");
-                if (isMobileViewport && onClose) {
+                if (isPhone && onClose) {
                   onClose();
                 }
               }}
@@ -228,7 +239,7 @@ export default function Sidebar({
           </div>
         </div>
       ) : null}
-      </div>
+      </aside>
     </>
   );
 }

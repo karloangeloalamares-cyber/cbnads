@@ -256,9 +256,9 @@ export default function SignInPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-app-screen flex flex-col bg-white lg:flex-row">
       <div
-        className="hidden lg:flex lg:w-1/2 relative bg-cover bg-center"
+        className="relative hidden bg-cover bg-center lg:flex lg:w-1/2"
         style={{
           backgroundImage:
             "url(https://ucarecdn.com/8d0941a2-8e3f-47fa-b87d-1904c04c4e0c/-/format/auto/)",
@@ -287,7 +287,7 @@ export default function SignInPage() {
         </div>
       </div>
 
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
+      <div className="safe-top-pad safe-bottom-pad flex w-full items-center justify-center bg-white px-4 py-6 sm:px-6 lg:w-1/2 lg:p-8">
         <div className="w-full max-w-md">
           <div className="flex justify-center mb-8">
             <img

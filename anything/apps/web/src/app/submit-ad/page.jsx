@@ -13,6 +13,8 @@ import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { CreateAdvertiserAccountStep } from "@/components/SubmitAdForm/CreateAdvertiserAccountStep";
 import { VerifyAdvertiserEmailStep } from "@/components/SubmitAdForm/VerifyAdvertiserEmailStep";
 import { AvailabilityDateField } from "@/components/SubmitAdForm/AvailabilityDateField";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
+import { useResponsiveViewport } from "@/hooks/useResponsiveViewport";
 import {
   clampWeeks,
   resolveAdvertiserMultiWeekPreview,
@@ -21,6 +23,8 @@ import { navigateBackWithFallback } from "@/lib/navigation";
 
 export default function SubmitAdPage() {
   const { modalState, showAlert, showConfirm } = useModal();
+  const isOffline = useOnlineStatus();
+  const { isPhone } = useResponsiveViewport();
   const [showPreview, setShowPreview] = useState(false);
   const [previewWeekIndex, setPreviewWeekIndex] = useState(0);
   const [showMultiWeekWorkspace, setShowMultiWeekWorkspace] = useState(false);
@@ -105,7 +109,7 @@ export default function SubmitAdPage() {
     previewWeekIndex,
     showMultiWeekWorkspace,
   ]);
-  const isSubmitDisabled = loading || !!pastTimeError;
+  const isSubmitDisabled = loading || !!pastTimeError || isOffline;
   const isDedicatedMultiWeek = phase === "form" && showMultiWeekWorkspace;
   const useSplitLayout = phase === "form";
 
@@ -146,10 +150,10 @@ export default function SubmitAdPage() {
         <ConfirmModal {...modalState.props} isOpen={modalState.isOpen} />
       )}
 
-      <div className={`min-h-screen ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
+      <div className={`min-h-app-screen safe-bottom-pad ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
         <div className="flex max-w-none mx-auto">
-          <div className={`flex-1 px-5 py-8 sm:px-6 sm:py-10 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
-            <div className={`${useSplitLayout ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between`}>
+          <div className={`safe-top-pad flex-1 px-4 py-6 sm:px-6 sm:py-8 xl:p-12 ${isDedicatedMultiWeek ? "bg-[#FAFAFA]" : "bg-white"}`}>
+            <div className={`${useSplitLayout ? "max-w-[1380px]" : "max-w-[680px]"} mx-auto mb-6 flex items-center justify-between gap-3`}>
               <button
                 type="button"
                 onClick={handlePageBack}
@@ -173,6 +177,16 @@ export default function SubmitAdPage() {
                 </div>
               )}
             </div>
+
+            {isOffline ? (
+              <div className="mx-auto mb-6 max-w-[1380px] rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <div className="font-semibold">Submission is paused while you&apos;re offline</div>
+                <p className="mt-1 text-amber-900/80">
+                  You can keep reviewing the form, but availability checks and submission need an
+                  internet connection.
+                </p>
+              </div>
+            ) : null}
 
             {phase === "account" ? (
               <CreateAdvertiserAccountStep
@@ -198,10 +212,10 @@ export default function SubmitAdPage() {
                 onReset={resetSuccess}
               />
             ) : (
-              <div className={useSplitLayout ? "max-w-[1380px] mx-auto grid gap-8 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
+              <div className={useSplitLayout ? "max-w-[1380px] mx-auto grid gap-6 xl:gap-10 lg:grid-cols-[minmax(0,820px)_380px] xl:grid-cols-[minmax(0,880px)_420px] items-start" : "max-w-[680px] mx-auto"}>
                 <div className={useSplitLayout ? "min-w-0" : ""}>
                 {isDedicatedMultiWeek ? (
-                  <div className="mb-8 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-7">
+                  <div className="mb-8 rounded-[28px] border border-gray-200 bg-white px-5 py-5 shadow-sm sm:px-8 sm:py-7">
                     <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
                       <div className="max-w-2xl">
                         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-gray-500">
@@ -212,7 +226,7 @@ export default function SubmitAdPage() {
                           Build one ad request per week, set the week count and anchor date here, then submit the series for admin review. Product and pricing can be attached later during approval.
                         </p>
                       </div>
-                      <div className="flex items-center gap-2 self-start">
+                      <div className="flex w-full flex-col gap-2 self-start sm:w-auto sm:flex-row">
                         <button
                           type="button"
                           onClick={() => {
@@ -278,11 +292,11 @@ export default function SubmitAdPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mb-8 flex items-start justify-between gap-4">
+                  <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
                       <FormHeader />
                     </div>
-                    <div className="shrink-0 pt-2 sm:pt-16">
+                    <div className="shrink-0 pt-0 sm:pt-16">
                       <button
                         type="button"
                         onClick={() => {
@@ -316,7 +330,7 @@ export default function SubmitAdPage() {
                   onSubmit={handleHoneypotSubmit}
                   method="post"
                   noValidate
-                  className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-6 py-6 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
+                  className={useSplitLayout ? "space-y-10 rounded-[28px] border border-gray-200 bg-white px-5 py-5 shadow-sm sm:px-8 sm:py-8" : "space-y-8"}
                 >
                   <AdvertiserInfoSection
                     formData={formData}
@@ -382,7 +396,7 @@ export default function SubmitAdPage() {
                         disabled={isSubmitDisabled}
                         className="w-full bg-black text-white px-6 py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
                       >
-                        {loading ? "Submitting..." : "Submit Ad Request"}
+                        {loading ? "Submitting..." : isOffline ? "Reconnect to Submit" : "Submit Ad Request"}
                       </button>
                     </div>
                   ) : null}
@@ -420,12 +434,13 @@ export default function SubmitAdPage() {
       {/* Ad Preview Modal — Issue #12 */}
       {showPreview && (
         <div
-          className="fixed inset-0 z-50 flex"
+          className="fixed inset-0 z-50 flex items-end sm:items-stretch"
           onClick={(e) => { if (e.target === e.currentTarget) setShowPreview(false); }}
         >
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
-          <div className="relative ml-auto w-full max-w-[480px] h-full bg-[#F5F5F5] shadow-2xl flex flex-col overflow-y-auto">
-            <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-gray-200 sticky top-0 z-10">
+          <div className={`safe-sheet relative flex w-full flex-col overflow-hidden bg-[#F5F5F5] shadow-2xl ${isPhone ? "mt-auto max-h-[88vh] rounded-t-[28px]" : "ml-auto h-full max-w-[520px]"}`}>
+            {isPhone ? <div className="mx-auto mt-3 h-1.5 w-14 rounded-full bg-gray-300" /> : null}
+            <div className="safe-top-pad sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
               <span className="text-sm font-semibold text-gray-900">
                 {isMultiWeekPreview ? `Ad Preview - Week ${previewWeekIndex + 1}` : "Ad Preview"}
               </span>
@@ -437,7 +452,7 @@ export default function SubmitAdPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-6">
+            <div className="flex-1 overflow-y-auto px-5 py-4 sm:py-6">
               {isMultiWeekPreview ? (
                 <div className="mb-5 flex flex-wrap gap-2">
                   {Array.from({ length: previewWeekCount }).map((_, index) => (
@@ -467,7 +482,7 @@ export default function SubmitAdPage() {
 
 export function HydrateFallback() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
+    <div className="min-h-app-screen bg-white flex items-center justify-center">
       <div className="animate-pulse text-gray-400 text-sm">Loading…</div>
     </div>
   );

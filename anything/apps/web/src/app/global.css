@@ -3,7 +3,76 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-right: env(safe-area-inset-right, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-left: env(safe-area-inset-left, 0px);
+    --app-viewport-height: 100vh;
+  }
+
+  @supports (height: 100dvh) {
+    :root {
+      --app-viewport-height: 100dvh;
+    }
+  }
+
+  html, body {
+    min-height: 100%;
+    background: #f8fafc;
+  }
+
   input, textarea, select, button {
     @apply outline-none focus:outline-none;
+  }
+}
+
+@layer utilities {
+  .min-h-app-screen {
+    min-height: var(--app-viewport-height);
+  }
+
+  .h-app-screen {
+    height: var(--app-viewport-height);
+  }
+
+  .safe-pt {
+    padding-top: var(--safe-area-top);
+  }
+
+  .safe-pb {
+    padding-bottom: var(--safe-area-bottom);
+  }
+
+  .safe-pl {
+    padding-left: var(--safe-area-left);
+  }
+
+  .safe-pr {
+    padding-right: var(--safe-area-right);
+  }
+
+  .safe-px {
+    padding-left: var(--safe-area-left);
+    padding-right: var(--safe-area-right);
+  }
+
+  .safe-top-pad {
+    padding-top: calc(var(--safe-area-top) + 0.75rem);
+  }
+
+  .safe-bottom-pad {
+    padding-bottom: calc(var(--safe-area-bottom) + 1rem);
+  }
+
+  .safe-sheet {
+    padding-bottom: calc(var(--safe-area-bottom) + 1rem);
+    padding-left: calc(var(--safe-area-left) + 1rem);
+    padding-right: calc(var(--safe-area-right) + 1rem);
+  }
+
+  .safe-dialog {
+    margin-left: max(1rem, var(--safe-area-left));
+    margin-right: max(1rem, var(--safe-area-right));
   }
 }

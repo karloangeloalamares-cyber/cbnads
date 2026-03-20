@@ -58,8 +58,11 @@ import {
   X,
   EyeOff,
   Loader2,
+  LayoutDashboard,
   LayoutGrid,
   List,
+  Megaphone,
+  CreditCard,
 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import AdsSortableHeader from "@/components/AdsSortableHeader";
@@ -134,6 +137,7 @@ import {
   upsertProduct,
 } from "@/lib/localDb";
 import { useSubmissionNotifications } from "@/hooks/useSubmissionNotifications";
+import { useResponsiveViewport } from "@/hooks/useResponsiveViewport";
 import { getSupabaseClient, hasSupabaseConfig } from "@/lib/supabase";
 
 const sections = [
@@ -723,6 +727,337 @@ function ProductSortableRow({
   );
 }
 
+function ProductStackCard({
+  item,
+  index,
+  canEditProducts,
+  isMenuOpen,
+  productMenuCoordinates,
+  productMenuRef,
+  openProductMenu,
+  openProductEdit,
+  openProductDelete,
+}) {
+  return (
+    <article className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+            Product {index + 1}
+          </div>
+          <h3 className="truncate text-base font-semibold text-gray-900">{item.product_name}</h3>
+        </div>
+        <div className="relative" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            onClick={(event) => openProductMenu(item.id, event)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50"
+          >
+            <MoreVertical size={18} />
+          </button>
+
+          {isMenuOpen && typeof document !== "undefined"
+            ? createPortal(
+                <div
+                  ref={productMenuRef}
+                  className="fixed w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-[200]"
+                  style={{
+                    top: `${productMenuCoordinates.top}px`,
+                    left: `${productMenuCoordinates.left}px`,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openProductEdit(item)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    <Edit2 size={16} className="text-gray-400" />
+                    Edit
+                  </button>
+                  <div className="my-1 border-t border-gray-100" />
+                  <button
+                    type="button"
+                    onClick={() => openProductDelete(item)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50"
+                  >
+                    <Trash2 size={16} className="text-red-500" />
+                    Delete
+                  </button>
+                </div>,
+                document.body,
+              )
+            : null}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            Placement
+          </div>
+          <div className="mt-1 text-sm font-medium text-gray-900">{item.placement || "N/A"}</div>
+        </div>
+        <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            Price
+          </div>
+          <div className="mt-1 text-sm font-semibold text-gray-900">{formatCurrency(item.price)}</div>
+        </div>
+        <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            Created
+          </div>
+          <div className="mt-1 text-sm font-medium text-gray-900">
+            {formatProductsDate(item.created_at) || "N/A"}
+          </div>
+        </div>
+      </div>
+
+      {canEditProducts ? (
+        <p className="mt-3 text-xs text-gray-500">
+          Drag reordering stays available on wider layouts.
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
+function InvoiceStackCard({
+  item,
+  advertiserName,
+  isAdvertiser,
+  canDeleteBilling,
+  selectedInvoiceIds,
+  handleToggleSelectInvoice,
+  canSelectInvoiceForBatchDelete,
+  openInvoicePreview,
+  openInvoiceMenu,
+  openInvoiceMenuId,
+  setOpenInvoiceMenuId,
+  invoiceMenuRef,
+  invoiceMenuCoordinates,
+  canEditBilling,
+  openInvoiceEditor,
+  canPayInvoiceWithSola,
+  launchSolaInvoiceCheckout,
+  isAdmin,
+  resendInvoicePaymentReminder,
+  canMarkInvoicePaid,
+  markInvoiceAsPaid,
+  deleteInvoiceRecord,
+  isInvoiceActionPending,
+}) {
+  const status = normalizeInvoiceStatus(item.status);
+  const statusLabel = getInvoiceStatusLabel(status);
+  const deleteActionLabel = getInvoiceDeleteActionLabel(item);
+  const itemCount =
+    Array.isArray(item.ad_ids) && item.ad_ids.length > 0
+      ? item.ad_ids.length
+      : Array.isArray(item.items)
+        ? item.items.length
+        : 0;
+  const selectable = canSelectInvoiceForBatchDelete(item);
+
+  return (
+    <article
+      className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-colors hover:border-gray-300"
+      onClick={() => openInvoicePreview(item)}
+    >
+      <div className="flex items-start gap-3">
+        {canDeleteBilling ? (
+          <div onClick={(event) => event.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={selectedInvoiceIds.has(String(item.id))}
+              disabled={!selectable}
+              onChange={() => handleToggleSelectInvoice(item.id)}
+              className="mt-1 h-4 w-4 rounded border-gray-300 accent-gray-900 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-gray-900">
+                #{item.invoice_number || item.id}
+              </div>
+              <div className="mt-1 truncate text-sm text-gray-500">{advertiserName}</div>
+            </div>
+
+            <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+              {isAdvertiser ? (
+                <button
+                  type="button"
+                  onClick={() => openInvoicePreview(item)}
+                  className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <Eye size={14} className="text-gray-400" />
+                  View
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(event) => openInvoiceMenu(item.id, status, event)}
+                    disabled={isInvoiceActionPending(item.id)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <MoreVertical size={18} />
+                  </button>
+                  {openInvoiceMenuId === item.id && typeof document !== "undefined"
+                    ? createPortal(
+                        <div
+                          ref={invoiceMenuRef}
+                          className="fixed z-[200] w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+                          style={{
+                            top: `${invoiceMenuCoordinates.top}px`,
+                            left: `${invoiceMenuCoordinates.left}px`,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenInvoiceMenuId(null);
+                              openInvoicePreview(item);
+                            }}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                          >
+                            <Eye size={16} className="text-gray-400" />
+                            View Invoice
+                          </button>
+                          {canEditBilling ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenInvoiceMenuId(null);
+                                openInvoiceEditor(item);
+                              }}
+                              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50"
+                            >
+                              <Edit2 size={16} className="text-gray-400" />
+                              Edit Invoice
+                            </button>
+                          ) : null}
+                          {status !== "Paid" ? (
+                            <>
+                              {canPayInvoiceWithSola(item) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenInvoiceMenuId(null);
+                                    void launchSolaInvoiceCheckout(item);
+                                  }}
+                                  disabled={isInvoiceActionPending(item.id)}
+                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <DollarSign size={16} className="text-gray-400" />
+                                  Pay Invoice
+                                </button>
+                              ) : null}
+                              {isAdmin ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenInvoiceMenuId(null);
+                                    void resendInvoicePaymentReminder(item);
+                                  }}
+                                  disabled={isInvoiceActionPending(item.id)}
+                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <Mail size={16} className="text-gray-400" />
+                                  Resend Payment Reminder
+                                </button>
+                              ) : null}
+                              {canMarkInvoicePaid ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenInvoiceMenuId(null);
+                                    markInvoiceAsPaid(item);
+                                  }}
+                                  disabled={isInvoiceActionPending(item.id)}
+                                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <CheckCircle size={16} className="text-gray-400" />
+                                  Record Payment
+                                </button>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {canDeleteBilling ? (
+                            <>
+                              <div className="my-1 border-t border-gray-100" />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenInvoiceMenuId(null);
+                                  deleteInvoiceRecord(item.id);
+                                }}
+                                disabled={isInvoiceActionPending(item.id)}
+                                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                <Trash2 size={16} className="text-red-500" />
+                                {deleteActionLabel}
+                              </button>
+                            </>
+                          ) : null}
+                        </div>,
+                        document.body,
+                      )
+                    : null}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span
+              className={`inline-flex items-center rounded-lg border px-2.5 py-1 text-[10px] font-semibold ${getInvoiceStatusColor(
+                status,
+              )}`}
+            >
+              {statusLabel}
+            </span>
+            {isInvoicePaidViaCredits(item) ? (
+              <span className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">
+                Paid via Credits
+              </span>
+            ) : null}
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Date
+              </div>
+              <div className="mt-1 text-sm font-medium text-gray-900">
+                {formatInvoiceListDate(item.due_date || item.created_at)}
+              </div>
+            </div>
+            <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Items
+              </div>
+              <div className="mt-1 text-sm font-medium text-gray-900">
+                {itemCount} item{itemCount !== 1 ? "s" : ""}
+              </div>
+            </div>
+            <div className="rounded-xl bg-gray-50 px-3 py-2.5">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                Total
+              </div>
+              <div className="mt-1 text-sm font-semibold text-gray-900">
+                {formatCurrency(getInvoiceDisplayTotal(item))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 const normalizeInvoiceStatus = (value) => {
   const status = String(value || "").trim();
   if (!status || status === "Unpaid") {
@@ -1264,6 +1599,50 @@ const parseAdMedia = (value) => {
     }
   }
   return [];
+};
+
+const getShortUserLabel = (user) => {
+  const raw = String(user?.name || user?.email || "Account").trim();
+  if (!raw) {
+    return "Account";
+  }
+
+  const [firstWord] = raw.split(/\s+/);
+  return firstWord || raw;
+};
+
+const formatSyncTimestamp = (value) => {
+  if (!value) {
+    return "Just updated";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "Just updated";
+  }
+
+  return `Synced ${parsed.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  })}`;
+};
+
+const getMobilePrimaryNavItems = ({ allowedSections = [], isAdvertiser = false }) => {
+  const preferredSections = isAdvertiser
+    ? [
+      { id: "Dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { id: "Create Ad", label: "Create Ad", icon: Plus },
+      { id: "Ads", label: "Ads", icon: Megaphone },
+      { id: "Billing", label: "Billing", icon: CreditCard },
+    ]
+    : [
+      { id: "Dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { id: "Submissions", label: "Submissions", icon: FileText },
+      { id: "Ads", label: "Ads", icon: Megaphone },
+      { id: "Billing", label: "Billing", icon: CreditCard },
+    ];
+
+  return preferredSections.filter((item) => allowedSections.includes(item.id));
 };
 
 function DashboardStatTooltipIcon({ icon: Icon, tooltip }) {
@@ -3289,6 +3668,8 @@ export default function AdsPage() {
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [adsUnreadCount, setAdsUnreadCount] = useState(0);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState(() => new Date().toISOString());
+  const { isPhone, isTablet } = useResponsiveViewport();
   const pendingAdDeleteIdsRef = useRef(new Set());
   const pendingInvoiceActionIdsRef = useRef(new Set());
   const dropdownRef = useRef(null);
@@ -3693,15 +4074,14 @@ export default function AdsPage() {
       authRedirectInFlightRef.current = true;
       navigate("/account/signin", { replace: true });
     };
-    const sync = () => {
+    const sync = ({ userOverride } = {}) => {
       if (cancelled) {
         return;
       }
       setDb(readDb());
-      setUser(getSignedInUser());
+      setUser(userOverride || getSignedInUser());
       setReady(true);
     };
-
     const recoverSessionUser = async () => {
       const recovered = await resolveSupabaseSessionUser();
       if (recovered?.id) {
@@ -3717,6 +4097,8 @@ export default function AdsPage() {
     };
 
     const initialize = async () => {
+      let resolvedUser = getSignedInUser();
+
       if (hasSupabaseConfig) {
         try {
           const recoveredUser = await recoverSessionUser();
@@ -3731,7 +4113,9 @@ export default function AdsPage() {
               redirectToSignIn();
               return;
             }
+            resolvedUser = fallbackUser;
           } else {
+            resolvedUser = recoveredUser;
             const cachedUser = getSignedInUser();
             const cachedUserId = String(cachedUser?.id || "").trim();
             const recoveredUserId = String(recoveredUser.id || "").trim();
@@ -3747,13 +4131,14 @@ export default function AdsPage() {
             redirectToSignIn();
             return;
           }
+          resolvedUser = fallbackUser;
         }
       }
 
-      invalidateDbCache();
+      sync({ userOverride: resolvedUser });
       await ensureDb();
       if (!cancelled) {
-        sync();
+        sync({ userOverride: resolvedUser });
         unsubscribe = subscribeDb(sync);
       }
     };
@@ -3772,6 +4157,14 @@ export default function AdsPage() {
 
     navigate("/account/signin", { replace: true });
   }, [navigate, ready, user]);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+
+    setLastSyncedAt(new Date().toISOString());
+  }, [db, ready]);
 
   useEffect(() => {
     if (!ready || !user) {
@@ -10270,9 +10663,57 @@ export default function AdsPage() {
     setShowInvoiceCreateMenu(false);
     setInvoicePreviewModal(null);
     setShowProfileDropdown(false);
+    setShowNotificationsDropdown(false);
+    setMobileSidebarOpen(false);
     if (section === "Ads") {
       setAdsUnreadCount(0);
     }
+  };
+
+  const openPrimaryCreateAdFlow = () => {
+    if (isAdvertiser) {
+      handleNavigate("Create Ad");
+      return;
+    }
+
+    if (!canEditAds) {
+      handleNavigate("Ads");
+      return;
+    }
+
+    setActiveSection("Ads");
+    setView("createAd");
+    setAd(blankAd);
+    setCreateAdCustomDate("");
+    setCreateAdCustomTime("");
+    setCreateAdAvailabilityError(null);
+    setCreateAdFullyBookedDates([]);
+    setShowProfileDropdown(false);
+    setShowNotificationsDropdown(false);
+    setMobileSidebarOpen(false);
+  };
+
+  const openDashboardAdItem = (item) => {
+    setActiveSection("Ads");
+    setShowProfileDropdown(false);
+    setShowNotificationsDropdown(false);
+    setMobileSidebarOpen(false);
+
+    if (canEditAds) {
+      openAdEditor(item);
+      return;
+    }
+
+    setView("list");
+  };
+
+  const openDashboardInvoiceItem = (item) => {
+    setActiveSection("Billing");
+    setView("list");
+    setShowProfileDropdown(false);
+    setShowNotificationsDropdown(false);
+    setMobileSidebarOpen(false);
+    openInvoicePreview(item);
   };
 
 
@@ -11033,6 +11474,107 @@ export default function AdsPage() {
     settingsProfileName !== (user?.name || "") ||
     settingsProfileImage !== (user?.image || "") ||
     settingsProfileWhatsapp !== (user?.whatsapp_number || "");
+  const compactShell = isPhone || isTablet;
+  const showMobileBottomNav = isPhone && view === "list";
+  const activeAdsViewMode = compactShell ? "grid" : adsViewMode;
+  const useCompactInvoiceCards = compactShell;
+  const useCompactProductCards = compactShell;
+  const mobileHeaderLabel = getShortUserLabel(user);
+  const syncStatusLabel = formatSyncTimestamp(lastSyncedAt);
+  const mobilePrimaryNavItems = getMobilePrimaryNavItems({
+    allowedSections,
+    isAdvertiser,
+  });
+  const dashboardPrimaryActionLabel =
+    isInternalUserRole && dashboardStats.pendingSubmissions > 0
+      ? "Review submissions"
+      : isAdvertiser
+        ? "Create ad"
+        : canEditAds
+          ? "Create ad"
+          : "View ads";
+  const dashboardPrimaryActionDescription =
+    isInternalUserRole && dashboardStats.pendingSubmissions > 0
+      ? `${dashboardStats.pendingSubmissions} submission${dashboardStats.pendingSubmissions === 1 ? "" : "s"} need review.`
+      : isAdvertiser
+        ? "Start a new advertiser submission from your phone."
+        : canEditAds
+          ? "Jump straight into the ad composer."
+          : "Open the ads workspace and continue reviewing.";
+  const handleDashboardPrimaryAction = async () => {
+    if (isInternalUserRole && dashboardStats.pendingSubmissions > 0) {
+      if (unreadCount > 0) {
+        await markAllAsRead();
+      }
+      await openSubmissionsFromNotification();
+      return;
+    }
+
+    openPrimaryCreateAdFlow();
+  };
+  const mobileDashboardStatCards = isAdvertiser
+    ? [
+      {
+        label: "Active Ads",
+        value: dashboardStats.totalAds,
+        detail: "Currently scheduled or in your pipeline.",
+        section: "Ads",
+        urgent: false,
+      },
+      {
+        label: "Overdue Invoices",
+        value: dashboardStats.overdueInvoices,
+        detail: dashboardStats.overdueInvoices > 0 ? "Needs payment follow-up." : "Nothing overdue right now.",
+        section: "Billing",
+        urgent: dashboardStats.overdueInvoices > 0,
+      },
+      {
+        label: "Outstanding",
+        value: formatCurrency(dashboardStats.outstandingRevenue),
+        detail: "Unpaid balance across your account.",
+        section: "Billing",
+        urgent: dashboardStats.outstandingRevenue > 0,
+      },
+      {
+        label: "This Month",
+        value: formatCurrency(dashboardStats.monthRevenue),
+        detail: "Paid ads recorded this month.",
+        section: "Billing",
+        urgent: false,
+      },
+    ]
+    : [
+      {
+        label: "Pending",
+        value: dashboardStats.pendingSubmissions,
+        detail: dashboardStats.pendingSubmissions > 0 ? "Needs review now." : "Queue is clear.",
+        section: "Submissions",
+        urgent: dashboardStats.pendingSubmissions > 0,
+      },
+      {
+        label: "Overdue",
+        value: dashboardStats.overdueInvoices,
+        detail: dashboardStats.overdueInvoices > 0 ? "Invoices need follow-up." : "No overdue invoices.",
+        section: "Billing",
+        urgent: dashboardStats.overdueInvoices > 0,
+      },
+      {
+        label: "Active Ads",
+        value: dashboardStats.totalAds,
+        detail: "Ads currently in your pipeline.",
+        section: "Ads",
+        urgent: false,
+      },
+      {
+        label: "This Month",
+        value: formatCurrency(dashboardStats.monthRevenue),
+        detail: "Revenue marked paid this month.",
+        section: "Billing",
+        urgent: false,
+      },
+    ];
+  const mobileTodayAds = todayAds.slice(0, 4);
+  const mobileOverdueInvoices = overdueInvoiceList.slice(0, 4);
 
   if (!ready) {
     return (
@@ -11051,7 +11593,7 @@ export default function AdsPage() {
 
   if (!user) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-app-screen items-center justify-center bg-gray-50">
         <p className="text-gray-600">Redirecting to sign in...</p>
       </div>
     );
@@ -11059,7 +11601,7 @@ export default function AdsPage() {
 
   if (!["admin", "manager", "staff", "advertiser"].includes(userRole)) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-app-screen items-center justify-center bg-gray-50">
         <div className="text-center max-w-md">
           <h1 className="text-2xl font-semibold text-gray-900 mb-2">
             Access Denied
@@ -11079,7 +11621,7 @@ export default function AdsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex min-h-app-screen bg-white">
       <Sidebar
         activeItem={activeSection}
         onNavigate={handleNavigate}
@@ -11092,25 +11634,37 @@ export default function AdsPage() {
         onClearAdsUnread={() => setAdsUnreadCount(0)}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {view === "list" && (
-          <header className="h-16 border-b border-gray-200 flex items-center justify-between px-4 md:px-8 gap-4 flex-shrink-0 bg-white">
-            <div className="flex items-center gap-3">
-              <button
-                className="inline-flex items-center justify-center p-2 hover:bg-gray-100 rounded-lg md:hidden"
-                type="button"
-                onClick={() => setMobileSidebarOpen(true)}
-              >
-                <Menu size={20} className="text-gray-600" />
-              </button>
+          <header className={`safe-top-pad flex shrink-0 items-center justify-between gap-4 border-b border-gray-200 bg-white px-4 sm:px-5 lg:px-8 ${isPhone ? "pb-3" : "min-h-[4.5rem]"}`}>
+            <div className="flex min-w-0 items-center gap-3">
+              {!showMobileBottomNav ? (
+                <button
+                  className="inline-flex items-center justify-center rounded-lg p-2 hover:bg-gray-100 md:hidden"
+                  type="button"
+                  onClick={() => setMobileSidebarOpen(true)}
+                >
+                  <Menu size={20} className="text-gray-600" />
+                </button>
+              ) : null}
+
+              {isPhone ? (
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                    CBN Ads
+                  </p>
+                  <p className="truncate text-lg font-semibold text-gray-900">{activeSection}</p>
+                </div>
+              ) : null}
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               <div className="relative" ref={notificationsDropdownRef}>
                 <button
-                  className="relative p-2 hover:bg-gray-100 rounded-lg"
+                  className={`relative rounded-xl p-2 transition-colors hover:bg-gray-100 ${isPhone ? "h-11 w-11" : ""}`}
                   type="button"
                   onClick={() => setShowNotificationsDropdown((current) => !current)}
+                  aria-label="Open notifications"
                 >
                   <Bell size={20} className="text-gray-600" />
                   {totalUnreadCount > 0 ? (
@@ -11120,8 +11674,8 @@ export default function AdsPage() {
                   ) : null}
                 </button>
 
-                {showNotificationsDropdown ? (
-                  <div className="absolute right-0 mt-2 w-[320px] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50">
+                {showNotificationsDropdown && !isPhone ? (
+                  <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] rounded-xl border border-gray-200 bg-white p-4 shadow-xl z-50">
                     <div className="mb-3 flex items-center justify-between">
                       <div>
                         <p className="text-sm font-semibold text-gray-900">Notifications</p>
@@ -11193,11 +11747,14 @@ export default function AdsPage() {
                 <button
                   type="button"
                   onClick={() => setShowProfileDropdown((current) => !current)}
-                  className="flex items-center gap-3 hover:bg-gray-50 rounded-lg px-3 py-2 transition-colors"
+                  className={`flex items-center rounded-xl transition-colors hover:bg-gray-50 ${isPhone ? "h-11 w-11 justify-center" : "gap-3 px-3 py-2"}`}
+                  aria-label="Open profile menu"
                 >
-                  <span className="text-sm font-medium text-gray-900">
-                    {user.name || user.email}
-                  </span>
+                  {!isPhone ? (
+                    <span className="text-sm font-medium text-gray-900">
+                      {user.name || user.email}
+                    </span>
+                  ) : null}
                   <div className="w-10 h-10 rounded-full bg-[#F4E4D7] overflow-hidden flex items-center justify-center">
                     {user.image ? (
                       <img
@@ -11211,10 +11768,10 @@ export default function AdsPage() {
                       </span>
                     )}
                   </div>
-                  <ChevronDown size={16} className="text-gray-600" />
+                  {!isPhone ? <ChevronDown size={16} className="text-gray-600" /> : null}
                 </button>
 
-                {showProfileDropdown && (
+                {showProfileDropdown && !isPhone && (
                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
                     {isAdmin ? (
                       <>
@@ -11243,12 +11800,495 @@ export default function AdsPage() {
           </header>
         )}
 
+        {isPhone && showNotificationsDropdown ? (
+          <div className="fixed inset-0 z-[60] md:hidden">
+            <button
+              type="button"
+              aria-label="Close notifications"
+              className="absolute inset-0 bg-slate-950/35"
+              onClick={() => setShowNotificationsDropdown(false)}
+            />
+            <div className="safe-bottom-pad absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-gray-200 bg-white px-4 pb-5 pt-4 shadow-[0_-24px_60px_rgba(15,23,42,0.18)]">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base font-semibold text-gray-900">Notifications</p>
+                  <p className="mt-1 text-sm text-gray-500">Recent app activity</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowNotificationsDropdown(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700"
+                  aria-label="Close notifications"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {totalUnreadCount > 0 ? (
+                <div className="mb-3 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await markAllAsRead();
+                      setAdsUnreadCount(0);
+                    }}
+                    className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                  >
+                    Mark all read
+                  </button>
+                </div>
+              ) : null}
+
+              {totalUnreadCount > 0 ? (
+                <div className="space-y-2">
+                  {adsUnreadCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdsUnreadCount(0);
+                        setShowNotificationsDropdown(false);
+                        handleNavigate("Ads");
+                      }}
+                      className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left transition-colors hover:bg-gray-100"
+                    >
+                      <p className="text-sm font-semibold text-gray-900">
+                        New ad created in dashboard
+                      </p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Open the ads workspace to review it now.
+                      </p>
+                    </button>
+                  ) : null}
+                  {unreadCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await markAllAsRead();
+                        await openSubmissionsFromNotification();
+                      }}
+                      className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-left transition-colors hover:bg-gray-100"
+                    >
+                      <p className="text-sm font-semibold text-gray-900">
+                        New ad submission received
+                      </p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        Review pending submissions from this queue.
+                      </p>
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+                  No new notifications
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+
+        {isPhone && showProfileDropdown ? (
+          <div className="fixed inset-0 z-[60] md:hidden">
+            <button
+              type="button"
+              aria-label="Close profile menu"
+              className="absolute inset-0 bg-slate-950/35"
+              onClick={() => setShowProfileDropdown(false)}
+            />
+            <div className="safe-bottom-pad absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-gray-200 bg-white px-4 pb-5 pt-4 shadow-[0_-24px_60px_rgba(15,23,42,0.18)]">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-[#F4E4D7]">
+                    {user.image ? (
+                      <img
+                        src={user.image}
+                        alt="Profile"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-sm font-medium text-gray-700">
+                        {(user.name || user.email || "U").charAt(0).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-semibold text-gray-900">
+                      {mobileHeaderLabel}
+                    </p>
+                    <p className="truncate text-sm text-gray-500">{user.email}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowProfileDropdown(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700"
+                  aria-label="Close profile menu"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    onClick={() => handleNavigate("Settings")}
+                    className="flex min-h-12 w-full items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-left text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+                  >
+                    <Settings size={18} />
+                    Profile Settings
+                  </button>
+                ) : null}
+                <a
+                  href="/account/logout"
+                  className="flex min-h-12 w-full items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  <LogOut size={18} />
+                  Sign Out
+                </a>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <main
-          className={`flex-1 overflow-auto bg-gray-50 ${activeSection === "Calendar" ? "p-0" : "p-8"
+          className={`flex-1 overflow-auto bg-gray-50 ${activeSection === "Calendar"
+            ? showMobileBottomNav
+              ? "pb-24"
+              : "p-0"
+            : `safe-bottom-pad px-4 pt-4 sm:px-5 lg:px-8 lg:pt-8 ${showMobileBottomNav ? "pb-24" : "pb-6 lg:pb-8"}`
             }`}
         >
           {activeSection === "Dashboard" && (
             <div className="max-w-7xl mx-auto">
+              {isPhone ? (
+                <div className="space-y-5">
+                  <section className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">
+                          Dashboard
+                        </p>
+                        <h1 className="mt-2 text-2xl font-bold tracking-tight text-gray-900">
+                          {isAdvertiser ? "Your ad workspace" : "Today's dashboard"}
+                        </h1>
+                        <p className="mt-2 text-sm leading-6 text-gray-600">
+                          {isAdvertiser
+                            ? "Stay on top of your ads, invoices, and today's publishing schedule."
+                            : "Review urgent work first, then move into ads, billing, and the daily publishing queue."}
+                        </p>
+                      </div>
+                      {(dashboardStats.pendingSubmissions > 0 || dashboardStats.overdueInvoices > 0) ? (
+                        <span className="inline-flex rounded-full bg-[#FEE2E2] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#B91C1C]">
+                          Needs attention
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
+                      <p className="text-sm font-medium text-gray-900">
+                        {dashboardPrimaryActionDescription}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">{syncStatusLabel}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleDashboardPrimaryAction();
+                      }}
+                      className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-2xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-gray-800"
+                    >
+                      {dashboardPrimaryActionLabel}
+                    </button>
+                  </section>
+
+                  <section className="grid grid-cols-2 gap-3">
+                    {mobileDashboardStatCards.map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => handleNavigate(item.section)}
+                        className={`rounded-[24px] border p-4 text-left shadow-sm transition-colors ${item.urgent
+                          ? "border-[#FECACA] bg-[#FEF2F2] hover:bg-[#FEE2E2]"
+                          : "border-gray-200 bg-white hover:bg-gray-50"
+                          }`}
+                      >
+                        <p className={`text-[11px] font-semibold uppercase tracking-[0.18em] ${item.urgent ? "text-[#B91C1C]" : "text-gray-500"}`}>
+                          {item.label}
+                        </p>
+                        <p className={`mt-3 text-2xl font-bold tracking-tight ${item.urgent ? "text-[#7F1D1D]" : "text-gray-900"}`}>
+                          {item.value}
+                        </p>
+                        <p className="mt-2 text-xs leading-5 text-gray-600">{item.detail}</p>
+                      </button>
+                    ))}
+                  </section>
+
+                  <section className="rounded-[24px] border border-gray-200 bg-white shadow-sm">
+                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-4">
+                      <div>
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                          Publishing Today
+                        </h2>
+                        <p className="mt-1 text-xs text-gray-500">Live queue for today&apos;s schedule</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavigate(allowedSections.includes("Calendar") ? "Calendar" : "Ads")}
+                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                      >
+                        View all
+                      </button>
+                    </div>
+                    <div className="p-4">
+                      {mobileTodayAds.length > 0 ? (
+                        <div className="space-y-3">
+                          {mobileTodayAds.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-2xl border border-gray-200 bg-gray-50 p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-semibold text-gray-900">
+                                    {item.ad_name}
+                                  </p>
+                                  <p className="mt-1 truncate text-xs text-gray-500">
+                                    {item.advertiser || "-"}
+                                    {" / "}
+                                    {item.placement || "-"}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs font-semibold text-gray-700">
+                                    {formatTime(item.post_time)}
+                                  </p>
+                                  <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${item.status === "Published" ? "bg-gray-200 text-gray-700" : "bg-white text-gray-600"}`}>
+                                    {item.status || "Draft"}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openDashboardAdItem(item)}
+                                className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl bg-white px-3 py-2 text-xs font-semibold text-gray-900 shadow-sm ring-1 ring-gray-200 transition-colors hover:bg-gray-100"
+                              >
+                                {canEditAds ? "Open ad" : "View ads"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5">
+                          <p className="text-sm font-medium text-gray-900">Nothing scheduled today</p>
+                          <p className="mt-1 text-sm text-gray-500">
+                            {isAdvertiser
+                              ? "Create a new ad to add something to today's queue."
+                              : "Your publishing queue is clear for today."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[24px] border border-gray-200 bg-white shadow-sm">
+                    <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-4">
+                      <div>
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                          Overdue Invoices
+                        </h2>
+                        <p className="mt-1 text-xs text-gray-500">Invoices that need payment follow-up</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleNavigate("Billing")}
+                        className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                      >
+                        View all
+                      </button>
+                    </div>
+                    <div className="p-4">
+                      {mobileOverdueInvoices.length > 0 ? (
+                        <div className="space-y-3">
+                          {mobileOverdueInvoices.map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-semibold text-gray-900">
+                                    {item.invoice_number || item.id}
+                                  </p>
+                                  <p className="mt-1 truncate text-xs text-gray-600">
+                                    {advertisers.find(
+                                      (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+                                    )?.advertiser_name || "-"}
+                                  </p>
+                                  <p className="mt-1 text-xs text-[#B91C1C]">
+                                    Due {formatInvoiceListDate(item.due_date || item.issue_date || item.created_at)}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-semibold text-[#7F1D1D]">
+                                    {formatCurrency(getInvoiceOutstanding(item))}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openDashboardInvoiceItem(item)}
+                                className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl bg-white px-3 py-2 text-xs font-semibold text-gray-900 shadow-sm ring-1 ring-[#FECACA] transition-colors hover:bg-[#FFF7F7]"
+                              >
+                                Review invoice
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5">
+                          <p className="text-sm font-medium text-gray-900">No overdue invoices</p>
+                          <p className="mt-1 text-sm text-gray-500">
+                            Outstanding billing issues will appear here when action is required.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[24px] border border-gray-200 bg-white p-4 shadow-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+                      Outstanding balance
+                    </p>
+                    <p className="mt-3 text-3xl font-bold tracking-tight text-gray-900">
+                      {formatCurrency(dashboardStats.outstandingRevenue)}
+                    </p>
+                    <p className="mt-2 text-sm text-gray-600">
+                      Total unpaid invoice balance across approved ads.
+                    </p>
+                  </section>
+
+                  {isAdmin && capacityWarnings.length > 0 ? (
+                    <section className="rounded-[24px] border border-gray-200 bg-white shadow-sm">
+                      <div className="border-b border-gray-200 px-4 py-4">
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                          Capacity Warnings
+                        </h2>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 p-4">
+                        {capacityWarnings.map((warning) => (
+                          <div
+                            key={warning.date}
+                            className="rounded-2xl border border-gray-200 bg-gray-50 p-3 text-center"
+                          >
+                            <p className="text-xs text-gray-600">{formatDate(warning.date)}</p>
+                            <p className="mt-2 text-sm font-bold text-gray-900">
+                              {warning.count}/{warning.max}
+                            </p>
+                            <p className="mt-1 text-[11px] text-gray-500">at capacity</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+
+                  <div className="grid gap-5">
+                    <section className="rounded-[24px] border border-gray-200 bg-white shadow-sm">
+                      <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-4">
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                          Recent Activity
+                        </h2>
+                        <button
+                          type="button"
+                          onClick={() => handleNavigate("Ads")}
+                          className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                        >
+                          View ads
+                        </button>
+                      </div>
+                      <div className="space-y-3 p-4">
+                        {recentAds.length > 0 ? (
+                          recentAds.slice(0, 4).map((item) => (
+                            <div
+                              key={item.id}
+                              className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-gray-900">{item.ad_name}</p>
+                                  <p className="mt-1 truncate text-xs text-gray-500">
+                                    {item.advertiser || "-"}
+                                  </p>
+                                </div>
+                                <div className="text-right">
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${item.status === "Published" ? "bg-gray-200 text-gray-700" : "bg-white text-gray-600"}`}>
+                                    {item.status || "Draft"}
+                                  </span>
+                                  <p className="mt-1 text-xs text-gray-500">
+                                    {formatRelativeTime(
+                                      item.created_at ||
+                                      `${item.post_date || ""}T${item.post_time || "00:00:00"}`,
+                                    )}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-sm text-gray-500">No recent activity.</p>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className="rounded-[24px] border border-gray-200 bg-white shadow-sm">
+                      <div className="border-b border-gray-200 px-4 py-4">
+                        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-900">
+                          Quick Stats
+                        </h2>
+                      </div>
+                      <div className="space-y-4 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-600">Total Advertisers</span>
+                          </div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {dashboardStats.activeAdvertisers}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <DollarSign className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-600">Avg Ad Price</span>
+                          </div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {formatCurrency(dashboardInsights.avgAdPrice)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-600">Most Popular Type</span>
+                          </div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {formatPostTypeLabel(dashboardInsights.mostPopularType)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-gray-400" />
+                            <span className="text-sm text-gray-600">Popular Placement</span>
+                          </div>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {dashboardInsights.mostPopularPlacement}
+                          </span>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
+                </div>
+              ) : (
+                <>
               <div className="mb-8 flex items-center justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -11617,6 +12657,8 @@ export default function AdsPage() {
                   </div>
                 </div>
               </div>
+                </>
+              )}
             </div>
           )}
 
@@ -12534,8 +13576,8 @@ export default function AdsPage() {
                 </p>
               </div>
 
-              <div className="flex items-center mb-6 gap-3 min-w-0">
-                <div className="flex items-center gap-3 shrink-0">
+              <div className="mb-6 flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
+                <div className="flex flex-wrap items-center gap-3">
                   <select
                     value={adsFilters.status}
                     onChange={(event) =>
@@ -12607,7 +13649,7 @@ export default function AdsPage() {
                     </button>
 
                     {adsShowAdvancedFilters ? (
-                      <div className="absolute top-full mt-2 left-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-4 min-w-[320px]">
+                      <div className="absolute left-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-2rem))] rounded-lg border border-gray-200 bg-white p-4 shadow-lg">
                         <div className="space-y-3">
                           <div>
                             <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5 block">
@@ -12779,25 +13821,26 @@ export default function AdsPage() {
                     ) : null}
                   </div>
                 </div>
-                <div className="ml-auto flex items-center gap-3 shrink-0">
-                  {/* View Mode Toggle */}
-                  <div className="flex bg-gray-100 p-1 rounded-lg">
-                    <button
-                      onClick={() => setAdsViewMode("grid")}
-                      className={`p-1.5 rounded-md transition-colors ${adsViewMode === "grid" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
-                      title="Grid View"
-                    >
-                      <LayoutGrid size={16} />
-                    </button>
-                    <button
-                      onClick={() => setAdsViewMode("list")}
-                      className={`p-1.5 rounded-md transition-colors ${adsViewMode === "list" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
-                      title="List View"
-                    >
-                      <List size={16} />
-                    </button>
-                  </div>
-                  <div className="relative w-[clamp(170px,18vw,230px)]">
+                <div className="flex w-full flex-col gap-3 sm:flex-row xl:ml-auto xl:w-auto xl:items-center">
+                  {!compactShell ? (
+                    <div className="flex rounded-lg bg-gray-100 p-1">
+                      <button
+                        onClick={() => setAdsViewMode("grid")}
+                        className={`p-1.5 rounded-md transition-colors ${adsViewMode === "grid" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                        title="Grid View"
+                      >
+                        <LayoutGrid size={16} />
+                      </button>
+                      <button
+                        onClick={() => setAdsViewMode("list")}
+                        className={`p-1.5 rounded-md transition-colors ${adsViewMode === "list" ? "bg-white shadow-sm text-gray-900" : "text-gray-500 hover:text-gray-700"}`}
+                        title="List View"
+                      >
+                        <List size={16} />
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="relative w-full sm:w-[clamp(170px,18vw,230px)]">
                     <Search
                       size={16}
                       className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
@@ -12817,7 +13860,7 @@ export default function AdsPage() {
                   </div>
                   <button
                     onClick={exportVisibleAdsCsv}
-                    className="px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2"
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 sm:w-auto"
                     type="button"
                   >
                     <Download size={16} />
@@ -12829,7 +13872,7 @@ export default function AdsPage() {
                         setAd(blankAd);
                         setView("createAd");
                       }}
-                      className="h-11 min-w-[132px] px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all flex items-center justify-center whitespace-nowrap shrink-0"
+                      className="flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white transition-all hover:bg-gray-800 sm:min-w-[132px] sm:w-auto"
                       type="button"
                     >
                       Create new ad
@@ -12891,7 +13934,7 @@ export default function AdsPage() {
                     </div>
                   )}
 
-                  {adsViewMode === "list" ? (
+                  {activeAdsViewMode === "list" ? (
                     <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-x-auto">
                       <table className="w-full">
                       <thead>
@@ -13000,7 +14043,7 @@ export default function AdsPage() {
                     </div>
                   )}
 
-                  <div className="mt-4 flex items-center justify-between gap-4">
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <span>Rows per page</span>
                       <select
@@ -13019,7 +14062,7 @@ export default function AdsPage() {
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2 sm:justify-end">
                       <button
                         type="button"
                         onClick={() => setAdsCurrentPage((current) => Math.max(1, current - 1))}
@@ -14498,7 +15541,7 @@ export default function AdsPage() {
           )}
           {activeSection === "Products" && (
             <div className="max-w-[1400px] mx-auto">
-              <div className="flex items-center justify-between mb-6 gap-4">
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h1 className="text-2xl font-semibold text-gray-900 mb-1">Products</h1>
                   <p className="text-sm text-gray-500">
@@ -14508,7 +15551,7 @@ export default function AdsPage() {
                 <button
                   type="button"
                   onClick={openProductCreate}
-                  className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors flex items-center gap-2"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-800 sm:w-auto"
                 >
                   <Plus size={18} />
                   Add new Product
@@ -14609,6 +15652,23 @@ export default function AdsPage() {
                   <p className="text-gray-500">
                     No products yet. Click "Add new Product" to create your first ad package!
                   </p>
+                </div>
+              ) : useCompactProductCards ? (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {filteredProducts.map((item, index) => (
+                    <ProductStackCard
+                      key={item.id}
+                      item={item}
+                      index={index}
+                      canEditProducts={canEditProducts}
+                      isMenuOpen={openProductMenuId === item.id}
+                      productMenuCoordinates={productMenuCoordinates}
+                      productMenuRef={productMenuRef}
+                      openProductMenu={openProductMenu}
+                      openProductEdit={openProductEdit}
+                      openProductDelete={openProductDelete}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="bg-white border border-gray-200 rounded-lg overflow-x-auto">
@@ -14799,7 +15859,7 @@ export default function AdsPage() {
           )}
           {activeSection === "Billing" && view === "list" && (
             <div className="max-w-[1400px] mx-auto">
-              <div className="flex items-start justify-between mb-8">
+              <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <h1 className="text-3xl font-semibold text-gray-900 mb-2">Billing</h1>
                   <p className="text-sm text-gray-500">
@@ -14812,7 +15872,7 @@ export default function AdsPage() {
                   <button
                     type="button"
                     onClick={openBillingCreditsComposer}
-                    className="px-5 py-2.5 bg-black text-white rounded-lg text-sm font-semibold hover:bg-gray-800 transition-all shadow-sm hover:shadow flex items-center gap-2"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-gray-800 hover:shadow sm:w-auto"
                   >
                     <Plus size={16} />
                     Add Credits
@@ -14856,8 +15916,8 @@ export default function AdsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between mb-6 gap-4">
-                <div className="flex items-center gap-2">
+              <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-1 text-sm text-gray-600 mr-2">
                     <Filter size={16} />
                     <span className="font-medium">Filter</span>
@@ -14881,8 +15941,8 @@ export default function AdsPage() {
                   </select>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <div className="relative">
+                <div className="flex w-full items-center gap-3 lg:w-auto">
+                  <div className="relative w-full lg:w-auto">
                     <Search
                       size={16}
                       className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400"
@@ -14897,7 +15957,7 @@ export default function AdsPage() {
                           search: event.target.value,
                         }))
                       }
-                      className="pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-gray-900 w-[260px] transition-all"
+                      className="w-full rounded-lg border border-gray-200 py-2.5 pl-10 pr-4 text-sm transition-all focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 lg:w-[260px]"
                     />
                   </div>
                 </div>
@@ -14925,7 +15985,7 @@ export default function AdsPage() {
               ) : (
                 <>
                 {canDeleteBilling && selectedInvoiceIds.size > 0 && (
-                  <div className="mb-3 flex items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
+                  <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
                     <span className="text-sm text-gray-700 font-medium">
                       {selectedInvoiceIds.size} invoice{selectedInvoiceIds.size > 1 ? "s" : ""} selected
                     </span>
@@ -14948,9 +16008,50 @@ export default function AdsPage() {
                     </div>
                   </div>
                 )}
-                <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
+                {useCompactInvoiceCards ? (
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {filteredInvoices.map((item) => {
+                      const advertiserName =
+                        item.advertiser_name ||
+                        advertisers.find(
+                          (adv) => String(adv.id || "") === String(item.advertiser_id || ""),
+                        )?.advertiser_name ||
+                        "-";
+
+                      return (
+                        <InvoiceStackCard
+                          key={item.id}
+                          item={item}
+                          advertiserName={advertiserName}
+                          isAdvertiser={isAdvertiser}
+                          canDeleteBilling={canDeleteBilling}
+                          selectedInvoiceIds={selectedInvoiceIds}
+                          handleToggleSelectInvoice={handleToggleSelectInvoice}
+                          canSelectInvoiceForBatchDelete={canSelectInvoiceForBatchDelete}
+                          openInvoicePreview={openInvoicePreview}
+                          openInvoiceMenu={openInvoiceMenu}
+                          openInvoiceMenuId={openInvoiceMenuId}
+                          setOpenInvoiceMenuId={setOpenInvoiceMenuId}
+                          invoiceMenuRef={invoiceMenuRef}
+                          invoiceMenuCoordinates={invoiceMenuCoordinates}
+                          canEditBilling={canEditBilling}
+                          openInvoiceEditor={openInvoiceEditor}
+                          canPayInvoiceWithSola={canPayInvoiceWithSola}
+                          launchSolaInvoiceCheckout={launchSolaInvoiceCheckout}
+                          isAdmin={isAdmin}
+                          resendInvoicePaymentReminder={resendInvoicePaymentReminder}
+                          canMarkInvoicePaid={canMarkInvoicePaid}
+                          markInvoiceAsPaid={markInvoiceAsPaid}
+                          deleteInvoiceRecord={deleteInvoiceRecord}
+                          isInvoiceActionPending={isInvoiceActionPending}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 bg-gray-50">
                           {canDeleteBilling && (
@@ -15210,8 +16311,9 @@ export default function AdsPage() {
                         })}
                       </tbody>
                     </table>
+                    </div>
                   </div>
-                </div>
+                )}
                 </>
               )}
 
@@ -17311,6 +18413,55 @@ export default function AdsPage() {
             </div>
           )}
         </main>
+
+        {showMobileBottomNav ? (
+          <nav className="safe-bottom-pad fixed inset-x-0 bottom-0 z-40 bg-transparent md:hidden">
+            <div className="mx-auto max-w-7xl px-2 pb-3 pt-2">
+              <div className="grid grid-cols-5 gap-1 border-t border-gray-200 bg-white/95 backdrop-blur">
+              {mobilePrimaryNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeSection === item.id;
+                const badge =
+                  item.id === "Submissions"
+                    ? totalUnreadCount
+                    : item.id === "Ads"
+                      ? adsUnreadCount
+                      : item.id === "Billing"
+                        ? dashboardStats.overdueInvoices
+                        : 0;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleNavigate(item.id)}
+                    className={`relative flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition-colors ${isActive ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+                  >
+                    <div className="relative">
+                      <Icon size={18} />
+                      {badge > 0 ? (
+                        <span className={`absolute -right-2 -top-2 inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-semibold ${isActive ? "bg-white text-gray-900" : "bg-[#ED1D26] text-white"}`}>
+                          {badge > 99 ? "99+" : badge}
+                        </span>
+                      ) : null}
+                    </div>
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+
+                <button
+                  type="button"
+                  onClick={() => setMobileSidebarOpen(true)}
+                  className={`flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition-colors ${mobileSidebarOpen || !mobilePrimaryNavItems.some((item) => item.id === activeSection) ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+                >
+                  <Menu size={18} />
+                  <span>More</span>
+                </button>
+              </div>
+            </div>
+          </nav>
+        ) : null}
 
         <Modal
           isOpen={Boolean(submissionEditModal)}

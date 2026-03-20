@@ -2,8 +2,8 @@
 
 export default function SubmitAdSuccessPage() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-6 py-12">
-      <div className="w-full max-w-xl rounded-3xl border border-gray-200 bg-white p-10 shadow-sm">
+    <div className="min-h-app-screen safe-top-pad safe-bottom-pad flex items-center justify-center bg-white px-4 py-6 sm:px-6 sm:py-12">
+      <div className="w-full max-w-xl rounded-3xl border border-gray-200 bg-white p-6 shadow-sm sm:p-10">
         <img
           src="https://ucarecdn.com/c4576b41-e610-4e61-ad4d-d571bd5e0b04/-/format/auto/"
           alt="CBN"
@@ -32,7 +32,7 @@ export default function SubmitAdSuccessPage() {
 
 export function HydrateFallback() {
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
+    <div className="min-h-app-screen bg-white flex items-center justify-center">
       <div className="animate-pulse text-gray-400 text-sm">Loading…</div>
     </div>
   );

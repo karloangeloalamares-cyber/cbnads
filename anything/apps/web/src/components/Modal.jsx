@@ -31,9 +31,9 @@ export function Modal({ isOpen, onClose, children, size = "md" }) {
       />
 
       {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="safe-dialog safe-sheet flex min-h-full items-end justify-center p-0 md:items-center md:p-4">
         <div
-          className={`relative bg-white rounded-xl shadow-xl ${sizeClasses[size]} w-full`}
+          className={`relative w-full overflow-hidden rounded-t-[28px] bg-white shadow-xl md:rounded-xl ${sizeClasses[size]}`}
           onClick={(e) => e.stopPropagation()}
         >
           {children}
