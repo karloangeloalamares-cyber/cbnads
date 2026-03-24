@@ -11953,9 +11953,9 @@ export default function AdsPage() {
         <main
           className={`flex-1 overflow-auto bg-gray-50 ${activeSection === "Calendar"
             ? showMobileBottomNav
-              ? "pb-24"
+              ? "mobile-bottom-nav-offset"
               : "p-0"
-            : `safe-bottom-pad px-4 pt-4 sm:px-5 lg:px-8 lg:pt-8 ${showMobileBottomNav ? "pb-24" : "pb-6 lg:pb-8"}`
+            : `safe-bottom-pad px-4 pt-4 sm:px-5 lg:px-8 lg:pt-8 ${showMobileBottomNav ? "mobile-bottom-nav-offset" : "pb-6 lg:pb-8"}`
             }`}
         >
           {activeSection === "Dashboard" && (
@@ -18415,40 +18415,40 @@ export default function AdsPage() {
         </main>
 
         {showMobileBottomNav ? (
-          <nav className="safe-bottom-pad fixed inset-x-0 bottom-0 z-40 bg-transparent md:hidden">
-            <div className="mx-auto max-w-7xl px-2 pb-3 pt-2">
-              <div className="grid grid-cols-5 gap-1 border-t border-gray-200 bg-white/95 backdrop-blur">
-              {mobilePrimaryNavItems.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeSection === item.id;
-                const badge =
-                  item.id === "Submissions"
-                    ? totalUnreadCount
-                    : item.id === "Ads"
-                      ? adsUnreadCount
-                      : item.id === "Billing"
-                        ? dashboardStats.overdueInvoices
-                        : 0;
+          <nav className="safe-pb safe-px fixed inset-x-0 bottom-0 z-40 border-t border-gray-200 bg-white/95 backdrop-blur md:hidden">
+            <div className="mx-auto max-w-7xl px-2 pb-2 pt-2">
+              <div className="grid grid-cols-5 gap-1">
+                {mobilePrimaryNavItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeSection === item.id;
+                  const badge =
+                    item.id === "Submissions"
+                      ? totalUnreadCount
+                      : item.id === "Ads"
+                        ? adsUnreadCount
+                        : item.id === "Billing"
+                          ? dashboardStats.overdueInvoices
+                          : 0;
 
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleNavigate(item.id)}
-                    className={`relative flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition-colors ${isActive ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`}
-                  >
-                    <div className="relative">
-                      <Icon size={18} />
-                      {badge > 0 ? (
-                        <span className={`absolute -right-2 -top-2 inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-semibold ${isActive ? "bg-white text-gray-900" : "bg-[#ED1D26] text-white"}`}>
-                          {badge > 99 ? "99+" : badge}
-                        </span>
-                      ) : null}
-                    </div>
-                    <span className="truncate">{item.label}</span>
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleNavigate(item.id)}
+                      className={`relative flex min-h-[4.25rem] flex-col items-center justify-center gap-1 rounded-2xl px-2 text-[11px] font-medium transition-colors ${isActive ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"}`}
+                    >
+                      <div className="relative">
+                        <Icon size={18} />
+                        {badge > 0 ? (
+                          <span className={`absolute -right-2 -top-2 inline-flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-semibold ${isActive ? "bg-white text-gray-900" : "bg-[#ED1D26] text-white"}`}>
+                            {badge > 99 ? "99+" : badge}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span className="truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
 
                 <button
                   type="button"
