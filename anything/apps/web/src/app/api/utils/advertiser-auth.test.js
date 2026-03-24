@@ -25,7 +25,7 @@ vi.mock("../../../lib/phone.js", () => ({
   normalizeUSPhoneNumber: vi.fn((value) => value),
 }));
 
-import { upsertAdvertiserProfile } from "./advertiser-auth.js";
+import { ensureAdvertiserRecord, upsertAdvertiserProfile } from "./advertiser-auth.js";
 
 const makeDefaultTenantQuery = (tenantId = "tenant-1") => ({
   select: vi.fn(() => ({
@@ -64,6 +64,34 @@ const makeExistingProfileQuery = (profile) => ({
         data: profile,
         error: null,
       }),
+    })),
+  })),
+});
+
+const makeAdvertiserUpsertConflictQuery = () => ({
+  upsert: vi.fn(() => ({
+    select: vi.fn().mockResolvedValue({
+      data: null,
+      error: {
+        code: "42P10",
+        message:
+          "there is no unique or exclusion constraint matching the ON CONFLICT specification",
+      },
+    }),
+  })),
+});
+
+const makeExistingAdvertiserQuery = (advertiser) => ({
+  select: vi.fn(() => ({
+    eq: vi.fn(() => ({
+      order: vi.fn(() => ({
+        limit: vi.fn(() => ({
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: advertiser,
+            error: null,
+          }),
+        })),
+      })),
     })),
   })),
 });
@@ -174,6 +202,108 @@ describe("upsertAdvertiserProfile", () => {
         advertiser_id: "adv-2",
         email: "jordan@example.com",
         onboarding_complete: true,
+      }),
+    );
+  });
+});
+
+describe("ensureAdvertiserRecord", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("falls back to insert when advertiser email upsert conflicts are unsupported", async () => {
+    const insertQuery = {
+      insert: vi.fn(() => ({
+        select: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: "adv-1",
+              email: "jordan@example.com",
+              advertiser_name: "Acme Co",
+              contact_name: "Jordan Smith",
+            },
+          ],
+          error: null,
+        }),
+      })),
+    };
+
+    mockSupabase.from
+      .mockImplementationOnce(() => makeAdvertiserUpsertConflictQuery())
+      .mockImplementationOnce(() => makeExistingAdvertiserQuery(null))
+      .mockImplementationOnce(() => insertQuery);
+
+    const result = await ensureAdvertiserRecord({
+      advertiserName: "Acme Co",
+      contactName: "Jordan Smith",
+      email: "Jordan@example.com",
+      phoneNumber: "(212) 555-0100",
+    });
+
+    expect(result).toMatchObject({
+      id: "adv-1",
+      email: "jordan@example.com",
+      advertiser_name: "Acme Co",
+      contact_name: "Jordan Smith",
+    });
+    expect(insertQuery.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "jordan@example.com",
+        advertiser_name: "Acme Co",
+        contact_name: "Jordan Smith",
+        phone: "(212) 555-0100",
+        phone_number: "(212) 555-0100",
+        status: "active",
+      }),
+    );
+  });
+
+  it("falls back to update when an advertiser row with that email already exists", async () => {
+    const updateQuery = {
+      update: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          select: vi.fn().mockResolvedValue({
+            data: [
+              {
+                id: "adv-2",
+                email: "jordan@example.com",
+                advertiser_name: "Acme Co",
+                contact_name: "Jordan Smith",
+              },
+            ],
+            error: null,
+          }),
+        })),
+      })),
+    };
+
+    mockSupabase.from
+      .mockImplementationOnce(() => makeAdvertiserUpsertConflictQuery())
+      .mockImplementationOnce(() => makeExistingAdvertiserQuery({ id: "adv-2" }))
+      .mockImplementationOnce(() => updateQuery);
+
+    const result = await ensureAdvertiserRecord({
+      advertiserName: "Acme Co",
+      contactName: "Jordan Smith",
+      email: "Jordan@example.com",
+      phoneNumber: "(212) 555-0100",
+    });
+
+    expect(result).toMatchObject({
+      id: "adv-2",
+      email: "jordan@example.com",
+      advertiser_name: "Acme Co",
+      contact_name: "Jordan Smith",
+    });
+    expect(updateQuery.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "jordan@example.com",
+        advertiser_name: "Acme Co",
+        contact_name: "Jordan Smith",
+        phone: "(212) 555-0100",
+        phone_number: "(212) 555-0100",
+        status: "active",
       }),
     );
   });

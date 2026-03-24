@@ -238,117 +238,58 @@ const buildAdvertiserProfilePayload = ({
   updated_at: new Date().toISOString(),
 });
 
-export const ensureAdvertiserRecord = async ({
-  advertiserName,
-  contactName,
-  email,
-  phoneNumber,
-}) => {
-  const supabase = db();
-  const normalizedEmail = normalizeEmail(email);
-  const normalizedAdvertiserName = String(advertiserName || "").trim();
+const isAdvertiserEmailOnConflictError = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").trim();
+  return (
+    code === "42P10" ||
+    /no unique or exclusion constraint matching the ON CONFLICT specification/i.test(
+      message,
+    )
+  );
+};
 
-  const normalizedPhoneNumber = normalizeUSPhoneNumber(phoneNumber || "");
-  const now = new Date().toISOString();
+const upsertAdvertiserByEmail = async (supabase, payload) =>
+  supabase
+    .from(table("advertisers"))
+    .upsert(payload, { onConflict: "email" })
+    .select("*");
 
-  const basePayload = {
-    advertiser_name: normalizedAdvertiserName || normalizedEmail,
-    contact_name: String(contactName || "").trim() || null,
-    email: normalizedEmail,
-    phone: normalizedPhoneNumber || null,
-    updated_at: now,
-  };
+const updateAdvertiserById = async (supabase, advertiserId, extendedPayload, basePayload) => {
+  let updateResult = await supabase
+    .from(table("advertisers"))
+    .update(extendedPayload)
+    .eq("id", advertiserId)
+    .select("*");
 
-  const extendedPayload = {
-    ...basePayload,
-    phone_number: normalizedPhoneNumber || null,
-    status: "active",
-  };
+  if (updateResult.error) {
+    const message = String(updateResult.error.message || "");
+    const missingCompatColumn =
+      message.includes("phone_number") || message.includes("status");
+    if (!missingCompatColumn) {
+      throw updateResult.error;
+    }
 
-  // Prefer an atomic email upsert when email is present. This prevents race
-  // conditions from creating duplicate advertiser rows for the same email.
-  if (normalizedEmail) {
-    let upsertResult = await supabase
+    updateResult = await supabase
       .from(table("advertisers"))
-      .upsert(extendedPayload, { onConflict: "email" })
+      .update(basePayload)
+      .eq("id", advertiserId)
       .select("*");
-
-    if (upsertResult.error) {
-      const message = String(upsertResult.error.message || "");
-      const missingCompatColumn =
-        message.includes("phone_number") || message.includes("status");
-      if (!missingCompatColumn) {
-        throw upsertResult.error;
-      }
-
-      upsertResult = await supabase
-        .from(table("advertisers"))
-        .upsert(basePayload, { onConflict: "email" })
-        .select("*");
-      if (upsertResult.error) {
-        throw upsertResult.error;
-      }
-    }
-
-    const upsertedRow = Array.isArray(upsertResult.data)
-      ? upsertResult.data[0] || null
-      : null;
-    if (!upsertedRow) {
-      throw new Error("Failed to upsert advertiser record.");
-    }
-    return upsertedRow;
-  }
-
-  let existing = null;
-  if (normalizedAdvertiserName) {
-    const { data, error } = await supabase
-      .from(table("advertisers"))
-      .select("*")
-      .ilike("advertiser_name", normalizedAdvertiserName)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      throw error;
-    }
-    existing = data || null;
-  }
-
-  if (existing?.id) {
-    let updateResult = await supabase
-      .from(table("advertisers"))
-      .update(extendedPayload)
-      .eq("id", existing.id)
-      .select("*");
-
     if (updateResult.error) {
-      const message = String(updateResult.error.message || "");
-      const missingCompatColumn =
-        message.includes("phone_number") || message.includes("status");
-      if (!missingCompatColumn) {
-        throw updateResult.error;
-      }
-
-      updateResult = await supabase
-        .from(table("advertisers"))
-        .update(basePayload)
-        .eq("id", existing.id)
-        .select("*");
-      if (updateResult.error) {
-        throw updateResult.error;
-      }
+      throw updateResult.error;
     }
-
-    const updatedRow = Array.isArray(updateResult.data)
-      ? updateResult.data[0] || null
-      : null;
-    if (!updatedRow) {
-      throw new Error("Failed to update advertiser record.");
-    }
-    return updatedRow;
   }
 
+  const updatedRow = Array.isArray(updateResult.data)
+    ? updateResult.data[0] || null
+    : null;
+  if (!updatedRow) {
+    throw new Error("Failed to update advertiser record.");
+  }
+  return updatedRow;
+};
+
+const insertAdvertiser = async (supabase, extendedPayload, basePayload, now) => {
   let insertResult = await supabase
     .from(table("advertisers"))
     .insert({
@@ -384,6 +325,107 @@ export const ensureAdvertiserRecord = async ({
     throw new Error("Failed to insert advertiser record.");
   }
   return insertedRow;
+};
+
+export const ensureAdvertiserRecord = async ({
+  advertiserName,
+  contactName,
+  email,
+  phoneNumber,
+}) => {
+  const supabase = db();
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedAdvertiserName = String(advertiserName || "").trim();
+
+  const normalizedPhoneNumber = normalizeUSPhoneNumber(phoneNumber || "");
+  const now = new Date().toISOString();
+
+  const basePayload = {
+    advertiser_name: normalizedAdvertiserName || normalizedEmail,
+    contact_name: String(contactName || "").trim() || null,
+    email: normalizedEmail,
+    phone: normalizedPhoneNumber || null,
+    updated_at: now,
+  };
+
+  const extendedPayload = {
+    ...basePayload,
+    phone_number: normalizedPhoneNumber || null,
+    status: "active",
+  };
+
+  // Prefer an atomic email upsert when email is present. This prevents race
+  // conditions from creating duplicate advertiser rows for the same email.
+  if (normalizedEmail) {
+    let upsertResult = await upsertAdvertiserByEmail(supabase, extendedPayload);
+
+    if (upsertResult.error) {
+      const message = String(upsertResult.error.message || "");
+      const missingCompatColumn =
+        message.includes("phone_number") || message.includes("status");
+      if (missingCompatColumn) {
+        upsertResult = await upsertAdvertiserByEmail(supabase, basePayload);
+        if (upsertResult.error) {
+          throw upsertResult.error;
+        }
+      } else if (isAdvertiserEmailOnConflictError(upsertResult.error)) {
+        const { data: existingAdvertiser, error: existingAdvertiserError } = await supabase
+          .from(table("advertisers"))
+          .select("*")
+          .eq("email", normalizedEmail)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (existingAdvertiserError) {
+          throw existingAdvertiserError;
+        }
+
+        if (existingAdvertiser?.id) {
+          return updateAdvertiserById(
+            supabase,
+            existingAdvertiser.id,
+            extendedPayload,
+            basePayload,
+          );
+        }
+
+        return insertAdvertiser(supabase, extendedPayload, basePayload, now);
+      } else {
+        throw upsertResult.error;
+      }
+    }
+
+    const upsertedRow = Array.isArray(upsertResult.data)
+      ? upsertResult.data[0] || null
+      : null;
+    if (!upsertedRow) {
+      throw new Error("Failed to upsert advertiser record.");
+    }
+    return upsertedRow;
+  }
+
+  let existing = null;
+  if (normalizedAdvertiserName) {
+    const { data, error } = await supabase
+      .from(table("advertisers"))
+      .select("*")
+      .ilike("advertiser_name", normalizedAdvertiserName)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    existing = data || null;
+  }
+
+  if (existing?.id) {
+    return updateAdvertiserById(supabase, existing.id, extendedPayload, basePayload);
+  }
+
+  return insertAdvertiser(supabase, extendedPayload, basePayload, now);
 };
 
 export const upsertAdvertiserProfile = async ({
