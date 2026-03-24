@@ -6,6 +6,17 @@ import {
     updatePendingAdAccountEmail,
     upsertAdvertiserProfile,
 } from "../../../utils/advertiser-auth.js";
+import {
+    sendPendingSubmissionAdminWhatsAppNotification,
+    sendPendingSubmissionAdvertiserReceipt,
+    sendPendingSubmissionInternalEmailNotification,
+    sendPendingSubmissionInternalTelegramNotification,
+} from "../../../utils/pending-ad-submission.js";
+import {
+    ADVERTISER_NAME_MAX_LENGTH,
+    EMAIL_MAX_LENGTH,
+    PERSON_NAME_MAX_LENGTH,
+} from "../../../../../lib/inputLimits.js";
 
 const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
 
@@ -95,6 +106,29 @@ export async function POST(request) {
         }
 
         const normalizedEmail = normalizeEmail(googleUser.email);
+        if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
+            return Response.json(
+                { error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` },
+                { status: 400 },
+            );
+        }
+
+        if (advertiserName.length > ADVERTISER_NAME_MAX_LENGTH) {
+            return Response.json(
+                {
+                    error: `Advertiser name must be ${ADVERTISER_NAME_MAX_LENGTH} characters or fewer.`,
+                },
+                { status: 400 },
+            );
+        }
+
+        if (contactName.length > PERSON_NAME_MAX_LENGTH) {
+            return Response.json(
+                { error: `Contact name must be ${PERSON_NAME_MAX_LENGTH} characters or fewer.` },
+                { status: 400 },
+            );
+        }
+
         const fullName =
             contactName ||
             advertiserName ||
@@ -206,6 +240,57 @@ export async function POST(request) {
             fullName,
             onboardingComplete: false,
         });
+
+        try {
+            await sendPendingSubmissionAdvertiserReceipt({
+                request,
+                pendingAdId,
+                supabase,
+            });
+        } catch (receiptError) {
+            console.error(
+                "[submit-ad/google-account] Account created but submission receipt email failed:",
+                receiptError,
+            );
+        }
+
+        try {
+            await sendPendingSubmissionInternalTelegramNotification({
+                request,
+                pendingAdId,
+                supabase,
+            });
+        } catch (telegramError) {
+            console.error(
+                "[submit-ad/google-account] Account created but internal Telegram notification failed:",
+                telegramError,
+            );
+        }
+
+        try {
+            await sendPendingSubmissionInternalEmailNotification({
+                request,
+                pendingAdId,
+                supabase,
+            });
+        } catch (internalEmailError) {
+            console.error(
+                "[submit-ad/google-account] Account created but internal email notification failed:",
+                internalEmailError,
+            );
+        }
+
+        try {
+            await sendPendingSubmissionAdminWhatsAppNotification({
+                pendingAdId,
+                supabase,
+            });
+        } catch (whatsAppError) {
+            console.error(
+                "[submit-ad/google-account] Account created but admin WhatsApp notification failed:",
+                whatsAppError,
+            );
+        }
 
         return Response.json({
             success: true,

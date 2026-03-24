@@ -1,5 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { appToast } from "@/lib/toast";
+import {
+  ACCOUNT_PASSWORD_REQUIREMENTS_MESSAGE,
+  isPasswordStrengthErrorMessage,
+} from "@/lib/passwordValidation";
 
 export function CreateAdvertiserAccountStep({
   accountData,
@@ -13,13 +18,18 @@ export function CreateAdvertiserAccountStep({
   onGoogleSignUp,
   onGoToSignIn,
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   useEffect(() => {
     if (!accountError || existingAccountPrompt) {
       return;
     }
 
     appToast.error({
-      title: "Unable to create account",
+      title: isPasswordStrengthErrorMessage(accountError)
+        ? "Invalid password"
+        : "Unable to create account",
       description: accountError,
     });
   }, [accountError, existingAccountPrompt]);
@@ -169,17 +179,29 @@ export function CreateAdvertiserAccountStep({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Password <span className="text-red-500">*</span>
               </label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={accountData.password}
-                onChange={(event) => onChange("password", event.target.value)}
-                placeholder="Create a password"
-                className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={accountData.password}
+                  onChange={(event) => onChange("password", event.target.value)}
+                  placeholder="Create a password"
+                  className="w-full bg-transparent pr-11 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center text-gray-400 transition hover:text-gray-600"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
               <p className="text-xs text-gray-500 mt-2">
-                Password must be at least 8 characters long, containing a mix of numbers, letters, and special characters.
+                {ACCOUNT_PASSWORD_REQUIREMENTS_MESSAGE}
               </p>
             </div>
 
@@ -187,15 +209,27 @@ export function CreateAdvertiserAccountStep({
               <label className="block text-xs font-semibold text-gray-700 mb-1">
                 Verify Password <span className="text-red-500">*</span>
               </label>
-              <input
-                type="password"
-                required
-                minLength={8}
-                value={accountData.confirmPassword}
-                onChange={(event) => onChange("confirmPassword", event.target.value)}
-                placeholder="Re-enter your password"
-                className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                  minLength={8}
+                  autoComplete="new-password"
+                  value={accountData.confirmPassword}
+                  onChange={(event) => onChange("confirmPassword", event.target.value)}
+                  placeholder="Re-enter your password"
+                  className="w-full bg-transparent pr-11 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword((current) => !current)}
+                  className="absolute inset-y-0 right-0 inline-flex w-10 items-center justify-center text-gray-400 transition hover:text-gray-600"
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showConfirmPassword}
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
           </div>
         </div>

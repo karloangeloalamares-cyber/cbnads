@@ -18,6 +18,7 @@ vi.mock("./send-whatsapp.js", () => ({
 }));
 
 import { createPendingAdSubmission } from "./pending-ad-submission.js";
+import { AD_TEXT_MAX_LENGTH, MEDIA_ITEM_MAX_COUNT } from "../../../lib/inputLimits.js";
 
 const buildRequest = () =>
   new Request("https://example.com/api/public/submit-ad", {
@@ -550,5 +551,44 @@ describe("createPendingAdSubmission", () => {
       price: 0,
       placement: "Website",
     });
+  });
+
+  it("rejects oversized ad text before writing the submission", async () => {
+    const { client, insertCalls } = buildMockSupabase();
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      submission: buildSubmission({
+        ad_text: "x".repeat(AD_TEXT_MAX_LENGTH + 1),
+      }),
+    });
+
+    expect(result).toMatchObject({
+      error: `Ad text must be ${AD_TEXT_MAX_LENGTH} characters or fewer.`,
+      status: 400,
+    });
+    expect(insertCalls).toHaveLength(0);
+  });
+
+  it("rejects submissions with too many attachments", async () => {
+    const { client, insertCalls } = buildMockSupabase();
+
+    const result = await createPendingAdSubmission({
+      request: buildRequest(),
+      supabase: client,
+      submission: buildSubmission({
+        media: Array.from({ length: MEDIA_ITEM_MAX_COUNT + 1 }, (_, index) => ({
+          type: "image",
+          url: `https://example.com/${index}.png`,
+        })),
+      }),
+    });
+
+    expect(result).toMatchObject({
+      error: `A submission can include up to ${MEDIA_ITEM_MAX_COUNT} attachments.`,
+      status: 400,
+    });
+    expect(insertCalls).toHaveLength(0);
   });
 });

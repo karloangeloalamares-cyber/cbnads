@@ -125,6 +125,10 @@ export async function POST(request) {
         submission: body,
         requireProductForMultiWeek: false,
         sourceRequestKey: idempotencyKey || null,
+        sendAdvertiserReceipt: false,
+        sendInternalEmailNotification: false,
+        sendInternalTelegramNotification: false,
+        sendAdminWhatsAppNotification: false,
       });
 
       if (result?.error) {

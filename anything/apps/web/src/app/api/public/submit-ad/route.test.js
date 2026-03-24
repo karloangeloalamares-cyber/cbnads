@@ -57,6 +57,10 @@ describe("public submit-ad route", () => {
     expect(createPendingAdSubmission).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceRequestKey: expect.stringMatching(/^[0-9a-f]{24}:submission-123$/),
+        sendAdvertiserReceipt: false,
+        sendInternalEmailNotification: false,
+        sendInternalTelegramNotification: false,
+        sendAdminWhatsAppNotification: false,
       }),
     );
   });

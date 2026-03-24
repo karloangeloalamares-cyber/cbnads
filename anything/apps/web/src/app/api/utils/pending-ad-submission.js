@@ -18,6 +18,19 @@ import {
   normalizeDateKeyStrict,
   resolveWeeklyCreative,
 } from "./series-helpers.js";
+import {
+  AD_NAME_MAX_LENGTH,
+  AD_TEXT_MAX_LENGTH,
+  ADVERTISER_NAME_MAX_LENGTH,
+  CUSTOM_DATE_MAX_COUNT,
+  EMAIL_MAX_LENGTH,
+  MEDIA_ITEM_MAX_COUNT,
+  MULTI_WEEK_MAX_COUNT,
+  NOTES_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+  PLACEMENT_MAX_LENGTH,
+} from "../../../lib/inputLimits.js";
+import { resolveMediaType } from "../../../lib/media.js";
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -122,6 +135,14 @@ const buildSourceRequestKey = (baseKey, suffix = "") => {
   return `${normalizedBase}:${normalizedSuffix}`.slice(0, 255);
 };
 
+const validateTextLimit = (value, maxLength, label) => {
+  const normalized = String(value ?? "");
+  if (normalized.length > maxLength) {
+    return `${label} must be ${maxLength} characters or fewer.`;
+  }
+  return "";
+};
+
 const isSourceRequestKeyUniqueViolation = (error) => {
   const code = String(error?.code || "").trim();
   const message = String(error?.message || "");
@@ -176,6 +197,699 @@ const fetchPendingAdsBySourceRequestKeys = async (supabase, sourceRequestKeys) =
 
   return normalizedKeys.map((key) => byKey.get(key)).filter(Boolean);
 };
+
+const fetchPendingAdById = async (supabase, pendingAdId) => {
+  const normalizedId = String(pendingAdId || "").trim();
+  if (!normalizedId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from(table("pending_ads"))
+    .select("*")
+    .eq("id", normalizedId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  return data || null;
+};
+
+const fetchPendingAdsBySeriesId = async (supabase, seriesId) => {
+  const normalizedSeriesId = String(seriesId || "").trim();
+  if (!normalizedSeriesId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from(table("pending_ads"))
+    .select("*")
+    .eq("series_id", normalizedSeriesId)
+    .order("series_index", { ascending: true });
+  if (error) {
+    throw error;
+  }
+  return Array.isArray(data) ? data : [];
+};
+
+const formatPendingReceiptPrice = (value) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue <= 0) {
+    return "";
+  }
+  return formatCurrency(numericValue);
+};
+
+const buildPendingSubmissionReceiptEmail = ({ pendingAd, pendingAds = [] }) => {
+  const rows = Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+  const firstPendingAd = rows[0] || pendingAd;
+  const isMultiWeek =
+    rows.length > 1 || Number(firstPendingAd?.series_total || 0) > 1;
+
+  const contactName = String(
+    firstPendingAd?.contact_name || firstPendingAd?.advertiser_name || "there",
+  ).trim();
+  const advertiserName = String(firstPendingAd?.advertiser_name || "").trim();
+  const normalizedEmail = String(firstPendingAd?.email || "").trim().toLowerCase();
+  const normalizedPhoneNumber = String(
+    firstPendingAd?.phone_number || firstPendingAd?.phone || "",
+  ).trim();
+  const campaignName = String(firstPendingAd?.ad_name || "Submission").trim();
+  const placement = String(firstPendingAd?.placement || "").trim();
+  const productName = String(firstPendingAd?.product_name || "").trim();
+  const priceText = formatPendingReceiptPrice(firstPendingAd?.price);
+  const startDate = String(
+    firstPendingAd?.post_date_from || firstPendingAd?.post_date || "",
+  ).trim();
+  const endDate = String(firstPendingAd?.post_date_to || "").trim();
+  const postTime = String(firstPendingAd?.post_time || "").trim();
+  const postType = String(firstPendingAd?.post_type || "").trim();
+  const weekCount = rows.length;
+
+  const escaped = {
+    contactName: escapeHtml(contactName),
+    advertiserName: escapeHtml(advertiserName),
+    email: escapeHtml(normalizedEmail),
+    phoneNumber: escapeHtml(normalizedPhoneNumber),
+    campaignName: escapeHtml(campaignName),
+    placement: escapeHtml(placement),
+    productName: escapeHtml(productName),
+    priceText: escapeHtml(priceText),
+    startDate: escapeHtml(startDate),
+    endDate: escapeHtml(endDate),
+    postTime: escapeHtml(postTime),
+    postType: escapeHtml(postType),
+    weekCount: escapeHtml(String(weekCount)),
+  };
+
+  const multiWeekRowsHtml = isMultiWeek
+    ? rows
+        .map((row, index) => {
+          const weekPlacement = String(row?.placement || "").trim();
+          const weekProductName = String(row?.product_name || "").trim();
+          const weekPriceText = formatPendingReceiptPrice(row?.price);
+          const weekDate = String(row?.post_date_from || row?.post_date || "").trim();
+          const weekTime = String(row?.post_time || "").trim();
+          const scheduleSummary =
+            weekDate && weekTime
+              ? `${escapeHtml(weekDate)} at ${escapeHtml(weekTime)}`
+              : weekDate
+                ? escapeHtml(weekDate)
+                : "TBD";
+
+          return `
+            <div class="info-row">
+              <span class="label">Week ${index + 1}:</span>
+              ${escapeHtml(String(row?.ad_name || campaignName).trim() || campaignName)}
+              ${weekPlacement ? `, ${escapeHtml(weekPlacement)}` : ""}
+              ${weekProductName ? `, ${escapeHtml(weekProductName)}` : ""}
+              ${weekPriceText ? `, ${escapeHtml(weekPriceText)}` : ""}
+              , ${scheduleSummary}
+            </div>
+          `;
+        })
+        .join("")
+    : "";
+
+  return {
+    to: normalizedEmail,
+    subject: isMultiWeek
+      ? `Multi-week Booking Request Received (Pending) - ${campaignName.replace(/[\r\n]+/g, " ").trim()}`
+      : `Ad Submission Received (Pending) - ${campaignName.replace(/[\r\n]+/g, " ").trim()}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; padding: 20px 0; border-bottom: 3px solid #0066cc; }
+    .logo { max-width: 200px; }
+    .content { padding: 30px 0; }
+    .info-block { background: #f8f9fa; padding: 20px; margin: 20px 0; border-radius: 5px; }
+    .info-row { margin: 10px 0; }
+    .label { font-weight: bold; color: #555; }
+    .footer { text-align: center; padding: 20px 0; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://cbnads.com/icons/icon-512.png" alt="Logo" class="logo">
+    </div>
+
+    <div class="content">
+      <h2>${isMultiWeek ? "Thank You for Your Multi-week Booking Request" : "Thank You for Your Ad Submission"}</h2>
+      <p>Dear ${escaped.contactName},</p>
+      <p>Your advertiser account has been created and we have your submission on file.</p>
+
+      <div class="info-block">
+        <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiserName}</div>
+        <div class="info-row"><span class="label">Email:</span> ${escaped.email}</div>
+        ${normalizedPhoneNumber ? `<div class="info-row"><span class="label">Phone:</span> ${escaped.phoneNumber}</div>` : ""}
+        <div class="info-row"><span class="label">${isMultiWeek ? "Campaign Name" : "Ad Name"}:</span> ${escaped.campaignName}</div>
+        ${isMultiWeek ? `<div class="info-row"><span class="label">Weeks:</span> ${escaped.weekCount}</div>` : ""}
+        ${!isMultiWeek && postType ? `<div class="info-row"><span class="label">Post Type:</span> ${escaped.postType}</div>` : ""}
+        ${productName ? `<div class="info-row"><span class="label">Product:</span> ${escaped.productName}</div>` : ""}
+        ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+        ${priceText ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.priceText} per scheduled post</div>` : ""}
+        ${!isMultiWeek && startDate ? `<div class="info-row"><span class="label">Start Date:</span> ${escaped.startDate}</div>` : ""}
+        ${!isMultiWeek && endDate ? `<div class="info-row"><span class="label">End Date:</span> ${escaped.endDate}</div>` : ""}
+        ${!isMultiWeek && postTime ? `<div class="info-row"><span class="label">Post Time:</span> ${escaped.postTime}</div>` : ""}
+        ${multiWeekRowsHtml}
+      </div>
+
+      <p><strong>Next Steps:</strong></p>
+      <p>Your submission is now in <strong>Pending</strong> status while our team reviews it. Once approved and invoiced, you will receive a <strong>Ready for Payment</strong> email.</p>
+      <p>Best regards,<br>CBN Team</p>
+    </div>
+
+    <div class="footer">
+      <p>This is an automated confirmation email. Please do not reply to this message.</p>
+    </div>
+  </div>
+</body>
+</html>
+`,
+  };
+};
+
+export async function sendPendingSubmissionAdvertiserReceipt({
+  request: _request,
+  pendingAdId,
+  supabase = db(),
+}) {
+  const normalizedPendingAdId = String(pendingAdId || "").trim();
+  if (!normalizedPendingAdId) {
+    return { sent: false, reason: "missing_pending_ad" };
+  }
+
+  const pendingAd = await fetchPendingAdById(supabase, normalizedPendingAdId);
+  if (!pendingAd?.id) {
+    return { sent: false, reason: "pending_ad_not_found" };
+  }
+
+  const pendingAds =
+    pendingAd?.series_id
+      ? await fetchPendingAdsBySeriesId(supabase, pendingAd.series_id)
+      : [pendingAd];
+  const receiptRows =
+    Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+
+  if (receiptRows.some((row) => String(row?.advertiser_receipt_sent_at || "").trim())) {
+    return { sent: false, reason: "already_sent" };
+  }
+
+  const emailPayload = buildPendingSubmissionReceiptEmail({
+    pendingAd,
+    pendingAds: receiptRows,
+  });
+
+  if (!emailPayload.to) {
+    return { sent: false, reason: "missing_email" };
+  }
+
+  await sendEmail(emailPayload);
+
+  const receiptSentAt = new Date().toISOString();
+  const updateQuery =
+    pendingAd?.series_id
+      ? supabase
+          .from(table("pending_ads"))
+          .update({
+            advertiser_receipt_sent_at: receiptSentAt,
+            updated_at: receiptSentAt,
+          })
+          .eq("series_id", pendingAd.series_id)
+      : supabase
+          .from(table("pending_ads"))
+          .update({
+            advertiser_receipt_sent_at: receiptSentAt,
+            updated_at: receiptSentAt,
+          })
+          .eq("id", normalizedPendingAdId);
+
+  const { error } = await updateQuery;
+  if (error) {
+    const missingColumn = missingColumnName(error);
+    if (missingColumn !== "advertiser_receipt_sent_at") {
+      throw error;
+    }
+  }
+
+  return { sent: true };
+}
+
+const buildPendingSubmissionInternalTelegramText = ({
+  pendingAd,
+  pendingAds = [],
+  reviewSubmissionUrl,
+}) => {
+  const rows = Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+  const firstPendingAd = rows[0] || pendingAd;
+  const isMultiWeek =
+    rows.length > 1 || Number(firstPendingAd?.series_total || 0) > 1;
+
+  if (isMultiWeek) {
+    return [
+      "<b>New Multi-week Booking Request (Pending)</b>",
+      "",
+      `<b>Advertiser:</b> ${escapeHtml(String(firstPendingAd?.advertiser_name || "").trim())}`,
+      `<b>Contact:</b> ${escapeHtml(String(firstPendingAd?.contact_name || "").trim())} (${escapeHtml(String(firstPendingAd?.email || "").trim().toLowerCase())})`,
+      `<b>Campaign:</b> ${escapeHtml(String(firstPendingAd?.ad_name || "").trim())}`,
+      `<b>Weeks:</b> ${escapeHtml(String(rows.length))}`,
+      `<b>Week 1 starts:</b> ${escapeHtml(String(firstPendingAd?.series_week_start || firstPendingAd?.post_date_from || "").trim())}`,
+      firstPendingAd?.placement
+        ? `<b>Placement:</b> ${escapeHtml(String(firstPendingAd.placement).trim())}`
+        : "",
+      firstPendingAd?.product_name
+        ? `<b>Product:</b> ${escapeHtml(String(firstPendingAd.product_name).trim())}`
+        : "",
+      firstPendingAd?.series_id
+        ? `<b>Series ID:</b> ${escapeHtml(String(firstPendingAd.series_id).trim())}`
+        : "",
+      reviewSubmissionUrl ? `<b>Review:</b> ${escapeHtml(reviewSubmissionUrl)}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return [
+    "<b>New Ad Submission Received (Pending)</b>",
+    "",
+    `<b>Advertiser:</b> ${escapeHtml(String(firstPendingAd?.advertiser_name || "").trim())}`,
+    `<b>Contact:</b> ${escapeHtml(String(firstPendingAd?.contact_name || "").trim())} (${escapeHtml(String(firstPendingAd?.email || "").trim().toLowerCase())})`,
+    `<b>Ad:</b> ${escapeHtml(String(firstPendingAd?.ad_name || "").trim())}`,
+    `<b>Post Type:</b> ${escapeHtml(String(firstPendingAd?.post_type || "").trim())}`,
+    firstPendingAd?.product_name
+      ? `<b>Product:</b> ${escapeHtml(String(firstPendingAd.product_name).trim())}`
+      : "",
+    firstPendingAd?.placement
+      ? `<b>Placement:</b> ${escapeHtml(String(firstPendingAd.placement).trim())}`
+      : "",
+    Number(firstPendingAd?.price) > 0
+      ? `<b>Quoted Price:</b> ${escapeHtml(formatCurrency(firstPendingAd.price))} per scheduled post`
+      : "",
+    firstPendingAd?.post_date_from
+      ? `<b>Start Date:</b> ${escapeHtml(String(firstPendingAd.post_date_from).trim())}`
+      : "",
+    firstPendingAd?.post_date_to
+      ? `<b>End Date:</b> ${escapeHtml(String(firstPendingAd.post_date_to).trim())}`
+      : "",
+    firstPendingAd?.post_time
+      ? `<b>Post Time:</b> ${escapeHtml(String(firstPendingAd.post_time).trim())}`
+      : "",
+    reviewSubmissionUrl ? `<b>Review:</b> ${escapeHtml(reviewSubmissionUrl)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+export async function sendPendingSubmissionInternalTelegramNotification({
+  request,
+  pendingAdId,
+  supabase = db(),
+}) {
+  const normalizedPendingAdId = String(pendingAdId || "").trim();
+  if (!normalizedPendingAdId) {
+    return { sent: false, reason: "missing_pending_ad" };
+  }
+
+  const pendingAd = await fetchPendingAdById(supabase, normalizedPendingAdId);
+  if (!pendingAd?.id) {
+    return { sent: false, reason: "pending_ad_not_found" };
+  }
+
+  const pendingAds =
+    pendingAd?.series_id
+      ? await fetchPendingAdsBySeriesId(supabase, pendingAd.series_id)
+      : [pendingAd];
+  const telegramRows =
+    Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+
+  if (telegramRows.some((row) => String(row?.internal_telegram_sent_at || "").trim())) {
+    return { sent: false, reason: "already_sent" };
+  }
+
+  const reviewSubmissionUrl = buildReviewSubmissionUrl(request);
+  const telegramText = buildPendingSubmissionInternalTelegramText({
+    pendingAd,
+    pendingAds: telegramRows,
+    reviewSubmissionUrl,
+  });
+
+  if (!telegramText) {
+    return { sent: false, reason: "missing_telegram_payload" };
+  }
+
+  const notificationResult = await notifyInternalChannels({
+    supabase,
+    telegramText,
+  });
+
+  if (!notificationResult?.telegram_sent) {
+    return {
+      sent: false,
+      reason: notificationResult?.telegram_error || "telegram_not_sent",
+    };
+  }
+
+  const sentAt = new Date().toISOString();
+  const updateQuery =
+    pendingAd?.series_id
+      ? supabase
+          .from(table("pending_ads"))
+          .update({
+            internal_telegram_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("series_id", pendingAd.series_id)
+      : supabase
+          .from(table("pending_ads"))
+          .update({
+            internal_telegram_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("id", normalizedPendingAdId);
+
+  const { error } = await updateQuery;
+  if (error) {
+    const missingColumn = missingColumnName(error);
+    if (missingColumn !== "internal_telegram_sent_at") {
+      throw error;
+    }
+  }
+
+  return { sent: true };
+}
+
+const buildPendingSubmissionInternalEmailPayload = ({
+  pendingAd,
+  pendingAds = [],
+  reviewSubmissionUrl,
+}) => {
+  const rows = Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+  const firstPendingAd = rows[0] || pendingAd;
+  const isMultiWeek =
+    rows.length > 1 || Number(firstPendingAd?.series_total || 0) > 1;
+
+  const advertiserName = String(firstPendingAd?.advertiser_name || "").trim();
+  const contactName = String(firstPendingAd?.contact_name || "").trim();
+  const normalizedEmail = String(firstPendingAd?.email || "").trim().toLowerCase();
+  const normalizedPhoneNumber = String(
+    firstPendingAd?.phone_number || firstPendingAd?.phone || "",
+  ).trim();
+  const campaignName = String(firstPendingAd?.ad_name || "Submission").trim();
+  const placement = String(firstPendingAd?.placement || "").trim();
+  const productName = String(firstPendingAd?.product_name || "").trim();
+  const quotedPriceText = formatPendingReceiptPrice(firstPendingAd?.price);
+  const safeSubjectAdName = campaignName.replace(/[\r\n]+/g, " ").trim();
+  const safeSubjectAdvertiserName = advertiserName.replace(/[\r\n]+/g, " ").trim();
+
+  const escaped = {
+    advertiserName: escapeHtml(advertiserName),
+    contactName: escapeHtml(contactName),
+    email: escapeHtml(normalizedEmail),
+    phoneNumber: escapeHtml(normalizedPhoneNumber),
+    campaignName: escapeHtml(campaignName),
+    placement: escapeHtml(placement),
+    productName: escapeHtml(productName),
+    quotedPriceText: escapeHtml(quotedPriceText),
+  };
+
+  const weekRowsHtml = isMultiWeek
+    ? rows
+        .map((row, index) => {
+          const weekDate = String(row?.post_date_from || row?.post_date || "").trim();
+          const weekTime = String(row?.post_time || "").trim();
+          const scheduleSummary =
+            weekDate && weekTime
+              ? `${escapeHtml(weekDate)} ${escapeHtml(weekTime)}`
+              : weekDate
+                ? escapeHtml(weekDate)
+                : "TBD";
+
+          return `
+            <div class="info-row">
+              <span class="label">Week ${index + 1}:</span>
+              ${escapeHtml(String(row?.ad_name || campaignName).trim() || campaignName)} | ${scheduleSummary}
+            </div>
+          `;
+        })
+        .join("")
+    : "";
+
+  const customDateItems = rows
+    .flatMap((row) => (Array.isArray(row?.custom_dates) ? row.custom_dates : []))
+    .map((entry) => {
+      if (entry && typeof entry === "object") {
+        const dateValue = String(entry.date || "").trim();
+        const timeValue = String(entry.time || "").trim().slice(0, 5);
+        if (!dateValue) {
+          return "";
+        }
+        return escapeHtml(timeValue ? `${dateValue} ${timeValue}` : dateValue);
+      }
+      const dateValue = String(entry || "").trim();
+      return dateValue ? escapeHtml(dateValue) : "";
+    })
+    .filter(Boolean);
+
+  return {
+    emailSubject: isMultiWeek
+      ? `New Multi-week Booking - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`
+      : `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
+    emailHtml: `
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { font-family: Arial, sans-serif; color: #333; line-height: 1.6; }
+    .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; padding: 20px 0; border-bottom: 3px solid #0066cc; }
+    .logo { max-width: 200px; }
+    .content { padding: 30px 0; }
+    .alert { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+    .info-section { margin: 25px 0; }
+    .section-title { font-size: 18px; font-weight: bold; color: #0066cc; margin-bottom: 15px; border-bottom: 2px solid #0066cc; padding-bottom: 5px; }
+    .info-block { background: #f8f9fa; padding: 20px; margin: 10px 0; border-radius: 5px; }
+    .info-row { margin: 8px 0; }
+    .label { font-weight: bold; color: #555; min-width: 150px; display: inline-block; }
+    .button { display: inline-block; padding: 12px 24px; background: #0066cc; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+    .footer { text-align: center; padding: 20px 0; border-top: 1px solid #ddd; color: #777; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="https://cbnads.com/icons/icon-512.png" alt="Logo" class="logo">
+    </div>
+
+    <div class="content">
+      <div class="alert">
+        <strong>${isMultiWeek ? "New Multi-week Booking Request (Pending)" : "New Ad Submission Received (Pending)"}</strong>
+      </div>
+
+      <div class="info-section">
+        <div class="section-title">Advertiser Information</div>
+        <div class="info-block">
+          <div class="info-row"><span class="label">Advertiser Name:</span> ${escaped.advertiserName}</div>
+          <div class="info-row"><span class="label">Contact Name:</span> ${escaped.contactName}</div>
+          <div class="info-row"><span class="label">Email:</span> <a href="mailto:${escaped.email}">${escaped.email}</a></div>
+          ${normalizedPhoneNumber ? `<div class="info-row"><span class="label">Phone Number:</span> ${escaped.phoneNumber}</div>` : ""}
+        </div>
+      </div>
+
+      <div class="info-section">
+        <div class="section-title">${isMultiWeek ? "Booking" : "Ad Details"}</div>
+        <div class="info-block">
+          <div class="info-row"><span class="label">${isMultiWeek ? "Campaign Name" : "Ad Name"}:</span> ${escaped.campaignName}</div>
+          ${!isMultiWeek ? `<div class="info-row"><span class="label">Post Type:</span> ${escapeHtml(String(firstPendingAd?.post_type || "").trim())}</div>` : ""}
+          ${productName ? `<div class="info-row"><span class="label">Product:</span> ${escaped.productName}</div>` : ""}
+          ${placement ? `<div class="info-row"><span class="label">Placement:</span> ${escaped.placement}</div>` : ""}
+          ${quotedPriceText ? `<div class="info-row"><span class="label">Quoted Price:</span> ${escaped.quotedPriceText} per scheduled post</div>` : ""}
+          ${isMultiWeek ? `<div class="info-row"><span class="label">Weeks:</span> ${escapeHtml(String(rows.length))}</div>` : ""}
+          ${weekRowsHtml}
+          ${!isMultiWeek && firstPendingAd?.post_date_from ? `<div class="info-row"><span class="label">Start Date:</span> ${escapeHtml(String(firstPendingAd.post_date_from).trim())}</div>` : ""}
+          ${!isMultiWeek && firstPendingAd?.post_date_to ? `<div class="info-row"><span class="label">End Date:</span> ${escapeHtml(String(firstPendingAd.post_date_to).trim())}</div>` : ""}
+          ${!isMultiWeek && firstPendingAd?.post_time ? `<div class="info-row"><span class="label">Post Time:</span> ${escapeHtml(String(firstPendingAd.post_time).trim())}</div>` : ""}
+          ${customDateItems.length > 0
+            ? `
+              <div class="info-row">
+                <span class="label">Custom Dates:</span>
+                <ul style="margin: 5px 0;">
+                  ${customDateItems.map((item) => `<li>${item}</li>`).join("")}
+                </ul>
+              </div>
+            `
+            : ""}
+        </div>
+      </div>
+
+      ${reviewSubmissionUrl
+        ? `
+          <div style="text-align: center; margin-top: 30px;">
+            <a href="${escapeHtml(reviewSubmissionUrl)}" class="button">Review Submission</a>
+          </div>
+        `
+        : ""}
+    </div>
+
+    <div class="footer">
+      <p>Submission received at ${new Date().toLocaleString()}</p>
+    </div>
+  </div>
+</body>
+</html>
+`,
+  };
+};
+
+export async function sendPendingSubmissionInternalEmailNotification({
+  request,
+  pendingAdId,
+  supabase = db(),
+}) {
+  const normalizedPendingAdId = String(pendingAdId || "").trim();
+  if (!normalizedPendingAdId) {
+    return { sent: false, reason: "missing_pending_ad" };
+  }
+
+  const pendingAd = await fetchPendingAdById(supabase, normalizedPendingAdId);
+  if (!pendingAd?.id) {
+    return { sent: false, reason: "pending_ad_not_found" };
+  }
+
+  const pendingAds =
+    pendingAd?.series_id
+      ? await fetchPendingAdsBySeriesId(supabase, pendingAd.series_id)
+      : [pendingAd];
+  const emailRows =
+    Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+
+  if (emailRows.some((row) => String(row?.internal_email_sent_at || "").trim())) {
+    return { sent: false, reason: "already_sent" };
+  }
+
+  const reviewSubmissionUrl = buildReviewSubmissionUrl(request);
+  const emailPayload = buildPendingSubmissionInternalEmailPayload({
+    pendingAd,
+    pendingAds: emailRows,
+    reviewSubmissionUrl,
+  });
+
+  const notificationResult = await notifyInternalChannels({
+    supabase,
+    emailSubject: emailPayload.emailSubject,
+    emailHtml: emailPayload.emailHtml,
+  });
+
+  if (!notificationResult?.email_sent) {
+    return {
+      sent: false,
+      reason: notificationResult?.email_error || "internal_email_not_sent",
+    };
+  }
+
+  const sentAt = new Date().toISOString();
+  const updateQuery =
+    pendingAd?.series_id
+      ? supabase
+          .from(table("pending_ads"))
+          .update({
+            internal_email_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("series_id", pendingAd.series_id)
+      : supabase
+          .from(table("pending_ads"))
+          .update({
+            internal_email_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("id", normalizedPendingAdId);
+
+  const { error } = await updateQuery;
+  if (error) {
+    const missingColumn = missingColumnName(error);
+    if (missingColumn !== "internal_email_sent_at") {
+      throw error;
+    }
+  }
+
+  return { sent: true };
+}
+
+export async function sendPendingSubmissionAdminWhatsAppNotification({
+  pendingAdId,
+  supabase = db(),
+}) {
+  const normalizedPendingAdId = String(pendingAdId || "").trim();
+  if (!normalizedPendingAdId) {
+    return { sent: false, reason: "missing_pending_ad" };
+  }
+
+  const pendingAd = await fetchPendingAdById(supabase, normalizedPendingAdId);
+  if (!pendingAd?.id) {
+    return { sent: false, reason: "pending_ad_not_found" };
+  }
+
+  const pendingAds =
+    pendingAd?.series_id
+      ? await fetchPendingAdsBySeriesId(supabase, pendingAd.series_id)
+      : [pendingAd];
+  const whatsappRows =
+    Array.isArray(pendingAds) && pendingAds.length > 0 ? pendingAds : [pendingAd];
+
+  if (whatsappRows.some((row) => String(row?.admin_whatsapp_sent_at || "").trim())) {
+    return { sent: false, reason: "already_sent" };
+  }
+
+  const adminWhatsApp = process.env.WHATSAPP_BROADCAST_NUMBER;
+  if (!adminWhatsApp) {
+    return { sent: false, reason: "missing_whatsapp_recipient" };
+  }
+
+  const firstPendingAd = whatsappRows[0] || pendingAd;
+  const sent = await sendWhatsAppInteractive({
+    to: adminWhatsApp,
+    adId: firstPendingAd.id,
+    advertiserName: String(firstPendingAd?.advertiser_name || "").trim(),
+    adName: String(firstPendingAd?.ad_name || "").trim() || "Untitled Ad",
+  });
+
+  if (!sent) {
+    return { sent: false, reason: "whatsapp_not_sent" };
+  }
+
+  const sentAt = new Date().toISOString();
+  const updateQuery =
+    pendingAd?.series_id
+      ? supabase
+          .from(table("pending_ads"))
+          .update({
+            admin_whatsapp_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("series_id", pendingAd.series_id)
+      : supabase
+          .from(table("pending_ads"))
+          .update({
+            admin_whatsapp_sent_at: sentAt,
+            updated_at: sentAt,
+          })
+          .eq("id", normalizedPendingAdId);
+
+  const { error } = await updateQuery;
+  if (error) {
+    const missingColumn = missingColumnName(error);
+    if (missingColumn !== "admin_whatsapp_sent_at") {
+      throw error;
+    }
+  }
+
+  return { sent: true };
+}
 
 const insertPendingAd = async (supabase, payload) => {
   const insertPayload = { ...payload };
@@ -277,6 +991,10 @@ export async function createPendingAdSubmission({
   requirePhoneNumber = true,
   requireProductForMultiWeek = true,
   sourceRequestKey = null,
+  sendAdvertiserReceipt = true,
+  sendInternalEmailNotification = true,
+  sendInternalTelegramNotification = true,
+  sendAdminWhatsAppNotification = true,
 }) {
   const {
     advertiser_id,
@@ -314,6 +1032,37 @@ export async function createPendingAdSubmission({
       : "") ||
     (multi_week && typeof multi_week === "object" ? "Multi-week booking" : "");
   let selectedProduct = null;
+
+  const topLevelLimitError =
+    validateTextLimit(advertiser_name, ADVERTISER_NAME_MAX_LENGTH, "Advertiser name") ||
+    validateTextLimit(contact_name, PERSON_NAME_MAX_LENGTH, "Contact name") ||
+    validateTextLimit(normalizedEmail, EMAIL_MAX_LENGTH, "Email") ||
+    validateTextLimit(ad_name, AD_NAME_MAX_LENGTH, "Ad name") ||
+    validateTextLimit(ad_text, AD_TEXT_MAX_LENGTH, "Ad text") ||
+    validateTextLimit(notes, NOTES_MAX_LENGTH, "Notes") ||
+    validateTextLimit(placement, PLACEMENT_MAX_LENGTH, "Placement");
+
+  if (topLevelLimitError) {
+    return {
+      error: topLevelLimitError,
+      status: 400,
+    };
+  }
+
+  const inputMedia = Array.isArray(media) ? media : [];
+  if (inputMedia.length > MEDIA_ITEM_MAX_COUNT) {
+    return {
+      error: `A submission can include up to ${MEDIA_ITEM_MAX_COUNT} attachments.`,
+      status: 400,
+    };
+  }
+
+  if (normalizedCustomDates.length > CUSTOM_DATE_MAX_COUNT) {
+    return {
+      error: `Custom schedules can include up to ${CUSTOM_DATE_MAX_COUNT} dates.`,
+      status: 400,
+    };
+  }
 
   if (!advertiser_name || !contact_name || !normalizedEmail || !resolvedAdName || !post_type) {
     return {
@@ -373,14 +1122,20 @@ export async function createPendingAdSubmission({
   }
 
   const sanitizeMediaArray = (input) => {
-    const items = Array.isArray(input) ? input : [];
+    const items = (Array.isArray(input) ? input : []).slice(0, MEDIA_ITEM_MAX_COUNT);
+
     return items
       .map((item) => {
         if (item && typeof item === "object") {
           const safeUrl = toSafeHttpUrl(item.url || item.cdnUrl || "");
           if (!safeUrl) return null;
+          const mediaType = resolveMediaType(item);
+          if (!["image", "video", "audio", "document"].includes(mediaType)) {
+            return null;
+          }
           return {
             ...item,
+            type: mediaType,
             url: safeUrl,
             cdnUrl: toSafeHttpUrl(item.cdnUrl || safeUrl) || safeUrl,
           };
@@ -388,7 +1143,7 @@ export async function createPendingAdSubmission({
 
         const safeUrl = toSafeHttpUrl(item);
         if (!safeUrl) return null;
-        return { type: "link", url: safeUrl, cdnUrl: safeUrl };
+        return { type: "document", url: safeUrl, cdnUrl: safeUrl };
       })
       .filter(Boolean);
   };
@@ -401,13 +1156,45 @@ export async function createPendingAdSubmission({
       };
     }
 
-    const weeks = clampWeeks(multi_week.weeks, { min: 2, max: 12, fallback: 4 });
+    const weeks = clampWeeks(multi_week.weeks, { min: 2, max: MULTI_WEEK_MAX_COUNT, fallback: 4 });
     const seriesWeekStart = normalizeDateKeyStrict(multi_week.series_week_start);
     if (!seriesWeekStart) {
       return { error: "Week 1 start date is required", status: 400 };
     }
 
     const overrides = Array.isArray(multi_week.overrides) ? multi_week.overrides : [];
+    if (overrides.length > MULTI_WEEK_MAX_COUNT) {
+      return {
+        error: `Multi-week bookings can include up to ${MULTI_WEEK_MAX_COUNT} weeks.`,
+        status: 400,
+      };
+    }
+
+    let overrideLimitError = "";
+    for (const item of overrides) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      overrideLimitError =
+        validateTextLimit(item.ad_name, AD_NAME_MAX_LENGTH, "Week ad name") ||
+        validateTextLimit(item.ad_text, AD_TEXT_MAX_LENGTH, "Week ad text") ||
+        validateTextLimit(item.placement, PLACEMENT_MAX_LENGTH, "Week placement") ||
+        (Array.isArray(item.media) && item.media.length > MEDIA_ITEM_MAX_COUNT
+          ? `Each week can include up to ${MEDIA_ITEM_MAX_COUNT} attachments.`
+          : "");
+
+      if (overrideLimitError) {
+        break;
+      }
+    }
+    if (overrideLimitError) {
+      return {
+        error: overrideLimitError,
+        status: 400,
+      };
+    }
+
     const seriesId = String(multi_week.series_id || "").trim() || createSeriesId();
     const weekStarts = buildSeriesWeekStarts({ seriesWeekStart, weeks });
 
@@ -765,14 +1552,16 @@ export async function createPendingAdSubmission({
 </html>
 `;
 
-    try {
-      await sendEmail({
-        to: normalizedEmail,
-        subject: `Multi-week Booking Request Received (Pending) - ${safeSubjectAdName}`,
-        html: advertiserEmailHTML,
-      });
-    } catch (error) {
-      console.error("[pending-ad-submission] Failed to send advertiser email:", error);
+    if (sendAdvertiserReceipt) {
+      try {
+        await sendEmail({
+          to: normalizedEmail,
+          subject: `Multi-week Booking Request Received (Pending) - ${safeSubjectAdName}`,
+          html: advertiserEmailHTML,
+        });
+      } catch (error) {
+        console.error("[pending-ad-submission] Failed to send advertiser email:", error);
+      }
     }
 
     const internalTelegramText = [
@@ -794,14 +1583,16 @@ export async function createPendingAdSubmission({
     try {
       await notifyInternalChannels({
         supabase,
-        emailSubject: `New Multi-week Booking - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
-        emailHtml: adminEmailHTML,
-        telegramText: internalTelegramText,
+        emailSubject: sendInternalEmailNotification
+          ? `New Multi-week Booking - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`
+          : "",
+        emailHtml: sendInternalEmailNotification ? adminEmailHTML : "",
+        telegramText: sendInternalTelegramNotification ? internalTelegramText : "",
       });
 
       try {
         const adminWhatsApp = process.env.WHATSAPP_BROADCAST_NUMBER;
-        if (adminWhatsApp && firstPendingAd?.id) {
+        if (sendAdminWhatsAppNotification && adminWhatsApp && firstPendingAd?.id) {
           await sendWhatsAppInteractive({
             to: adminWhatsApp,
             adId: firstPendingAd.id,
@@ -1169,14 +1960,16 @@ export async function createPendingAdSubmission({
 </html>
 `;
 
-  try {
-    await sendEmail({
-      to: normalizedEmail,
-      subject: `Ad Submission Received (Pending) - ${safeSubjectAdName}`,
-      html: advertiserEmailHTML,
-    });
-  } catch (error) {
-    console.error("[pending-ad-submission] Failed to send advertiser email:", error);
+  if (sendAdvertiserReceipt) {
+    try {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: `Ad Submission Received (Pending) - ${safeSubjectAdName}`,
+        html: advertiserEmailHTML,
+      });
+    } catch (error) {
+      console.error("[pending-ad-submission] Failed to send advertiser email:", error);
+    }
   }
 
   const internalTelegramText = [
@@ -1200,15 +1993,17 @@ export async function createPendingAdSubmission({
   try {
     await notifyInternalChannels({
       supabase,
-      emailSubject: `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`,
-      emailHtml: adminEmailHTML,
-      telegramText: internalTelegramText,
+      emailSubject: sendInternalEmailNotification
+        ? `New Ad Submission - ${safeSubjectAdName} from ${safeSubjectAdvertiserName}`
+        : "",
+      emailHtml: sendInternalEmailNotification ? adminEmailHTML : "",
+      telegramText: sendInternalTelegramNotification ? internalTelegramText : "",
     });
     
     // Attempt to notify the admin via interactive WhatsApp buttons (Approve/Decline)
     try {
       const adminWhatsApp = process.env.WHATSAPP_BROADCAST_NUMBER;
-      if (adminWhatsApp) {
+      if (sendAdminWhatsAppNotification && adminWhatsApp) {
          await sendWhatsAppInteractive({
            to: adminWhatsApp,
            adId: insertedPendingAd.id,

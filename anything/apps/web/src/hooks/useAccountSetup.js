@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { appToast } from "@/lib/toast";
+import {
+    getPasswordStrengthValidationError,
+    normalizePasswordStrengthErrorMessage,
+} from "@/lib/passwordValidation";
 
 const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
 
@@ -67,8 +71,11 @@ export function useAccountSetup() {
             return;
         }
 
-        if (accountData.password.length < 8) {
-            setAccountError("Password must be at least 8 characters.");
+        const passwordValidationError = getPasswordStrengthValidationError(
+            accountData.password,
+        );
+        if (passwordValidationError) {
+            setAccountError(passwordValidationError);
             return;
         }
 
@@ -138,12 +145,18 @@ export function useAccountSetup() {
             const isNetworkError =
                 err instanceof TypeError &&
                 /failed to fetch/i.test(String(err.message || ""));
-            const message =
-                isNetworkError
-                    ? "Could not reach the server. Please refresh and try again."
-                    : err.name === "AbortError"
-                    ? "The request timed out. Please check your connection and try again."
-                    : err.message || "Failed to create advertiser account.";
+            const normalizedPasswordError = normalizePasswordStrengthErrorMessage(
+                err?.message,
+            );
+            let message = err.message || "Failed to create advertiser account.";
+
+            if (normalizedPasswordError) {
+                message = normalizedPasswordError;
+            } else if (isNetworkError) {
+                message = "Could not reach the server. Please refresh and try again.";
+            } else if (err.name === "AbortError") {
+                message = "The request timed out. Please check your connection and try again.";
+            }
             setAccountError(message);
         } finally {
             setAccountLoading(false);

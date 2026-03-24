@@ -14,6 +14,21 @@ import {
   consumePublicRateLimit,
 } from "../../../utils/public-rate-limit.js";
 import { getTodayInAppTimeZone } from "../../../../../lib/timezone.js";
+import {
+  ADVERTISER_NAME_MAX_LENGTH,
+  EMAIL_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+} from "../../../../../lib/inputLimits.js";
+import {
+  getPasswordStrengthValidationError,
+  normalizePasswordStrengthErrorMessage,
+} from "../../../../../lib/passwordValidation.js";
+import {
+  sendPendingSubmissionAdminWhatsAppNotification,
+  sendPendingSubmissionAdvertiserReceipt,
+  sendPendingSubmissionInternalEmailNotification,
+  sendPendingSubmissionInternalTelegramNotification,
+} from "../../../utils/pending-ad-submission.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 8;
@@ -61,6 +76,27 @@ export async function POST(request) {
     const password = String(body.password || "");
     const confirmPassword = String(body.confirmPassword || "");
 
+    if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
+      return Response.json(
+        { error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (advertiserName.length > ADVERTISER_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Advertiser name must be ${ADVERTISER_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (contactName.length > PERSON_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Contact name must be ${PERSON_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
     const rateLimitKey = `${requesterIp}:${normalizedEmail}:${getTodayInAppTimeZone()}`;
     const rateLimitState = await consumePublicRateLimit({
       key: rateLimitKey,
@@ -85,11 +121,9 @@ export async function POST(request) {
       return Response.json({ error: "Enter a valid email address." }, { status: 400 });
     }
 
-    if (password.length < 8) {
-      return Response.json(
-        { error: "Password must be at least 8 characters." },
-        { status: 400 },
-      );
+    const passwordValidationError = getPasswordStrengthValidationError(password);
+    if (passwordValidationError) {
+      return Response.json({ error: passwordValidationError }, { status: 400 });
     }
 
     if (password !== confirmPassword) {
@@ -183,6 +217,12 @@ export async function POST(request) {
       );
 
       if (error) {
+        const normalizedPasswordError = normalizePasswordStrengthErrorMessage(
+          error?.message,
+        );
+        if (normalizedPasswordError) {
+          return Response.json({ error: normalizedPasswordError }, { status: 400 });
+        }
         throw error;
       }
 
@@ -205,6 +245,12 @@ export async function POST(request) {
       });
 
       if (error) {
+        const normalizedPasswordError = normalizePasswordStrengthErrorMessage(
+          error?.message,
+        );
+        if (normalizedPasswordError) {
+          return Response.json({ error: normalizedPasswordError }, { status: 400 });
+        }
         throw error;
       }
 
@@ -222,6 +268,57 @@ export async function POST(request) {
       fullName,
       onboardingComplete: false,
     });
+
+    try {
+      await sendPendingSubmissionAdvertiserReceipt({
+        request,
+        pendingAdId,
+        supabase,
+      });
+    } catch (receiptError) {
+      console.error(
+        "[submit-ad/account] Account created but submission receipt email failed:",
+        receiptError,
+      );
+    }
+
+    try {
+      await sendPendingSubmissionInternalTelegramNotification({
+        request,
+        pendingAdId,
+        supabase,
+      });
+    } catch (telegramError) {
+      console.error(
+        "[submit-ad/account] Account created but internal Telegram notification failed:",
+        telegramError,
+      );
+    }
+
+    try {
+      await sendPendingSubmissionInternalEmailNotification({
+        request,
+        pendingAdId,
+        supabase,
+      });
+    } catch (internalEmailError) {
+      console.error(
+        "[submit-ad/account] Account created but internal email notification failed:",
+        internalEmailError,
+      );
+    }
+
+    try {
+      await sendPendingSubmissionAdminWhatsAppNotification({
+        pendingAdId,
+        supabase,
+      });
+    } catch (whatsAppError) {
+      console.error(
+        "[submit-ad/account] Account created but admin WhatsApp notification failed:",
+        whatsAppError,
+      );
+    }
 
     const verificationToken = createAdvertiserVerificationToken({
       userId: authUser.id,
