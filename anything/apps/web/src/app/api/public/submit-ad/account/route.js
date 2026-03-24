@@ -23,16 +23,28 @@ import {
   getPasswordStrengthValidationError,
   normalizePasswordStrengthErrorMessage,
 } from "../../../../../lib/passwordValidation.js";
-import {
-  sendPendingSubmissionAdminWhatsAppNotification,
-  sendPendingSubmissionAdvertiserReceipt,
-  sendPendingSubmissionInternalEmailNotification,
-  sendPendingSubmissionInternalTelegramNotification,
-} from "../../../utils/pending-ad-submission.js";
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 8;
 const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
+
+const normalizeAccountCreationError = (error) => {
+  const message = String(error?.message || "").trim();
+  const normalizedPasswordError = normalizePasswordStrengthErrorMessage(message);
+  if (normalizedPasswordError) {
+    return { error: normalizedPasswordError, status: 400 };
+  }
+
+  if (/Database error saving new user/i.test(message)) {
+    return {
+      error:
+        "We couldn't finish creating your account right now. Please try again, or use Log in instead if this email already has an account.",
+      status: 500,
+    };
+  }
+
+  return null;
+};
 
 const existingAdvertiserAccountPayload = (email) => ({
   code: EXISTING_ACCOUNT_ERROR_CODE,
@@ -270,53 +282,67 @@ export async function POST(request) {
     });
 
     try {
-      await sendPendingSubmissionAdvertiserReceipt({
-        request,
-        pendingAdId,
-        supabase,
-      });
-    } catch (receiptError) {
-      console.error(
-        "[submit-ad/account] Account created but submission receipt email failed:",
-        receiptError,
-      );
-    }
+      const {
+        sendPendingSubmissionAdminWhatsAppNotification,
+        sendPendingSubmissionAdvertiserReceipt,
+        sendPendingSubmissionInternalEmailNotification,
+        sendPendingSubmissionInternalTelegramNotification,
+      } = await import("../../../utils/pending-ad-submission.js");
 
-    try {
-      await sendPendingSubmissionInternalTelegramNotification({
-        request,
-        pendingAdId,
-        supabase,
-      });
-    } catch (telegramError) {
-      console.error(
-        "[submit-ad/account] Account created but internal Telegram notification failed:",
-        telegramError,
-      );
-    }
+      try {
+        await sendPendingSubmissionAdvertiserReceipt({
+          request,
+          pendingAdId,
+          supabase,
+        });
+      } catch (receiptError) {
+        console.error(
+          "[submit-ad/account] Account created but submission receipt email failed:",
+          receiptError,
+        );
+      }
 
-    try {
-      await sendPendingSubmissionInternalEmailNotification({
-        request,
-        pendingAdId,
-        supabase,
-      });
-    } catch (internalEmailError) {
-      console.error(
-        "[submit-ad/account] Account created but internal email notification failed:",
-        internalEmailError,
-      );
-    }
+      try {
+        await sendPendingSubmissionInternalTelegramNotification({
+          request,
+          pendingAdId,
+          supabase,
+        });
+      } catch (telegramError) {
+        console.error(
+          "[submit-ad/account] Account created but internal Telegram notification failed:",
+          telegramError,
+        );
+      }
 
-    try {
-      await sendPendingSubmissionAdminWhatsAppNotification({
-        pendingAdId,
-        supabase,
-      });
-    } catch (whatsAppError) {
+      try {
+        await sendPendingSubmissionInternalEmailNotification({
+          request,
+          pendingAdId,
+          supabase,
+        });
+      } catch (internalEmailError) {
+        console.error(
+          "[submit-ad/account] Account created but internal email notification failed:",
+          internalEmailError,
+        );
+      }
+
+      try {
+        await sendPendingSubmissionAdminWhatsAppNotification({
+          pendingAdId,
+          supabase,
+        });
+      } catch (whatsAppError) {
+        console.error(
+          "[submit-ad/account] Account created but admin WhatsApp notification failed:",
+          whatsAppError,
+        );
+      }
+    } catch (notificationImportError) {
       console.error(
-        "[submit-ad/account] Account created but admin WhatsApp notification failed:",
-        whatsAppError,
+        "[submit-ad/account] Account created but delayed notification helpers failed to load:",
+        notificationImportError,
       );
     }
 
@@ -353,6 +379,10 @@ export async function POST(request) {
     });
   } catch (error) {
     console.error("[submit-ad/account] Failed to create advertiser account:", error);
+    const normalizedError = normalizeAccountCreationError(error);
+    if (normalizedError) {
+      return Response.json({ error: normalizedError.error }, { status: normalizedError.status });
+    }
     return Response.json(
       { error: "Internal Server Error" },
       { status: 500 },

@@ -208,6 +208,36 @@ const getDefaultTenantId = async (supabase) => {
   return data?.tenant_id || null;
 };
 
+const isProfilesIdOnConflictError = (error) => {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").trim();
+  return (
+    code === "42P10" ||
+    /no unique or exclusion constraint matching the ON CONFLICT specification/i.test(
+      message,
+    )
+  );
+};
+
+const buildAdvertiserProfilePayload = ({
+  userId,
+  advertiserId,
+  email,
+  fullName,
+  onboardingComplete,
+  tenantId,
+}) => ({
+  id: userId,
+  tenant_id: tenantId,
+  role: "Advertiser",
+  advertiser_id: advertiserId || null,
+  full_name: String(fullName || "").trim() || normalizeEmail(email),
+  email: normalizeEmail(email),
+  timezone: APP_TIME_ZONE,
+  onboarding_complete: Boolean(onboardingComplete),
+  updated_at: new Date().toISOString(),
+});
+
 export const ensureAdvertiserRecord = async ({
   advertiserName,
   contactName,
@@ -365,25 +395,59 @@ export const upsertAdvertiserProfile = async ({
 }) => {
   const supabase = db();
   const tenantId = await getDefaultTenantId(supabase);
+  const profilePayload = buildAdvertiserProfilePayload({
+    userId,
+    advertiserId,
+    email,
+    fullName,
+    onboardingComplete,
+    tenantId,
+  });
 
   const { data, error } = await supabase
     .from("profiles")
-    .upsert(
-      {
-        id: userId,
-        tenant_id: tenantId,
-        role: "Advertiser",
-        advertiser_id: advertiserId || null,
-        full_name: String(fullName || "").trim() || normalizeEmail(email),
-        email: normalizeEmail(email),
-        timezone: APP_TIME_ZONE,
-        onboarding_complete: Boolean(onboardingComplete),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "id" },
-    )
+    .upsert(profilePayload, { onConflict: "id" })
     .select("*")
     .single();
+
+  if (error && isProfilesIdOnConflictError(error)) {
+    const { data: existingProfile, error: existingProfileError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      throw existingProfileError;
+    }
+
+    if (existingProfile?.id) {
+      const { data: updatedProfile, error: updateError } = await supabase
+        .from("profiles")
+        .update(profilePayload)
+        .eq("id", userId)
+        .select("*")
+        .single();
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      return updatedProfile;
+    }
+
+    const { data: insertedProfile, error: insertError } = await supabase
+      .from("profiles")
+      .insert(profilePayload)
+      .select("*")
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    return insertedProfile;
+  }
 
   if (error) {
     throw error;
