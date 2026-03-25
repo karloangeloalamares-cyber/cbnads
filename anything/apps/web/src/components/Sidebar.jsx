@@ -105,7 +105,7 @@ export default function Sidebar({
         onClick={onClose}
       />
       <aside
-        className={`safe-pb fixed inset-y-0 left-0 z-50 flex h-app-screen w-[min(19.5rem,calc(100vw-0.75rem))] flex-col border-r border-gray-200 bg-[#F7F8FA] shadow-xl transition-all duration-300 md:static md:z-auto md:shadow-none ${isMinimized ? "md:w-[88px]" : "md:w-[240px]"} ${mobileOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
+        className={`safe-pb fixed inset-y-0 left-0 z-50 flex h-app-screen w-[min(19.5rem,calc(100vw-0.75rem))] flex-col border-r border-gray-200 bg-[#F7F8FA] shadow-xl transition-all duration-300 md:sticky md:top-0 md:z-auto md:self-start md:shadow-none ${isMinimized ? "md:w-[88px]" : "md:w-[240px]"} ${mobileOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0`}
       >
       <div className="safe-top-pad flex items-center justify-between border-b border-gray-200 px-4 pb-4">
         {!isMinimized && (
@@ -211,7 +211,7 @@ export default function Sidebar({
       </nav>
 
       {canViewSettings ? (
-        <div className="border-t border-gray-200 p-3">
+        <div className="border-t border-gray-200 bg-[#F7F8FA] p-3">
           <div className="relative group">
             <button
               onClick={() => {
