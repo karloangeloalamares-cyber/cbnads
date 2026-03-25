@@ -4,6 +4,11 @@ import {
   isCompleteUSPhoneNumber,
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
+import {
+  ADVERTISER_NAME_MAX_LENGTH,
+  EMAIL_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+} from "../../../../lib/inputLimits.js";
 
 export async function POST(request) {
   try {
@@ -27,6 +32,27 @@ export async function POST(request) {
       .trim()
       .toLowerCase();
     const normalizedPhoneNumber = normalizeUSPhoneNumber(phone_number || "");
+
+    if (normalizedAdvertiserName.length > ADVERTISER_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Advertiser name must be ${ADVERTISER_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (normalizedContactName.length > PERSON_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Contact name must be ${PERSON_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
+      return Response.json(
+        { error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
 
     if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
       return Response.json(

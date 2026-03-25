@@ -6,6 +6,7 @@ import {
   normalizeEmail,
   sendAdvertiserVerificationEmail,
 } from "../../../utils/advertiser-auth.js";
+import { EMAIL_MAX_LENGTH } from "../../../../../lib/inputLimits.js";
 
 export async function POST(request) {
   try {
@@ -13,6 +14,13 @@ export async function POST(request) {
 
     const body = await request.json();
     const normalizedEmail = normalizeEmail(body.email);
+
+    if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
+      return Response.json(
+        { error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
 
     if (!normalizedEmail) {
       return Response.json({ error: "Email is required." }, { status: 400 });

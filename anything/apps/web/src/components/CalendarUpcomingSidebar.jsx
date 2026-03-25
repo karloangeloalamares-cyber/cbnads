@@ -8,8 +8,9 @@ export default function CalendarUpcomingSidebar({
   isMinimized,
   setIsMinimized,
   getStatusClass,
+  isCompact = false,
 }) {
-  if (isMinimized) {
+  if (isMinimized && !isCompact) {
     return (
       <div className="bg-white border-l border-gray-200 flex items-start justify-center pt-4">
         <button
@@ -25,17 +26,21 @@ export default function CalendarUpcomingSidebar({
   }
 
   return (
-    <div className="w-80 bg-white border-l border-gray-200 p-4 overflow-y-auto">
+    <div className="w-full lg:w-80 bg-white border-t border-gray-200 lg:border-t-0 lg:border-l p-4 lg:overflow-y-auto">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900">Upcoming (Next 7 Days)</h3>
-        <button
-          onClick={() => setIsMinimized(true)}
-          className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Minimize sidebar"
-          type="button"
-        >
-          <ChevronRight size={18} className="text-gray-600" />
-        </button>
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900">
+          Upcoming (Next 7 Days)
+        </h3>
+        {!isCompact ? (
+          <button
+            onClick={() => setIsMinimized(true)}
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Minimize sidebar"
+            type="button"
+          >
+            <ChevronRight size={18} className="text-gray-600" />
+          </button>
+        ) : null}
       </div>
 
       {ads.length === 0 ? (

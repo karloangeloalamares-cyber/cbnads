@@ -2,6 +2,11 @@ import {
   FLEX_PHONE_INPUT_MAX_LENGTH,
   US_PHONE_INPUT_MAX_LENGTH,
 } from "@/lib/phone";
+import {
+  ADVERTISER_NAME_MAX_LENGTH,
+  EMAIL_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+} from "@/lib/inputLimits";
 
 const containerClass = (readOnly) =>
   `border border-gray-200 rounded-lg bg-white px-4 pt-4 pb-3 transition-all focus-within:border-gray-900 focus-within:ring-2 focus-within:ring-gray-900 focus-within:ring-offset-0 ${readOnly ? "bg-gray-50" : "hover:border-gray-300"}`;
@@ -60,6 +65,7 @@ export function AdvertiserInfoSection({
               }
             }}
             placeholder="Enter advertiser name"
+            maxLength={ADVERTISER_NAME_MAX_LENGTH}
             className={inputClass(isReadOnly("advertiser_name"))}
           />
         </div>
@@ -84,6 +90,7 @@ export function AdvertiserInfoSection({
               }
             }}
             placeholder="Enter contact name"
+            maxLength={PERSON_NAME_MAX_LENGTH}
             className={inputClass(isReadOnly("contact_name"))}
           />
         </div>
@@ -108,6 +115,7 @@ export function AdvertiserInfoSection({
               }
             }}
             placeholder="your@email.com"
+            maxLength={EMAIL_MAX_LENGTH}
             className={inputClass(isReadOnly("email"))}
           />
         </div>

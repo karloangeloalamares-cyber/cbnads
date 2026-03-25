@@ -3208,11 +3208,19 @@ const getCapacityStatus = (count, maxAdsPerDay) => {
   return { bg: "bg-green-100", color: "text-green-700" };
 };
 
-function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateClick }) {
+function CalendarMonthView({
+  currentDate,
+  ads,
+  maxAdsPerDay,
+  onAdClick,
+  onDateClick,
+  isCompact = false,
+}) {
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const calendarDays = getMonthCalendarDays(year, month);
   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const maxVisibleAds = isCompact ? 2 : 3;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -3220,7 +3228,7 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
         {weekDays.map((day) => (
           <div
             key={day}
-            className="py-3 text-center text-xs font-semibold text-gray-700 bg-gray-50"
+            className="py-2 sm:py-3 text-center text-[10px] sm:text-xs font-semibold text-gray-700 bg-gray-50"
           >
             {day}
           </div>
@@ -3233,7 +3241,7 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
             return (
               <div
                 key={`placeholder-${year}-${month}-${index}`}
-                className="min-h-[120px] border-b border-r border-gray-200 bg-white"
+                className="min-h-[88px] sm:min-h-[120px] border-b border-r border-gray-200 bg-white"
               />
             );
           }
@@ -3246,12 +3254,12 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
             <div
               key={`${toDateKey(dayInfo.date)}-${index}`}
               onClick={() => onDateClick(dayInfo.date)}
-              className="min-h-[120px] border-b border-r border-gray-200 p-2 cursor-pointer hover:bg-gray-50 transition-colors bg-white"
+              className="min-h-[88px] sm:min-h-[120px] border-b border-r border-gray-200 p-1.5 sm:p-2 cursor-pointer hover:bg-gray-50 transition-colors bg-white"
             >
               <div className="flex items-center justify-between mb-2">
                 <span
-                  className={`text-sm font-medium ${today
-                    ? "bg-gray-900 text-white w-6 h-6 rounded-full flex items-center justify-center text-xs"
+                  className={`text-[11px] sm:text-sm font-medium ${today
+                    ? "bg-gray-900 text-white w-5 h-5 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-[10px] sm:text-xs"
                     : "text-gray-900"
                     }`}
                 >
@@ -3260,7 +3268,7 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
 
                 {dayAds.length > 0 ? (
                   <span
-                    className={`text-xs px-1.5 py-0.5 rounded ${capacity.bg} ${capacity.color}`}
+                    className={`text-[10px] sm:text-xs px-1 sm:px-1.5 py-0.5 rounded ${capacity.bg} ${capacity.color}`}
                   >
                     {dayAds.length}/{maxAdsPerDay}
                   </span>
@@ -3268,14 +3276,14 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
               </div>
 
               <div className="space-y-1">
-                {dayAds.slice(0, 3).map((item, itemIndex) => (
+                {dayAds.slice(0, maxVisibleAds).map((item, itemIndex) => (
                   <div
                     key={`${item.ad.id || item.ad.ad_name}-${itemIndex}`}
                     onClick={(event) => {
                       event.stopPropagation();
                       onAdClick(item.ad);
                     }}
-                    className={`text-xs p-1.5 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
+                    className={`text-[10px] sm:text-xs p-1 sm:p-1.5 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
                       item.ad.status,
                     )}`}
                   >
@@ -3284,8 +3292,10 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
                   </div>
                 ))}
 
-                {dayAds.length > 3 ? (
-                  <div className="text-xs text-gray-500 pl-1.5">+{dayAds.length - 3} more</div>
+                {dayAds.length > maxVisibleAds ? (
+                  <div className="text-[10px] sm:text-xs text-gray-500 pl-1.5">
+                    +{dayAds.length - maxVisibleAds} more
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -3296,7 +3306,7 @@ function CalendarMonthView({ currentDate, ads, maxAdsPerDay, onAdClick, onDateCl
   );
 }
 
-function CalendarWeekView({ currentDate, ads, onAdClick }) {
+function CalendarWeekView({ currentDate, ads, onAdClick, isCompact = false }) {
   const weekStart = getWeekStart(currentDate);
   const weekDays = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(weekStart);
@@ -3306,67 +3316,69 @@ function CalendarWeekView({ currentDate, ads, onAdClick }) {
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      <div className="grid grid-cols-7">
-        {weekDays.map((date) => {
-          const dayAds = sortCalendarItemsByTime(getAdsForDate(ads, date));
-          const today = toDateKey(date) === getTodayInAppTimeZone();
+      <div className={isCompact ? "overflow-x-auto" : ""}>
+        <div className={`grid grid-cols-7 ${isCompact ? "min-w-[720px]" : ""}`}>
+          {weekDays.map((date) => {
+            const dayAds = sortCalendarItemsByTime(getAdsForDate(ads, date));
+            const today = toDateKey(date) === getTodayInAppTimeZone();
 
-          return (
-            <div
-              key={toDateKey(date)}
-              className={`border-r border-b border-gray-200 p-3 min-h-[400px] ${today ? "bg-blue-50" : "bg-white"
-                }`}
-            >
-              <div className="text-center mb-3">
-                <div className="text-xs font-semibold text-gray-600 uppercase">
-                  {date.toLocaleDateString("en-US", { weekday: "short" })}
-                </div>
-                <div
-                  className={`text-lg font-semibold mt-1 ${today
-                    ? "bg-gray-900 text-white w-8 h-8 rounded-full flex items-center justify-center mx-auto"
-                    : "text-gray-900"
-                    }`}
-                >
-                  {date.getDate()}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                {dayAds.map((item, index) => (
-                  <div
-                    key={`${item.ad.id || item.ad.ad_name}-${index}`}
-                    onClick={() => onAdClick(item.ad)}
-                    className={`text-xs p-2 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
-                      item.ad.status,
-                    )}`}
-                  >
-                    <div className="mb-1.5 flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
-                        {formatCalendarLiveTime(item.ad.post_time)}
-                      </span>
-                    </div>
-                    <div className="font-medium truncate">{item.ad.ad_name}</div>
-                    <div className="text-[10px] truncate opacity-75 mt-0.5">
-                      {item.ad.advertiser}
-                    </div>
+            return (
+              <div
+                key={toDateKey(date)}
+                className={`border-r border-b border-gray-200 p-3 min-h-[320px] sm:min-h-[400px] ${today ? "bg-blue-50" : "bg-white"
+                  }`}
+              >
+                <div className="text-center mb-3">
+                  <div className="text-[10px] sm:text-xs font-semibold text-gray-600 uppercase">
+                    {date.toLocaleDateString("en-US", { weekday: "short" })}
                   </div>
-                ))}
+                  <div
+                    className={`text-base sm:text-lg font-semibold mt-1 ${today
+                      ? "bg-gray-900 text-white w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center mx-auto"
+                      : "text-gray-900"
+                      }`}
+                  >
+                    {date.getDate()}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {dayAds.map((item, index) => (
+                    <div
+                      key={`${item.ad.id || item.ad.ad_name}-${index}`}
+                      onClick={() => onAdClick(item.ad)}
+                      className={`text-[10px] sm:text-xs p-2 rounded border cursor-pointer hover:shadow-sm transition-shadow ${getCalendarStatusColor(
+                        item.ad.status,
+                      )}`}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-gray-700">
+                          {formatCalendarLiveTime(item.ad.post_time)}
+                        </span>
+                      </div>
+                      <div className="font-medium truncate">{item.ad.ad_name}</div>
+                      <div className="text-[10px] truncate opacity-75 mt-0.5">
+                        {item.ad.advertiser}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
 }
 
-function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
+function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick, isCompact = false }) {
   const dayAds = sortCalendarItemsByTime(getAdsForDate(ads, currentDate));
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold text-gray-900">
+    <div className={`bg-white rounded-lg border border-gray-200 p-4 sm:p-6 ${isCompact ? "shadow-sm" : ""}`}>
+      <div className="mb-5 sm:mb-6">
+        <h2 className="text-xl sm:text-2xl font-semibold text-gray-900">
           {currentDate.toLocaleDateString("en-US", {
             weekday: "long",
             month: "long",
@@ -3374,7 +3386,7 @@ function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
             year: "numeric",
           })}
         </h2>
-        <p className="text-sm text-gray-500 mt-1">
+        <p className="text-xs sm:text-sm text-gray-500 mt-1">
           {dayAds.length} ad{dayAds.length !== 1 ? "s" : ""} scheduled (
           {dayAds.length}/{maxAdsPerDay} capacity)
         </p>
@@ -3389,10 +3401,10 @@ function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
           {dayAds.map((item, index) => (
             <div
               key={`${item.ad.id || item.ad.ad_name}-${index}`}
-              className="grid grid-cols-[88px_minmax(0,1fr)] gap-4 items-start"
+              className="grid grid-cols-1 sm:grid-cols-[88px_minmax(0,1fr)] gap-3 sm:gap-4 items-start"
             >
-              <div className="pt-3 text-right">
-                <div className="text-xs font-semibold text-gray-700">
+              <div className="pt-1 sm:pt-3 text-left sm:text-right">
+                <div className="text-[11px] sm:text-xs font-semibold text-gray-700">
                   {formatCalendarLiveTime(item.ad.post_time)}
                 </div>
                 <div className="text-[10px] uppercase tracking-wide text-gray-400 mt-1">
@@ -3401,15 +3413,15 @@ function CalendarDayView({ currentDate, ads, maxAdsPerDay, onAdClick }) {
               </div>
               <div
                 onClick={() => onAdClick(item.ad)}
-                className={`p-4 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${getCalendarStatusColor(
+                className={`p-3 sm:p-4 rounded-lg border cursor-pointer hover:shadow-md transition-shadow ${getCalendarStatusColor(
                   item.ad.status,
                 )}`}
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-base">{item.ad.ad_name}</h3>
-                    <p className="text-sm opacity-75 mt-1">{item.ad.advertiser}</p>
-                    <div className="flex flex-wrap gap-4 mt-2 text-xs">
+                    <h3 className="font-semibold text-sm sm:text-base">{item.ad.ad_name}</h3>
+                    <p className="text-xs sm:text-sm opacity-75 mt-1">{item.ad.advertiser}</p>
+                    <div className="flex flex-wrap gap-3 sm:gap-4 mt-2 text-xs">
                       <span>
                         <span className="font-medium">Type:</span> {item.ad.post_type}
                       </span>
@@ -11955,7 +11967,7 @@ export default function AdsPage() {
             ? showMobileBottomNav
               ? "mobile-bottom-nav-offset"
               : "p-0"
-            : `safe-bottom-pad px-4 pt-4 sm:px-5 lg:px-8 lg:pt-8 ${showMobileBottomNav ? "mobile-bottom-nav-offset" : "pb-6 lg:pb-8"}`
+            : `${showMobileBottomNav ? "mobile-bottom-nav-offset" : "safe-bottom-pad pb-6 lg:pb-8"} px-4 pt-4 sm:px-5 lg:px-8 lg:pt-8`
             }`}
         >
           {activeSection === "Dashboard" && (
@@ -12676,24 +12688,24 @@ export default function AdsPage() {
           {activeSection === "Calendar" && (
             <div className="flex flex-col h-full bg-gray-50">
               <div className="bg-white border-b border-gray-200">
-                <div className="px-6 py-4">
-                  <div className="flex items-center justify-between mb-4 gap-4">
-                    <div className="flex items-center gap-4">
-                      <h1 className="text-2xl font-semibold text-gray-900">Calendar</h1>
+                <div className="px-4 sm:px-6 py-4">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-xl sm:text-2xl font-semibold text-gray-900">Calendar</h1>
                       <button
                         onClick={goToCalendarToday}
-                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
+                        className="px-3 py-1.5 text-xs sm:text-sm border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700"
                         type="button"
                       >
                         Today
                       </button>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                    <div className="flex w-full sm:w-auto items-center gap-2">
+                      <div className="flex w-full sm:w-auto border border-gray-300 rounded-lg overflow-hidden">
                         <button
                           onClick={() => setCalendarMode("month")}
-                          className={`px-3 py-1.5 text-sm ${calendarMode === "month"
+                          className={`flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm ${calendarMode === "month"
                             ? "bg-gray-900 text-white"
                             : "bg-white text-gray-700 hover:bg-gray-50"
                             }`}
@@ -12703,7 +12715,7 @@ export default function AdsPage() {
                         </button>
                         <button
                           onClick={() => setCalendarMode("week")}
-                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${calendarMode === "week"
+                          className={`flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm border-l border-gray-300 ${calendarMode === "week"
                             ? "bg-gray-900 text-white"
                             : "bg-white text-gray-700 hover:bg-gray-50"
                             }`}
@@ -12713,7 +12725,7 @@ export default function AdsPage() {
                         </button>
                         <button
                           onClick={() => setCalendarMode("day")}
-                          className={`px-3 py-1.5 text-sm border-l border-gray-300 ${calendarMode === "day"
+                          className={`flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm border-l border-gray-300 ${calendarMode === "day"
                             ? "bg-gray-900 text-white"
                             : "bg-white text-gray-700 hover:bg-gray-50"
                             }`}
@@ -12725,9 +12737,9 @@ export default function AdsPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex w-full sm:w-auto items-center justify-between gap-4">
+                      <div className="flex items-center gap-2 min-w-0">
                         <button
                           onClick={() => navigateCalendarDate(-1)}
                           className="p-1.5 hover:bg-gray-100 rounded-lg"
@@ -12735,7 +12747,7 @@ export default function AdsPage() {
                         >
                           <ChevronLeft className="w-5 h-5 text-gray-600" />
                         </button>
-                        <span className="text-lg font-medium text-gray-900 min-w-[250px] text-center">
+                        <span className="text-base sm:text-lg font-medium text-gray-900 min-w-0 sm:min-w-[250px] text-center truncate">
                           {calendarPeriodLabel}
                         </span>
                         <button
@@ -12748,21 +12760,21 @@ export default function AdsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+                      <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                         <input
                           type="text"
                           placeholder="Search ads or invoice #..."
                           value={calendarSearch}
                           onChange={(event) => setCalendarSearch(event.target.value)}
-                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-64"
+                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 w-full sm:w-64"
                         />
                       </div>
 
                       <button
                         onClick={() => setCalendarShowFilters((current) => !current)}
-                        className={`px-3 py-2 border border-gray-300 rounded-lg text-sm flex items-center gap-2 ${calendarShowFilters
+                        className={`px-3 py-2 border border-gray-300 rounded-lg text-xs sm:text-sm flex items-center justify-center gap-2 w-full sm:w-auto ${calendarShowFilters
                           ? "bg-gray-900 text-white"
                           : "bg-white text-gray-700 hover:bg-gray-50"
                           }`}
@@ -12794,8 +12806,8 @@ export default function AdsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-1 overflow-hidden">
-                <div className="flex-1 p-6 overflow-auto">
+              <div className="flex flex-1 flex-col gap-4 overflow-hidden lg:flex-row lg:gap-0">
+                <div className="flex-1 p-4 sm:p-6 overflow-auto">
                   {calendarMode === "month" ? (
                     <CalendarMonthView
                       currentDate={calendarCurrentDate}
@@ -12803,6 +12815,7 @@ export default function AdsPage() {
                       maxAdsPerDay={calendarMaxAdsPerDay}
                       onAdClick={handleCalendarAdClick}
                       onDateClick={handleCalendarDateClick}
+                      isCompact={isPhone}
                     />
                   ) : null}
 
@@ -12811,6 +12824,7 @@ export default function AdsPage() {
                       currentDate={calendarCurrentDate}
                       ads={calendarFilteredAds}
                       onAdClick={handleCalendarAdClick}
+                      isCompact={isPhone}
                     />
                   ) : null}
 
@@ -12820,6 +12834,7 @@ export default function AdsPage() {
                       ads={calendarFilteredAds}
                       maxAdsPerDay={calendarMaxAdsPerDay}
                       onAdClick={handleCalendarAdClick}
+                      isCompact={isPhone}
                     />
                   ) : null}
                 </div>
@@ -12830,6 +12845,7 @@ export default function AdsPage() {
                   isMinimized={calendarSidebarMinimized}
                   setIsMinimized={setCalendarSidebarMinimized}
                   getStatusClass={getCalendarStatusColor}
+                  isCompact={isPhone}
                 />
               </div>
 

@@ -1,5 +1,6 @@
 import { db, table } from "../../utils/supabase-db.js";
 import { getSessionUser, requireAuth } from "../../utils/auth-check.js";
+import { PERSON_NAME_MAX_LENGTH } from "../../../../lib/inputLimits.js";
 
 // Update user profile
 export async function PUT(request) {
@@ -14,6 +15,13 @@ export async function PUT(request) {
 
     if (name === undefined && image === undefined) {
       return Response.json({ error: "No fields to update" }, { status: 400 });
+    }
+
+    if (name !== undefined && String(name || "").length > PERSON_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Name must be ${PERSON_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
     }
 
     const currentUser = await getSessionUser(request);

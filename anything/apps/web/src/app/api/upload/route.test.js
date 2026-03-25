@@ -110,4 +110,44 @@ describe("upload route", () => {
     expect(data.error).toBe("Too many uploads. Please try again later.");
     expect(getSupabaseAdmin).not.toHaveBeenCalled();
   });
+
+  it("rejects remote URL uploads", async () => {
+    const response = await POST(
+      new Request("https://example.com/api/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: "https://example.com/file.png",
+        }),
+      }),
+    );
+
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data.error).toBe("Remote URL uploads are not supported.");
+  });
+
+  it("rejects oversized octet-stream uploads based on media type", async () => {
+    const largePayload = new Uint8Array((20 * 1024 * 1024) + 1);
+    const response = await POST(
+      new Request("https://example.com/api/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-File-Name": encodeURIComponent("creative.png"),
+          "X-Mime-Type": "image/png",
+        },
+        body: largePayload,
+      }),
+    );
+
+    const data = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(data.error).toContain("Image uploads must be under 20 MB");
+    expect(upload).not.toHaveBeenCalled();
+  });
 });

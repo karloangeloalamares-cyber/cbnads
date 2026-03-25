@@ -2,11 +2,60 @@ import { getSupabaseAdmin, adminBucketName } from "../../../lib/supabaseAdmin.js
 import crypto from "node:crypto";
 import path from "node:path";
 import { enforceUploadAccess } from "../utils/upload-access.js";
+import {
+    FILE_NAME_MAX_LENGTH,
+    MEDIA_UPLOAD_MAX_BYTES,
+    mediaUploadLimitLabel,
+} from "../../../lib/inputLimits.js";
+import {
+    AUDIO_EXTENSIONS,
+    DOCUMENT_EXTENSIONS,
+    getFileExtension,
+    IMAGE_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+} from "../../../lib/media.js";
 
 const BUCKET = adminBucketName("uploads");
-const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 const PUBLIC_UPLOAD_MAX_ATTEMPTS = 20;
 const PUBLIC_UPLOAD_WINDOW_MS = 10 * 60 * 1000;
+
+const classifyUpload = ({ fileName, mimeType }) => {
+    const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+    const extension = getFileExtension(fileName);
+
+    if (normalizedMimeType.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) {
+        return "image";
+    }
+
+    if (normalizedMimeType.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) {
+        return "video";
+    }
+
+    if (normalizedMimeType.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) {
+        return "audio";
+    }
+
+    if (normalizedMimeType === "application/pdf" || DOCUMENT_EXTENSIONS.has(extension)) {
+        return "document";
+    }
+
+    return "";
+};
+
+const sanitizeFileName = (value) => {
+    const normalized = String(value || "").trim().replace(/[\r\n]+/g, " ");
+    if (!normalized) {
+        return "upload";
+    }
+    const parsed = path.basename(normalized);
+    return parsed.slice(0, FILE_NAME_MAX_LENGTH) || "upload";
+};
+
+const buildSizeError = (kind) =>
+    Response.json(
+        { error: `File too large. ${kind[0].toUpperCase()}${kind.slice(1)} uploads must be under ${mediaUploadLimitLabel(kind)}.` },
+        { status: 413 },
+    );
 
 /**
  * POST /api/upload
@@ -37,6 +86,7 @@ export async function POST(request) {
         let fileBuffer;
         let fileName;
         let mimeType = "application/octet-stream";
+        let mediaKind = "";
 
         if (contentType.includes("multipart/form-data")) {
             const formData = await request.formData();
@@ -46,37 +96,56 @@ export async function POST(request) {
                 return Response.json({ error: "No file provided." }, { status: 400 });
             }
 
-            if (file.size > MAX_FILE_SIZE) {
-                return Response.json({ error: "File too large." }, { status: 413 });
-            }
-
             fileBuffer = Buffer.from(await file.arrayBuffer());
-            fileName = file.name || "upload";
+            fileName = sanitizeFileName(file.name);
             mimeType = file.type || mimeType;
+            mediaKind = classifyUpload({ fileName, mimeType });
+            if (!mediaKind) {
+                return Response.json({ error: "Unsupported file type." }, { status: 400 });
+            }
+            if (file.size > (MEDIA_UPLOAD_MAX_BYTES[mediaKind] || MEDIA_UPLOAD_MAX_BYTES.file)) {
+                return buildSizeError(mediaKind);
+            }
         } else if (contentType.includes("application/json")) {
             const body = await request.json();
 
             if (body.url) {
-                const resp = await fetch(body.url);
-                if (!resp.ok) {
-                    return Response.json({ error: "Failed to fetch URL." }, { status: 400 });
-                }
-                fileBuffer = Buffer.from(await resp.arrayBuffer());
-                mimeType = resp.headers.get("content-type") || mimeType;
-                fileName = path.basename(new URL(body.url).pathname) || "download";
+                return Response.json(
+                    { error: "Remote URL uploads are not supported." },
+                    { status: 400 },
+                );
             } else if (body.base64) {
                 fileBuffer = Buffer.from(body.base64, "base64");
-                fileName = "upload";
+                fileName = sanitizeFileName(body.fileName || "upload");
+                mimeType = String(body.mimeType || mimeType).trim() || mimeType;
+                mediaKind = classifyUpload({ fileName, mimeType });
+                if (!mediaKind) {
+                    return Response.json({ error: "Unsupported file type." }, { status: 400 });
+                }
             } else {
                 return Response.json({ error: "No file, url, or base64 provided." }, { status: 400 });
             }
         } else if (contentType.includes("application/octet-stream")) {
             fileBuffer = Buffer.from(await request.arrayBuffer());
             const rawFileName = request.headers.get("x-file-name");
-            fileName = rawFileName ? decodeURIComponent(rawFileName) : "upload";
+            fileName = sanitizeFileName(rawFileName ? decodeURIComponent(rawFileName) : "upload");
             mimeType = request.headers.get("x-mime-type") || mimeType;
+            mediaKind = classifyUpload({ fileName, mimeType });
+            if (!mediaKind) {
+                return Response.json({ error: "Unsupported file type." }, { status: 400 });
+            }
         } else {
             return Response.json({ error: "Unsupported content type." }, { status: 400 });
+        }
+
+        if (!mediaKind) {
+            mediaKind = classifyUpload({ fileName, mimeType });
+        }
+        if (!mediaKind) {
+            return Response.json({ error: "Unsupported file type." }, { status: 400 });
+        }
+        if (fileBuffer.length > (MEDIA_UPLOAD_MAX_BYTES[mediaKind] || MEDIA_UPLOAD_MAX_BYTES.file)) {
+            return buildSizeError(mediaKind);
         }
 
         // Generate a unique path

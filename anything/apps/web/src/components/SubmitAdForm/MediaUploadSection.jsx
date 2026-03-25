@@ -12,6 +12,7 @@ import {
 } from "@/lib/media";
 import useUpload from "@/utils/useUpload";
 import { appToast } from "@/lib/toast";
+import { MEDIA_ITEM_MAX_COUNT } from "@/lib/inputLimits";
 
 const MEDIA_SIZE_LIMITS = {
   image: 20 * 1024 * 1024,
@@ -72,7 +73,26 @@ export function MediaUploadSection({
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
-    for (const file of files) {
+    const availableSlots = Math.max(0, MEDIA_ITEM_MAX_COUNT - media.length);
+    if (availableSlots <= 0) {
+      await notifyUploadResult({
+        title: "Attachment Limit Reached",
+        message: `You can upload up to ${MEDIA_ITEM_MAX_COUNT} attachments per submission.`,
+        variant: "warning",
+      });
+      event.target.value = "";
+      return;
+    }
+
+    if (files.length > availableSlots) {
+      await notifyUploadResult({
+        title: "Too Many Attachments",
+        message: `Only ${availableSlots} attachment${availableSlots === 1 ? "" : "s"} can be added. Limit: ${MEDIA_ITEM_MAX_COUNT}.`,
+        variant: "warning",
+      });
+    }
+
+    for (const file of files.slice(0, availableSlots)) {
       try {
         const mediaType = classifyMediaFile(file);
         if (!mediaType) {
@@ -195,7 +215,7 @@ export function MediaUploadSection({
           </label>
 
           <p className="text-xs text-gray-400 mt-2">
-            Supports images (20 MB), videos (250 MB), audio files (100 MB), and PDF (50 MB).
+            Supports up to {MEDIA_ITEM_MAX_COUNT} attachments: images (20 MB), videos (250 MB), audio files (100 MB), and PDF (50 MB).
           </p>
         </div>
       </div>

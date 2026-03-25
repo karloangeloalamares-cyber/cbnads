@@ -1,3 +1,4 @@
+import { createAdAtomic, resolveAdCreateRequestKey } from "../../utils/create-ad-atomic.js";
 import { dateOnly, db, normalizePostType, table } from "../../utils/supabase-db.js";
 import { requireInternalUser } from "../../utils/auth-check.js";
 import { updateAdvertiserNextAdDate } from "../../utils/update-advertiser-next-ad.js";
@@ -46,6 +47,15 @@ const normalizeCustomDateEntries = (entries, { fallbackTime = "" } = {}) =>
     })
     .filter(Boolean);
 
+const duplicateWarningPayload = ({ duplicateAd, advertiser }) => ({
+  warning: true,
+  deduplicated: true,
+  message: `Similar ad "${duplicateAd?.ad_name || "Untitled ad"}" already exists for ${advertiser} on this date and placement (Status: ${duplicateAd?.status || "Draft"}). Create anyway?`,
+  duplicateId: duplicateAd?.id || null,
+  duplicateName: duplicateAd?.ad_name || null,
+  ad: duplicateAd || null,
+});
+
 export async function POST(request) {
   try {
     const auth = await requireInternalUser(request);
@@ -73,6 +83,7 @@ export async function POST(request) {
       reminder_minutes,
       skip_duplicate_check,
       advertiser_id,
+      source_request_key,
     } = body;
 
     if (!ad_name || !advertiser || !post_type || !placement || !payment) {
@@ -83,10 +94,7 @@ export async function POST(request) {
     }
 
     // Run advertiser lookup, product lookup, and duplicate check in parallel
-    let advertiserQuery = supabase
-      .from(table("advertisers"))
-      .select("id, advertiser_name, status")
-      .maybeSingle();
+    let advertiserQuery = supabase.from(table("advertisers")).select("id, advertiser_name, status");
     advertiserQuery = advertiser_id
       ? advertiserQuery.eq("id", advertiser_id)
       : advertiserQuery.eq("advertiser_name", advertiser);
@@ -96,7 +104,7 @@ export async function POST(request) {
       { data: productRow, error: productError },
       { data: candidateAds, error: candidateError },
     ] = await Promise.all([
-      advertiserQuery,
+      advertiserQuery.maybeSingle(),
       product_id
         ? supabase.from(table("products")).select("id, product_name, price").eq("id", product_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
@@ -141,12 +149,10 @@ export async function POST(request) {
 
       if (duplicate) {
         return Response.json(
-          {
-            warning: true,
-            message: `Similar ad "${duplicate.ad_name}" already exists for ${advertiser} on this date and placement (Status: ${duplicate.status}). Create anyway?`,
-            duplicateId: duplicate.id,
-            duplicateName: duplicate.ad_name,
-          },
+          duplicateWarningPayload({
+            duplicateAd: duplicate,
+            advertiser,
+          }),
           { status: 200 },
         );
       }
@@ -225,36 +231,65 @@ export async function POST(request) {
       }
     }
 
-    const { data: createdAd, error: createError } = await supabase
-      .from(table("ads"))
-      .insert({
-        ad_name,
-        advertiser,
-        advertiser_id: advertiserRow?.id || null,
-        status: status || "Draft",
-        post_type,
-        placement,
-        schedule: scheduleDate,
-        post_date: scheduleDate,
-        post_date_from: dateFrom,
-        post_date_to: dateTo,
-        custom_dates: customDates,
-        payment,
-        product_id: product_id || null,
-        product_name: productRow?.product_name || null,
-        price: productRow?.price || 0,
-        media: Array.isArray(media) ? media : [],
-        ad_text: ad_text || null,
-        post_time: post_time || null,
-        scheduled_timezone: APP_TIME_ZONE,
-        reminder_minutes: reminder_minutes || 15,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .select("*")
-      .single();
+    const adInsertPayload = {
+      ad_name,
+      advertiser,
+      advertiser_id: advertiserRow?.id || null,
+      status: status || "Draft",
+      post_type,
+      placement,
+      schedule: scheduleDate,
+      post_date: scheduleDate,
+      post_date_from: dateFrom,
+      post_date_to: dateTo,
+      custom_dates: customDates,
+      payment,
+      product_id: product_id || null,
+      product_name: productRow?.product_name || null,
+      price: productRow?.price || 0,
+      media: Array.isArray(media) ? media : [],
+      ad_text: ad_text || null,
+      post_time: post_time || null,
+      scheduled_timezone: APP_TIME_ZONE,
+      reminder_minutes: reminder_minutes || 15,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const requestKey = resolveAdCreateRequestKey({
+      request,
+      bodyKey: source_request_key,
+      ad: adInsertPayload,
+      skipDuplicateCheck: skip_duplicate_check === true,
+    });
+    const createResult = await createAdAtomic({
+      supabase,
+      ad: {
+        ...adInsertPayload,
+        source_request_key: requestKey.key,
+      },
+    });
+    const createdAd = createResult?.ad || null;
+    if (!createdAd) {
+      throw new Error("Ad create returned no ad row.");
+    }
 
-    if (createError) throw createError;
+    if (createResult.created !== true && createResult.reason === "idempotency_reuse") {
+      if (requestKey.source === "auto" && skip_duplicate_check !== true) {
+        return Response.json(
+          duplicateWarningPayload({
+            duplicateAd: createdAd,
+            advertiser,
+          }),
+          { status: 200 },
+        );
+      }
+
+      return Response.json({
+        ad: createdAd,
+        deduplicated: true,
+        created: false,
+      });
+    }
 
     // Fire-and-forget: updates a cached field, slight staleness is acceptable
     void updateAdvertiserNextAdDate(advertiser).catch((err) =>

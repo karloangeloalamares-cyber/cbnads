@@ -1,4 +1,5 @@
 import { getSupabaseAdmin, hasSupabaseAdminConfig } from "../../../../lib/supabaseAdmin.js";
+import { EMAIL_MAX_LENGTH } from "../../../../lib/inputLimits.js";
 
 const readTrustedAppOrigin = () => {
     const candidates = [
@@ -32,7 +33,7 @@ export async function POST(request) {
         const body = await request.json();
         const email = String(body?.email || "").trim().toLowerCase();
 
-        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (!email || email.length > EMAIL_MAX_LENGTH || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
             // Return success even for invalid emails to prevent enumeration.
             return Response.json({ success: true });
         }

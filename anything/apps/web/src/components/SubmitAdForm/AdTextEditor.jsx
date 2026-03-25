@@ -1,9 +1,8 @@
 import { useRef } from "react";
 import { List } from "lucide-react";
 import { EmojiPicker } from "@/components/EmojiPicker";
+import { AD_TEXT_MAX_LENGTH } from "@/lib/inputLimits";
 import { insertAtCursor, toggleBulletList, wrapSelection } from "@/utils/whatsappFormatter";
-
-const MAX_AD_TEXT_LENGTH = 1500;
 
 export function AdTextEditor({
   label = "Ad Text",
@@ -11,7 +10,7 @@ export function AdTextEditor({
   value = "",
   onChange,
   placeholder = "Enter your ad copy... Use *bold*, _italic_, ~strikethrough~, ```code```, or bullet lists",
-  maxLength = MAX_AD_TEXT_LENGTH,
+  maxLength = AD_TEXT_MAX_LENGTH,
   className = "",
 }) {
   const textareaRef = useRef(null);

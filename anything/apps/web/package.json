@@ -12,7 +12,8 @@
 		"typecheck": "react-router typegen && tsc --noEmit",
 		"test": "vitest run",
 		"smoke:launch": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/launch-smoke.ps1",
-		"seed:demo": "node ./scripts/seed-supabase-demo.mjs"
+		"seed:demo": "node ./scripts/seed-supabase-demo.mjs",
+		"stress:ads": "node ./scripts/stress-create-ads.mjs"
 	},
 	"dependencies": {
 		"@auth/core": "^0.34.3",

@@ -71,6 +71,7 @@ describe("upload signed-url route", () => {
         body: JSON.stringify({
           fileName: "creative.png",
           mimeType: "image/png",
+          fileSize: 1024,
         }),
       }),
     );
@@ -109,11 +110,34 @@ describe("upload signed-url route", () => {
         body: JSON.stringify({
           fileName: "creative.mp4",
           mimeType: "video/mp4",
+          fileSize: 2048,
         }),
       }),
     );
 
     expect(response.status).toBe(200);
     expect(createSignedUploadUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects oversized signed upload requests before issuing a token", async () => {
+    const response = await POST(
+      new Request("https://example.com/api/upload/signed-url", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          fileName: "creative.pdf",
+          mimeType: "application/pdf",
+          fileSize: (50 * 1024 * 1024) + 1,
+        }),
+      }),
+    );
+
+    const data = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(data.error).toContain("Document uploads must be under 50 MB");
+    expect(createSignedUploadUrl).not.toHaveBeenCalled();
   });
 });

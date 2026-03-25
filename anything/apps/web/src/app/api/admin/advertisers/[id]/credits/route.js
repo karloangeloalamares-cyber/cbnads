@@ -8,6 +8,11 @@ import {
   invoicePaymentProviderRequiresReference,
   normalizeInvoicePaymentProvider,
 } from "../../../../../../lib/invoicePayment.js";
+import {
+  CREDIT_REASON_MAX_LENGTH,
+  PAYMENT_NOTE_MAX_LENGTH,
+  PAYMENT_REFERENCE_MAX_LENGTH,
+} from "../../../../../../lib/inputLimits.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -52,6 +57,27 @@ export async function POST(request, { params }) {
     const paymentNote = String(body?.payment_note || "").trim();
     const paidDate = String(body?.paid_date || "").trim() || getTodayInAppTimeZone();
     const requirePaymentDetails = body?.require_payment_details === true;
+
+    if (reason.length > CREDIT_REASON_MAX_LENGTH) {
+      return Response.json(
+        { error: `Reason must be ${CREDIT_REASON_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (paymentReference.length > PAYMENT_REFERENCE_MAX_LENGTH) {
+      return Response.json(
+        { error: `Payment reference must be ${PAYMENT_REFERENCE_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (paymentNote.length > PAYMENT_NOTE_MAX_LENGTH) {
+      return Response.json(
+        { error: `Payment note must be ${PAYMENT_NOTE_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
 
     if (!amount) {
       return Response.json({ error: "A non-zero amount is required" }, { status: 400 });

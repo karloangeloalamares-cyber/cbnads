@@ -1,3 +1,5 @@
+import { NOTES_MAX_LENGTH } from "@/lib/inputLimits";
+
 export function NotesSection({ notes, onChange }) {
   return (
     <div>
@@ -13,6 +15,7 @@ export function NotesSection({ notes, onChange }) {
           value={notes}
           onChange={(e) => onChange("notes", e.target.value)}
           rows={3}
+          maxLength={NOTES_MAX_LENGTH}
           placeholder="Any additional details or special requests..."
           className="w-full text-sm text-gray-900 placeholder:text-gray-400 bg-transparent focus:outline-none resize-none"
         />

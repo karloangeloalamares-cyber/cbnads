@@ -2,6 +2,18 @@ import { getSupabaseAdmin, adminBucketName } from "../../../../lib/supabaseAdmin
 import crypto from "node:crypto";
 import path from "node:path";
 import { enforceUploadAccess } from "../../utils/upload-access.js";
+import {
+  FILE_NAME_MAX_LENGTH,
+  MEDIA_UPLOAD_MAX_BYTES,
+  mediaUploadLimitLabel,
+} from "../../../../lib/inputLimits.js";
+import {
+  AUDIO_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
+  getFileExtension,
+  IMAGE_EXTENSIONS,
+  VIDEO_EXTENSIONS,
+} from "../../../../lib/media.js";
 
 const BUCKET = adminBucketName("uploads");
 const PUBLIC_SIGNED_UPLOAD_MAX_ATTEMPTS = 40;
@@ -51,8 +63,35 @@ function guessExtension(mimeType) {
   return map[mimeType] || "";
 }
 
+const classifyUpload = ({ fileName, mimeType }) => {
+  const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (normalizedMimeType.startsWith("image/") || IMAGE_EXTENSIONS.has(extension)) {
+    return "image";
+  }
+  if (normalizedMimeType.startsWith("video/") || VIDEO_EXTENSIONS.has(extension)) {
+    return "video";
+  }
+  if (normalizedMimeType.startsWith("audio/") || AUDIO_EXTENSIONS.has(extension)) {
+    return "audio";
+  }
+  if (normalizedMimeType === "application/pdf" || DOCUMENT_EXTENSIONS.has(extension)) {
+    return "document";
+  }
+  return "";
+};
+
+const sanitizeFileName = (value) => {
+  const normalized = String(value || "").trim().replace(/[\r\n]+/g, " ");
+  if (!normalized) {
+    return "upload";
+  }
+  return (path.basename(normalized).slice(0, FILE_NAME_MAX_LENGTH) || "upload");
+};
+
 const buildStoragePath = (fileName, mimeType) => {
-  const safeName = String(fileName || "").trim() || "upload";
+  const safeName = sanitizeFileName(fileName);
   const ext = path.extname(safeName) || guessExtension(mimeType);
   return `ad-media/${Date.now()}-${crypto.randomUUID().slice(0, 8)}${ext}`;
 };
@@ -69,8 +108,24 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const fileName = String(body?.fileName || "").trim() || "upload";
+    const fileName = sanitizeFileName(body?.fileName || "upload");
     const mimeType = String(body?.mimeType || "application/octet-stream").trim();
+    const fileSize = Number(body?.fileSize || body?.sizeBytes || 0);
+    const mediaKind = classifyUpload({ fileName, mimeType });
+
+    if (!mediaKind) {
+      return Response.json({ error: "Unsupported file type." }, { status: 400 });
+    }
+
+    if (Number.isFinite(fileSize) && fileSize > 0) {
+      const maxBytes = MEDIA_UPLOAD_MAX_BYTES[mediaKind] || MEDIA_UPLOAD_MAX_BYTES.file;
+      if (fileSize > maxBytes) {
+        return Response.json(
+          { error: `File too large. ${mediaKind[0].toUpperCase()}${mediaKind.slice(1)} uploads must be under ${mediaUploadLimitLabel(mediaKind)}.` },
+          { status: 413 },
+        );
+      }
+    }
 
     const supabase = getSupabaseAdmin();
     await ensureBucketExists(supabase);

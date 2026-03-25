@@ -5,6 +5,15 @@ import {
   normalizeUSPhoneNumber,
 } from "../../../../lib/phone.js";
 import { hasSupabaseAdminConfig } from "../../../../lib/supabaseAdmin.js";
+import {
+  TELEGRAM_CHAT_ID_MAX_COUNT,
+  TELEGRAM_CHAT_ID_MAX_LENGTH,
+  TELEGRAM_LABEL_MAX_LENGTH,
+  WHATSAPP_LABEL_MAX_LENGTH,
+  WHATSAPP_RECIPIENT_MAX_COUNT,
+  WHATSAPP_TEMPLATE_LANGUAGE_MAX_LENGTH,
+  WHATSAPP_TEMPLATE_NAME_MAX_LENGTH,
+} from "../../../../lib/inputLimits.js";
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -44,12 +53,12 @@ const normalizeTelegramChatIds = (value) => {
   const normalized = [];
   const seen = new Set();
 
-  for (const entry of value) {
+  for (const entry of value.slice(0, TELEGRAM_CHAT_ID_MAX_COUNT)) {
     if (!entry || typeof entry !== "object") {
       continue;
     }
 
-    const chatId = String(entry.chat_id || "").trim();
+    const chatId = String(entry.chat_id || "").trim().slice(0, TELEGRAM_CHAT_ID_MAX_LENGTH);
     if (!chatId) {
       continue;
     }
@@ -61,8 +70,8 @@ const normalizeTelegramChatIds = (value) => {
     seen.add(key);
 
     normalized.push({
-      id: String(entry.id || chatId).trim() || chatId,
-      label: String(entry.label || chatId).trim() || chatId,
+      id: String(entry.id || chatId).trim().slice(0, TELEGRAM_CHAT_ID_MAX_LENGTH) || chatId,
+      label: String(entry.label || chatId).trim().slice(0, TELEGRAM_LABEL_MAX_LENGTH) || chatId,
       chat_id: chatId,
       is_active: entry.is_active !== false,
       created_at: entry.created_at || null,
@@ -96,7 +105,7 @@ const normalizeWhatsAppRecipients = (value) => {
   const normalized = [];
   const seen = new Set();
 
-  for (const entry of value) {
+  for (const entry of value.slice(0, WHATSAPP_RECIPIENT_MAX_COUNT)) {
     if (!entry || typeof entry !== "object") {
       continue;
     }
@@ -115,8 +124,8 @@ const normalizeWhatsAppRecipients = (value) => {
     seen.add(key);
 
     normalized.push({
-      id: String(entry.id || phone).trim() || phone,
-      label: String(entry.label || phone).trim() || phone,
+      id: String(entry.id || phone).trim().slice(0, 80) || phone,
+      label: String(entry.label || phone).trim().slice(0, WHATSAPP_LABEL_MAX_LENGTH) || phone,
       phone_e164: phone,
       is_active: entry.is_active !== false,
       created_at: entry.created_at || null,
@@ -137,8 +146,9 @@ const normalizeWhatsAppSettings = (value) => {
     .trim()
     .toLowerCase();
   const sendMode = WHATSAPP_SEND_MODES.has(sendModeRaw) ? sendModeRaw : "text";
-  const templateName = String(source?.template_name || "").trim();
-  const templateLanguage = String(source?.template_language || "en_US").trim() || "en_US";
+  const templateName = String(source?.template_name || "").trim().slice(0, WHATSAPP_TEMPLATE_NAME_MAX_LENGTH);
+  const templateLanguage =
+    String(source?.template_language || "en_US").trim().slice(0, WHATSAPP_TEMPLATE_LANGUAGE_MAX_LENGTH) || "en_US";
 
   return {
     enabled: source?.enabled !== false,
@@ -255,6 +265,20 @@ export async function POST(request) {
       "whatsapp_settings",
     );
     const normalizedWhatsAppRecipients = normalizeWhatsAppRecipients(body?.whatsapp_recipients);
+
+    if (Array.isArray(body?.telegram_chat_ids) && body.telegram_chat_ids.length > TELEGRAM_CHAT_ID_MAX_COUNT) {
+      return Response.json(
+        { error: `Telegram recipients are limited to ${TELEGRAM_CHAT_ID_MAX_COUNT}.` },
+        { status: 400 },
+      );
+    }
+
+    if (Array.isArray(body?.whatsapp_recipients) && body.whatsapp_recipients.length > WHATSAPP_RECIPIENT_MAX_COUNT) {
+      return Response.json(
+        { error: `WhatsApp recipients are limited to ${WHATSAPP_RECIPIENT_MAX_COUNT}.` },
+        { status: 400 },
+      );
+    }
 
     if (normalizedPhoneNumber && !isCompleteUSPhoneNumber(normalizedPhoneNumber)) {
       return Response.json(

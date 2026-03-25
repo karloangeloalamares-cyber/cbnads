@@ -132,6 +132,7 @@ async function getSignedUploadPayload(file) {
       body: JSON.stringify({
         fileName: file.name,
         mimeType: file.type || "application/octet-stream",
+        fileSize: Number(file.size || 0),
       }),
     });
   } catch {

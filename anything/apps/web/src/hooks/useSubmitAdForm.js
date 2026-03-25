@@ -17,6 +17,7 @@ import {
 import { appToast } from "@/lib/toast";
 import { clampWeeks } from "@/lib/multiWeekBooking";
 import { useAccountSetup } from "./useAccountSetup";
+import { CUSTOM_DATE_MAX_COUNT } from "@/lib/inputLimits";
 
 const SUBMISSION_NOTIFICATION_EVENT = "cbn:pending-submission-created";
 const SUBMISSION_NOTIFICATION_STORAGE_KEY = "cbn:pending-submission-created";
@@ -149,6 +150,11 @@ export function useSubmitAdForm() {
 
   const addCustomDate = () => {
     if (!customDate) return;
+
+    if (formData.custom_dates.length >= CUSTOM_DATE_MAX_COUNT) {
+      showSubmitError(`You can add up to ${CUSTOM_DATE_MAX_COUNT} custom dates.`);
+      return;
+    }
 
     if (isBeforeTodayInAppTimeZone(customDate)) {
       showSubmitError("Cannot select past dates");

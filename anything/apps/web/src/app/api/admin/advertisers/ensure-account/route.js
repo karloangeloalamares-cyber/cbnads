@@ -10,6 +10,11 @@ import {
   sendAdvertiserVerificationEmail,
   upsertAdvertiserProfile,
 } from "../../../utils/advertiser-auth.js";
+import {
+  ADVERTISER_NAME_MAX_LENGTH,
+  EMAIL_MAX_LENGTH,
+  PERSON_NAME_MAX_LENGTH,
+} from "../../../../../lib/inputLimits.js";
 
 const buildMetadata = ({
   existingMetadata,
@@ -42,6 +47,24 @@ export async function POST(request) {
     const contactName = String(body?.contact_name || "").trim();
     const phoneNumber = String(body?.phone_number || body?.phone || "").trim();
     const email = normalizeEmail(body?.email);
+
+    if (email.length > EMAIL_MAX_LENGTH) {
+      return Response.json({ error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` }, { status: 400 });
+    }
+
+    if (advertiserName.length > ADVERTISER_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Advertiser name must be ${ADVERTISER_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
+
+    if (contactName.length > PERSON_NAME_MAX_LENGTH) {
+      return Response.json(
+        { error: `Contact name must be ${PERSON_NAME_MAX_LENGTH} characters or fewer.` },
+        { status: 400 },
+      );
+    }
 
     if (!email) {
       return Response.json({ error: "Email is required." }, { status: 400 });
