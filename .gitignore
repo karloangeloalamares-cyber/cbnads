@@ -8,6 +8,7 @@ node_modules/
 
 # Build/cache
 .react-router/
+.vitest/
 dist/
 build/
 .next/
@@ -24,3 +25,6 @@ pnpm-debug.log*
 Thumbs.db
 .vercel
 .env*.local
+
+# Local scratch files
+tmp-home*.png
