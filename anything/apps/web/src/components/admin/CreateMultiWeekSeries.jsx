@@ -3,7 +3,6 @@ import { appToast } from "@/lib/toast";
 import { MediaUploadSection } from "@/components/SubmitAdForm/MediaUploadSection";
 import CreateAdAdvertiserField from "@/components/CreateAdAdvertiserField";
 import { AdTextEditor } from "@/components/SubmitAdForm/AdTextEditor";
-import { LivePreviewRail } from "@/components/preview/LivePreviewRail";
 import { AdPreview } from "@/components/SubmitAdForm/AdPreview";
 import { AvailabilityDateField } from "@/components/SubmitAdForm/AvailabilityDateField";
 import { TimeSelect } from "@/components/SubmitAdForm/ScheduleSection";
@@ -273,10 +272,6 @@ export default function CreateMultiWeekSeries({
     });
   }, [blockedTimesMap, loadBlockedTimesForDate, weekAds]);
 
-  const togglePreviewWeek = (index) => {
-    setPreviewWeekIndex((current) => (current === index ? null : index));
-  };
-
   const buildPreviewData = (index) => {
     const weekIndex = typeof index === "number" ? index : null;
     const advertiserName = selectedAdvertiser?.advertiser_name || selectedAdvertiser?.name || "";
@@ -293,28 +288,6 @@ export default function CreateMultiWeekSeries({
       post_time: week?.schedule_tbd ? "" : String(week?.post_time || ""),
     };
   };
-
-  const previewTitle =
-    typeof previewWeekIndex === "number" ? `Week ${previewWeekIndex + 1}` : "Week Preview";
-  const previewControls =
-    normalizedWeeks > 1 ? (
-      <div className="grid grid-cols-2 gap-2">
-        {Array.from({ length: normalizedWeeks }).map((_, index) => (
-          <button
-            key={index}
-            type="button"
-            onClick={() => setPreviewWeekIndex(index)}
-            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-              previewWeekIndex === index
-                ? "border-gray-900 bg-gray-900 text-white"
-                : "border-white bg-white/80 text-gray-700 hover:border-gray-300"
-            }`}
-          >
-            {`Week ${index + 1}`}
-          </button>
-        ))}
-      </div>
-    ) : null;
 
   const submit = async () => {
     if (submitting) return;
@@ -460,14 +433,17 @@ export default function CreateMultiWeekSeries({
               <div key={index} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div className="text-sm font-semibold text-gray-900">Week {index + 1}</div>
-                  <label className="flex items-center gap-2 text-sm text-gray-700 select-none">
-                    <input
-                      type="checkbox"
-                      checked={previewWeekIndex === index}
-                      onChange={() => togglePreviewWeek(index)}
-                    />
-                    Preview
-                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewWeekIndex(index)}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                      previewWeekIndex === index
+                        ? "bg-gray-900 text-white"
+                        : "bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100"
+                    }`}
+                  >
+                    {previewWeekIndex === index ? "Previewing" : "View preview"}
+                  </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -735,14 +711,40 @@ export default function CreateMultiWeekSeries({
         </div>
       </div>
 
-      <div className="hidden lg:block w-[380px] xl:w-[420px] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0">
-        <LivePreviewRail
-          title={previewTitle}
-          description="Switch weeks to review copy, media, and schedule before you create the booking."
-          controls={previewControls}
-        >
-          <AdPreview formData={buildPreviewData(previewWeekIndex)} />
-        </LivePreviewRail>
+      <div className="hidden lg:flex w-[380px] xl:w-[420px] px-5 py-8 sm:px-6 sm:py-10 xl:py-12 flex-shrink-0">
+        <div className="sticky top-8 flex min-h-[720px] w-full flex-col items-center justify-start">
+          <div className="mb-4 w-full max-w-[332px]">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">
+                  Preview
+                </div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">
+                  {`Week ${(previewWeekIndex ?? 0) + 1}`}
+                </div>
+              </div>
+            </div>
+            {normalizedWeeks > 1 ? (
+              <div className="grid grid-cols-2 gap-2">
+                {Array.from({ length: normalizedWeeks }).map((_, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => setPreviewWeekIndex(index)}
+                    className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                      previewWeekIndex === index
+                        ? "border-gray-900 bg-gray-900 text-white"
+                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-300"
+                    }`}
+                  >
+                    {`Week ${index + 1}`}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <AdPreview formData={buildPreviewData(previewWeekIndex)} sticky={false} />
+        </div>
       </div>
     </div>
   );
