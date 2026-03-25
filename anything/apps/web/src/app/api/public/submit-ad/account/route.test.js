@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { findAuthUserByEmail } from "../../../utils/advertiser-auth.js";
 
 const {
   createUserMock,
@@ -193,5 +194,47 @@ describe("public submit-ad account route", () => {
     expect(data.error).toBe(
       "Password must be at least 8 characters long and include letters, numbers, and special characters.",
     );
+  });
+
+  it("returns a generic success response for existing verified advertiser accounts", async () => {
+    vi.mocked(findAuthUserByEmail).mockResolvedValueOnce({
+      id: "user-existing",
+      user_metadata: {
+        role: "Advertiser",
+        account_verified: true,
+      },
+      app_metadata: {
+        role: "Advertiser",
+        advertiser_id: "adv-1",
+      },
+    });
+
+    const response = await POST(
+      new Request("https://example.com/api/public/submit-ad/account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          advertiserName: "Acme Co",
+          contactName: "Jordan Smith",
+          phoneNumber: "(212) 555-0100",
+          email: "jordan@example.com",
+          password: "Password1!",
+          confirmPassword: "Password1!",
+        }),
+      }),
+    );
+
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data).toMatchObject({
+      success: true,
+      email: "jordan@example.com",
+      advertiserId: "adv-1",
+      verificationRequired: true,
+      verificationEmailSent: true,
+    });
+    expect(createUserMock).not.toHaveBeenCalled();
+    expect(updateUserByIdMock).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,10 @@ vi.mock("../../../lib/supabaseAdmin.js", () => ({
   getSupabaseAdmin: vi.fn(),
 }));
 
+vi.mock("../utils/media-asset-url.js", () => ({
+  buildMediaAssetUrl: vi.fn(() => "/api/upload/object?token=test-token"),
+}));
+
 import { enforceUploadAccess } from "../utils/upload-access.js";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin.js";
 import { POST } from "./route.js";
@@ -19,29 +23,27 @@ describe("upload route", () => {
   let supabase;
   let listBuckets;
   let createBucket;
+  let updateBucket;
   let upload;
-  let getPublicUrl;
 
   beforeEach(() => {
     vi.clearAllMocks();
 
     listBuckets = vi.fn().mockResolvedValue({
-      data: [{ name: "test_uploads" }],
+      data: [{ name: "test_uploads", public: false }],
       error: null,
     });
     createBucket = vi.fn().mockResolvedValue({ error: null });
+    updateBucket = vi.fn().mockResolvedValue({ error: null });
     upload = vi.fn().mockResolvedValue({ error: null });
-    getPublicUrl = vi.fn().mockReturnValue({
-      data: { publicUrl: "https://example.com/ad-media/test.png" },
-    });
 
     supabase = {
       storage: {
         listBuckets,
         createBucket,
+        updateBucket,
         from: vi.fn(() => ({
           upload,
-          getPublicUrl,
         })),
       },
     };
@@ -71,7 +73,7 @@ describe("upload route", () => {
     const data = await response.json();
 
     expect(response.status).toBe(200);
-    expect(data.url).toBe("https://example.com/ad-media/test.png");
+    expect(data.url).toBe("/api/upload/object?token=test-token");
     expect(data.mimeType).toBe("image/png");
     expect(enforceUploadAccess).toHaveBeenCalledWith(
       expect.any(Request),

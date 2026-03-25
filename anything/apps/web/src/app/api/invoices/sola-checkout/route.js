@@ -40,22 +40,28 @@ export async function POST(request) {
     }
 
     const supabase = db();
-    const { data: invoice, error: invoiceError } = await supabase
+    const advertiserScope = isAdvertiserUser(auth.user)
+      ? await resolveAdvertiserScope(auth.user)
+      : null;
+    if (isAdvertiserUser(auth.user) && !advertiserScope?.id) {
+      return Response.json({ error: "Invoice not found." }, { status: 404 });
+    }
+
+    let invoiceQuery = supabase
       .from(table("invoices"))
       .select("*")
       .eq("id", invoiceId)
-      .is("deleted_at", null)
-      .maybeSingle();
+      .is("deleted_at", null);
+    if (advertiserScope?.id) {
+      invoiceQuery = invoiceQuery.eq("advertiser_id", advertiserScope.id);
+    }
+    const { data: invoice, error: invoiceError } = await invoiceQuery.maybeSingle();
     if (invoiceError) {
       throw invoiceError;
     }
     if (!invoice) {
       return Response.json({ error: "Invoice not found." }, { status: 404 });
     }
-
-    const advertiserScope = isAdvertiserUser(auth.user)
-      ? await resolveAdvertiserScope(auth.user)
-      : null;
     if (advertiserScope && !matchesAdvertiserScope(invoice, advertiserScope)) {
       return Response.json({ error: "Invoice not found." }, { status: 404 });
     }

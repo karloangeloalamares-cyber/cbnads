@@ -158,13 +158,30 @@ export async function GET(request) {
       ? await resolveAdvertiserScope(auth.user)
       : null;
 
+    if (isAdvertiserUser(auth.user) && !advertiserScope?.id) {
+      if (invoiceId) {
+        return Response.json({ error: "Invoice not found" }, { status: 404 });
+      }
+      return Response.json({
+        invoices: [],
+        summary: {
+          collected: 0,
+          outstanding: 0,
+          overdueCount: 0,
+        },
+      });
+    }
+
     if (invoiceId) {
-      const { data: invoice, error: invoiceError } = await supabase
+      let invoiceQuery = supabase
         .from(table("invoices"))
         .select("*")
         .eq("id", invoiceId)
-        .is("deleted_at", null)
-        .maybeSingle();
+        .is("deleted_at", null);
+      if (advertiserScope?.id) {
+        invoiceQuery = invoiceQuery.eq("advertiser_id", advertiserScope.id);
+      }
+      const { data: invoice, error: invoiceError } = await invoiceQuery.maybeSingle();
       if (invoiceError) throw invoiceError;
       if (!invoice) {
         return Response.json({ error: "Invoice not found" }, { status: 404 });
@@ -193,7 +210,9 @@ export async function GET(request) {
     if (status && status !== "All") {
       query = query.eq("status", status);
     }
-    if (!advertiserScope && advertiser_id) {
+    if (advertiserScope?.id) {
+      query = query.eq("advertiser_id", advertiserScope.id);
+    } else if (!advertiserScope && advertiser_id) {
       query = query.eq("advertiser_id", advertiser_id);
     }
 

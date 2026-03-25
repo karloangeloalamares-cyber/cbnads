@@ -27,6 +27,10 @@ export async function GET(request, { params }) {
       ? await resolveAdvertiserScope(auth.user)
       : null;
 
+    if (isAdvertiserUser(auth.user) && !advertiserScope?.id) {
+      return Response.json({ invoices: [] });
+    }
+
     if (advertiserScope) {
       const { data: ad, error: adError } = await supabase
         .from(table("ads"))
@@ -57,7 +61,7 @@ export async function GET(request, { params }) {
 
     const { data: invoices, error: invoicesError } = await supabase
       .from(table("invoices"))
-      .select("id, invoice_number, advertiser_name, issue_date, status, total, amount_paid, created_at")
+      .select("id, invoice_number, advertiser_id, advertiser_name, issue_date, status, total, amount_paid, created_at")
       .in("id", invoiceIds)
       .is("deleted_at", null)
       .order("created_at", { ascending: false });

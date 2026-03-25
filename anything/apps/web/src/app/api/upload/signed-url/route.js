@@ -14,6 +14,7 @@ import {
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
 } from "../../../../lib/media.js";
+import { buildMediaAssetUrl } from "../../utils/media-asset-url.js";
 
 const BUCKET = adminBucketName("uploads");
 const PUBLIC_SIGNED_UPLOAD_MAX_ATTEMPTS = 40;
@@ -25,16 +26,26 @@ const ensureBucketExists = async (supabase) => {
     throw listError;
   }
 
-  const bucketExists = buckets?.some((bucket) => bucket.name === BUCKET);
-  if (bucketExists) {
+  const existingBucket = buckets?.find((bucket) => bucket.name === BUCKET) || null;
+  if (existingBucket?.public === false) {
     return;
   }
 
-  const { error: createError } = await supabase.storage.createBucket(BUCKET, {
-    public: true,
+  if (!existingBucket) {
+    const { error: createError } = await supabase.storage.createBucket(BUCKET, {
+      public: false,
+    });
+    if (createError) {
+      throw createError;
+    }
+    return;
+  }
+
+  const { error: updateError } = await supabase.storage.updateBucket(BUCKET, {
+    public: false,
   });
-  if (createError) {
-    throw createError;
+  if (updateError) {
+    throw updateError;
   }
 };
 
@@ -139,14 +150,12 @@ export async function POST(request) {
       throw error;
     }
 
-    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
-
     return Response.json({
       bucket: BUCKET,
       path: storagePath,
       token: data.token,
       signedUrl: data.signedUrl,
-      publicUrl: publicUrlData.publicUrl,
+      url: buildMediaAssetUrl({ bucket: BUCKET, path: storagePath }),
     });
   } catch (error) {
     console.error("[upload/signed-url] Failed:", error);

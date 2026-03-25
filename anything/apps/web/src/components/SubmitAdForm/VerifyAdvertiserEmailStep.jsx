@@ -47,11 +47,12 @@ export function VerifyAdvertiserEmailStep({
           <h1 className="text-4xl font-bold text-gray-900 mb-4">Check your email</h1>
 
           <p className="text-lg text-gray-600 mb-3">
-            We sent a verification link to <span className="text-gray-900">{email}</span>.
+            Check <span className="text-gray-900">{email}</span> for next steps.
           </p>
 
           <p className="text-sm text-gray-500 mb-8">
-            Verify the account first, then sign in as Advertiser.
+            If this account still needs verification, we&apos;ll email a link there. If
+            it is already active, sign in as Advertiser instead.
           </p>
 
           <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-8">

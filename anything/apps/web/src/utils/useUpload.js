@@ -190,15 +190,15 @@ async function uploadFileDirectly(file) {
     return uploadFileViaApi(file);
   }
 
-  const publicUrl = String(signedUpload.publicUrl || "").trim();
-  if (!publicUrl) {
+  const assetUrl = String(signedUpload.url || signedUpload.publicUrl || "").trim();
+  if (!assetUrl) {
     return uploadFileViaApi(file);
   }
 
   await uploadFileToSignedUrl(file, signedUpload);
 
   return {
-    url: publicUrl,
+    url: assetUrl,
     mimeType: file.type || null,
   };
 }

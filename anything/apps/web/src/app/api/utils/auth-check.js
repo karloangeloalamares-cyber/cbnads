@@ -146,10 +146,6 @@ const attachAdvertiserIdentity = async (supabase, user, fallbackName = "") => {
     advertiserRow = await loadAdvertiserByEmail(supabase, user.email);
   }
 
-  if (!advertiserRow && fallbackName) {
-    advertiserRow = await loadAdvertiserByName(supabase, fallbackName);
-  }
-
   return {
     ...user,
     advertiser_id: advertiserRow?.id || advertiserId || null,
@@ -412,13 +408,13 @@ export async function resolveAdvertiserScope(user) {
     advertiserRow = await loadAdvertiserByEmail(supabase, email);
   }
 
-  if (!advertiserRow && advertiserName) {
-    advertiserRow = await loadAdvertiserByName(supabase, advertiserName);
+  if (!advertiserRow && !advertiserId) {
+    return null;
   }
 
   return {
     id: advertiserRow?.id || advertiserId || null,
-    name: advertiserRow?.advertiser_name || advertiserName || null,
+    name: advertiserRow?.advertiser_name || null,
     email: normalizeEmail(advertiserRow?.email || email) || null,
   };
 }
@@ -430,6 +426,7 @@ export const matchesAdvertiserScope = (
     advertiserIdFields = ["advertiser_id"],
     advertiserNameFields = ["advertiser_name", "advertiser"],
     emailFields = ["email", "contact_email"],
+    allowAdvertiserNameFallback = false,
   } = {},
 ) => {
   if (!row || !scope) {
@@ -437,27 +434,37 @@ export const matchesAdvertiserScope = (
   }
 
   const scopeId = String(scope.id || "").trim();
+  let rowHasAdvertiserId = false;
   if (scopeId) {
     for (const field of advertiserIdFields) {
-      if (String(row?.[field] || "").trim() === scopeId) {
+      const rowValue = String(row?.[field] || "").trim();
+      if (!rowValue) {
+        continue;
+      }
+      rowHasAdvertiserId = true;
+      if (rowValue === scopeId) {
         return true;
       }
     }
   }
 
-  const scopeName = normalizeText(scope.name);
-  if (scopeName) {
-    for (const field of advertiserNameFields) {
-      if (normalizeText(row?.[field]) === scopeName) {
-        return true;
-      }
-    }
+  if (scopeId && rowHasAdvertiserId) {
+    return false;
   }
 
   const scopeEmail = normalizeEmail(scope.email);
   if (scopeEmail) {
     for (const field of emailFields) {
       if (normalizeEmail(row?.[field]) === scopeEmail) {
+        return true;
+      }
+    }
+  }
+
+  const scopeName = normalizeText(scope.name);
+  if (allowAdvertiserNameFallback && scopeName) {
+    for (const field of advertiserNameFields) {
+      if (normalizeText(row?.[field]) === scopeName) {
         return true;
       }
     }

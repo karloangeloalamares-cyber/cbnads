@@ -116,15 +116,6 @@ export function useAccountSetup() {
 
             const data = await response.json();
             if (!response.ok) {
-                if (
-                    response.status === 409 &&
-                    data?.code === EXISTING_ACCOUNT_ERROR_CODE
-                ) {
-                    setExistingAccountPrompt(
-                        buildExistingAccountPrompt(data, accountData.email),
-                    );
-                    return;
-                }
                 throw new Error(data.error || "Failed to create advertiser account.");
             }
 
@@ -363,7 +354,9 @@ export function useAccountSetup() {
                 throw new Error(data.error || "Failed to resend verification email.");
             }
 
-            setResendMessage(`Verification email sent to ${data.email}.`);
+            setResendMessage(
+                `If ${email} has an advertiser account that still needs verification, we'll send a link there.`,
+            );
         } catch (err) {
             console.error("Error resending verification email:", err);
             setResendError(err.message || "Failed to resend verification email.");

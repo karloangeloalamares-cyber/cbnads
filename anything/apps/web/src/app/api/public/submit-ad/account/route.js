@@ -26,8 +26,6 @@ import {
 
 const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 8;
-const EXISTING_ACCOUNT_ERROR_CODE = "existing_advertiser_account";
-
 const normalizeAccountCreationError = (error) => {
   const message = String(error?.message || "").trim();
   const normalizedPasswordError = normalizePasswordStrengthErrorMessage(message);
@@ -46,17 +44,6 @@ const normalizeAccountCreationError = (error) => {
   return null;
 };
 
-const existingAdvertiserAccountPayload = (email) => ({
-  code: EXISTING_ACCOUNT_ERROR_CODE,
-  title: "You already have an advertiser account",
-  error:
-    "This email is already connected to a CBN Ads advertiser account. Sign in to your dashboard to manage submissions, ads, and billing.",
-  description:
-    "This email is already connected to a CBN Ads advertiser account. Sign in to your dashboard to manage submissions, ads, and billing.",
-  email,
-  ctaLabel: "Log in to dashboard",
-});
-
 const buildMetadata = ({
   existingMetadata,
   advertiserId,
@@ -72,6 +59,20 @@ const buildMetadata = ({
   full_name: contactName || advertiserName || null,
   account_verified: false,
   signup_source: "submit_ad",
+});
+
+const buildAccountSetupSuccessPayload = ({
+  email,
+  advertiserId,
+  pendingAdId,
+  verificationEmailSent = true,
+}) => ({
+  success: true,
+  email,
+  advertiserId,
+  pendingAdId,
+  verificationRequired: true,
+  verificationEmailSent,
 });
 
 export async function POST(request) {
@@ -204,8 +205,11 @@ export async function POST(request) {
 
       if (existingUser?.user_metadata?.account_verified === true) {
         return Response.json(
-          existingAdvertiserAccountPayload(normalizedEmail),
-          { status: 409 },
+          buildAccountSetupSuccessPayload({
+            email: normalizedEmail,
+            advertiserId: advertiser.id,
+            pendingAdId,
+          }),
         );
       }
 
@@ -369,14 +373,14 @@ export async function POST(request) {
       );
     }
 
-    return Response.json({
-      success: true,
-      email: normalizedEmail,
-      advertiserId: advertiser.id,
-      pendingAdId,
-      verificationRequired: true,
-      verificationEmailSent,
-    });
+    return Response.json(
+      buildAccountSetupSuccessPayload({
+        email: normalizedEmail,
+        advertiserId: advertiser.id,
+        pendingAdId,
+        verificationEmailSent,
+      }),
+    );
   } catch (error) {
     console.error("[submit-ad/account] Failed to create advertiser account:", error);
     const normalizedError = normalizeAccountCreationError(error);

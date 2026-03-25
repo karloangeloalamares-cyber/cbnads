@@ -14,6 +14,7 @@ import {
     IMAGE_EXTENSIONS,
     VIDEO_EXTENSIONS,
 } from "../../../lib/media.js";
+import { buildMediaAssetUrl } from "../utils/media-asset-url.js";
 
 const BUCKET = adminBucketName("uploads");
 const PUBLIC_UPLOAD_MAX_ATTEMPTS = 20;
@@ -155,13 +156,24 @@ export async function POST(request) {
 
         // Ensure the bucket exists (create if not)
         const { data: buckets } = await supabase.storage.listBuckets();
-        const bucketExists = buckets?.some((b) => b.name === BUCKET);
-        if (!bucketExists) {
+        const existingBucket = buckets?.find((bucket) => bucket.name === BUCKET) || null;
+        if (!existingBucket) {
             const { error: createError } = await supabase.storage.createBucket(BUCKET, {
-                public: true,
+                public: false,
             });
             if (createError) {
                 console.error("[upload] Failed to create bucket:", createError);
+                return Response.json(
+                    { error: "Internal Server Error" },
+                    { status: 500 },
+                );
+            }
+        } else if (existingBucket.public !== false) {
+            const { error: updateBucketError } = await supabase.storage.updateBucket(BUCKET, {
+                public: false,
+            });
+            if (updateBucketError) {
+                console.error("[upload] Failed to update bucket visibility:", updateBucketError);
                 return Response.json(
                     { error: "Internal Server Error" },
                     { status: 500 },
@@ -185,13 +197,10 @@ export async function POST(request) {
             );
         }
 
-        // Get the public URL
-        const { data: urlData } = supabase.storage
-            .from(BUCKET)
-            .getPublicUrl(storagePath);
-
         return Response.json({
-            url: urlData.publicUrl,
+            url: buildMediaAssetUrl({ bucket: BUCKET, path: storagePath }),
+            bucket: BUCKET,
+            path: storagePath,
             mimeType,
         });
     } catch (error) {

@@ -51,21 +51,23 @@ export const getAdvertiserAuthBaseUrl = (request) => {
     "AUTH_URL",
     "NEXT_PUBLIC_APP_URL",
     "VITE_APP_URL",
+    "VITE_PUBLIC_APP_URL",
   );
   if (configured) {
     try {
       return new URL(configured).toString().replace(/\/$/, "");
     } catch {
-      // Fall back to the request origin below.
+      // Fall through to the local dev fallback below.
     }
   }
 
-  try {
-    const url = new URL(request.url);
-    return `${url.protocol}//${url.host}`;
-  } catch {
+  if (process.env.NODE_ENV !== "production") {
     return "http://localhost:4000";
   }
+
+  throw new Error(
+    "Missing configuration: APP_URL, AUTH_URL, NEXT_PUBLIC_APP_URL, VITE_APP_URL, or VITE_PUBLIC_APP_URL",
+  );
 };
 
 export const assertAdvertiserVerificationConfig = () => {

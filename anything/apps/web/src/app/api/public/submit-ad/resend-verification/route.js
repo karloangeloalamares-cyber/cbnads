@@ -29,49 +29,32 @@ export async function POST(request) {
     const supabase = db();
     const user = await findAuthUserByEmail(supabase, normalizedEmail);
 
-    if (!user?.id) {
-      return Response.json(
-        { error: "No advertiser account was found for this email." },
-        { status: 404 },
-      );
-    }
-
     const role = String(user?.user_metadata?.role || user?.app_metadata?.role || "").toLowerCase();
-    if (role && role !== "advertiser") {
-      return Response.json(
-        { error: "This account is not an advertiser account." },
-        { status: 400 },
-      );
+    const canResendVerification =
+      Boolean(user?.id) &&
+      (!role || role === "advertiser") &&
+      user?.user_metadata?.account_verified !== true;
+
+    if (canResendVerification) {
+      const verificationToken = createAdvertiserVerificationToken({
+        userId: user.id,
+        email: normalizedEmail,
+        advertiserId:
+          user?.user_metadata?.advertiser_id || user?.app_metadata?.advertiser_id || null,
+        pendingAdId: user?.user_metadata?.pending_ad_id || null,
+      });
+
+      await sendAdvertiserVerificationEmail({
+        request,
+        email: normalizedEmail,
+        contactName: user?.user_metadata?.full_name || normalizedEmail,
+        verificationToken,
+      });
     }
 
-    if (user?.user_metadata?.account_verified === true) {
-      return Response.json(
-        { error: "This advertiser account is already verified." },
-        { status: 400 },
-      );
-    }
-
-    const verificationToken = createAdvertiserVerificationToken({
-      userId: user.id,
-      email: normalizedEmail,
-      advertiserId:
-        user?.user_metadata?.advertiser_id || user?.app_metadata?.advertiser_id || null,
-      pendingAdId: user?.user_metadata?.pending_ad_id || null,
-    });
-
-    await sendAdvertiserVerificationEmail({
-      request,
-      email: normalizedEmail,
-      contactName: user?.user_metadata?.full_name || normalizedEmail,
-      verificationToken,
-    });
-
-    return Response.json({ success: true, email: normalizedEmail });
+    return Response.json({ success: true });
   } catch (error) {
     console.error("[submit-ad/resend-verification] Failed:", error);
-    return Response.json(
-      { error: "Internal Server Error" },
-      { status: 500 },
-    );
+    return Response.json({ success: true });
   }
 }
