@@ -17,7 +17,7 @@ import {
 import { buildMediaAssetUrl } from "../utils/media-asset-url.js";
 
 const BUCKET = adminBucketName("uploads");
-const PUBLIC_UPLOAD_MAX_ATTEMPTS = 20;
+const PUBLIC_UPLOAD_MAX_ATTEMPTS = 10;
 const PUBLIC_UPLOAD_WINDOW_MS = 10 * 60 * 1000;
 
 const classifyUpload = ({ fileName, mimeType }) => {

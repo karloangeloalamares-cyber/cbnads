@@ -80,6 +80,13 @@ export async function POST(request) {
         const contactName = String(body.contactName || "").trim();
         const phoneNumber = String(body.phoneNumber || "").trim();
 
+        if (!pendingAdId) {
+            return Response.json(
+                { error: "Pending ad submission ID is required." },
+                { status: 400 },
+            );
+        }
+
         const supabase = db();
 
         // Verify the access token and get the authenticated user
@@ -144,30 +151,28 @@ export async function POST(request) {
             googleUser.user_metadata?.name ||
             normalizedEmail;
 
-        if (pendingAdId) {
-            const { data: pendingAd, error: pendingAdError } = await supabase
-                .from(table("pending_ads"))
-                .select("id, email")
-                .eq("id", pendingAdId)
-                .maybeSingle();
+        const { data: pendingAd, error: pendingAdError } = await supabase
+            .from(table("pending_ads"))
+            .select("id, email")
+            .eq("id", pendingAdId)
+            .maybeSingle();
 
-            if (pendingAdError) {
-                throw pendingAdError;
-            }
+        if (pendingAdError) {
+            throw pendingAdError;
+        }
 
-            if (!pendingAd?.id) {
-                return Response.json(
-                    { error: "Pending ad submission not found." },
-                    { status: 404 },
-                );
-            }
+        if (!pendingAd?.id) {
+            return Response.json(
+                { error: "Pending ad submission not found." },
+                { status: 404 },
+            );
+        }
 
-            if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
-                return Response.json(
-                    { error: "Pending ad does not belong to this email." },
-                    { status: 403 },
-                );
-            }
+        if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
+            return Response.json(
+                { error: "Pending ad does not belong to this email." },
+                { status: 403 },
+            );
         }
 
         // Check if this email is already taken by a non-advertiser account
@@ -206,13 +211,11 @@ export async function POST(request) {
         }));
 
         // Link the pending ad to this email / advertiser
-        if (pendingAdId) {
-            await updatePendingAdAccountEmail({
-                pendingAdId,
-                email: normalizedEmail,
-                advertiserId: advertiser.id,
-            });
-        }
+        await updatePendingAdAccountEmail({
+            pendingAdId,
+            email: normalizedEmail,
+            advertiserId: advertiser.id,
+        });
 
         // Update the Supabase auth user with advertiser metadata
         const { error: updateError } = await supabase.auth.admin.updateUserById(

@@ -944,5 +944,22 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
-  return POST(request);
+  const configuredSecret = String(process.env.CRON_SECRET || "").trim();
+  const bearerToken = String(request.headers.get("authorization") || "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+  const cronHeaderSecret = String(request.headers.get("x-cron-secret") || "").trim();
+
+  if (
+    configuredSecret &&
+    (timingSafeSecretMatch(bearerToken, configuredSecret) ||
+      timingSafeSecretMatch(cronHeaderSecret, configuredSecret))
+  ) {
+    return POST(request);
+  }
+
+  return Response.json(
+    { error: "Method Not Allowed" },
+    { status: 405 },
+  );
 }

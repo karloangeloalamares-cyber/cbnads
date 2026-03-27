@@ -21,6 +21,26 @@ const getDefaultRedirectForUser = (user) => {
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
+const normalizeCallbackUrl = (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    const url = new URL(rawValue, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      return "";
+    }
+    if (!url.pathname.startsWith("/")) {
+      return "";
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "";
+  }
+};
+
 const requestPasswordResetEmail = async ({ email }) => {
   if (!hasSupabaseConfig) {
     throw new Error("Password reset is unavailable right now.");
@@ -43,7 +63,7 @@ const requestPasswordResetEmail = async ({ email }) => {
 };
 
 const resolveRedirectTarget = (user, params) => {
-  const callbackUrl = String(params.get("callbackUrl") || "").trim();
+  const callbackUrl = normalizeCallbackUrl(params.get("callbackUrl"));
   return callbackUrl || getDefaultRedirectForUser(user);
 };
 
@@ -65,26 +85,8 @@ export default function SignInPage() {
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError, setForgotError] = useState("");
   const redirectTo = (target) => {
-    const destination = String(target || "").trim();
+    const destination = normalizeCallbackUrl(target);
     if (!destination || hasRedirectedRef.current) {
-      return;
-    }
-
-    const hasScheme = /^[a-z][a-z\d+\-.]*:\/\//i.test(destination);
-    if (hasScheme) {
-      try {
-        const url = new URL(destination);
-        if (url.origin === window.location.origin) {
-          hasRedirectedRef.current = true;
-          navigate(`${url.pathname}${url.search}${url.hash}`, { replace: true });
-          return;
-        }
-      } catch {
-        // Fall back to hard navigation for malformed absolute URLs.
-      }
-
-      hasRedirectedRef.current = true;
-      window.location.assign(destination);
       return;
     }
 
@@ -241,7 +243,7 @@ export default function SignInPage() {
     try {
       const params = new URLSearchParams(window.location.search);
       const result = await signInWithGoogle({
-        callbackUrl: String(params.get("callbackUrl") || "").trim(),
+        callbackUrl: normalizeCallbackUrl(params.get("callbackUrl")),
       });
 
       if (!result.ok) {

@@ -18,6 +18,22 @@ const getBearerTokenFromRequest = (request) => {
 const getRequestStatusForError = (error) =>
   /please sign in/i.test(String(error || "")) ? 401 : 403;
 
+const getAdvertiserVerificationError = (user) => {
+  if (!isAdvertiserRole(user?.role)) {
+    return null;
+  }
+
+  if (user?.account_verified === true) {
+    return null;
+  }
+
+  return {
+    authorized: false,
+    error: "Unauthorized - Verify your email before continuing",
+    status: 403,
+  };
+};
+
 const loadProfile = async (supabase, { userId }) => {
   if (!userId) {
     return null;
@@ -161,6 +177,18 @@ const mapSessionUser = async (supabase, sessionUser) => {
     profileRole: profile?.role,
     email: sessionUser?.email || profile?.email,
   });
+  let accountVerified = null;
+
+  if (isAdvertiserRole(role) && sessionUser?.id) {
+    try {
+      const { data, error } = await supabase.auth.admin.getUserById(sessionUser.id);
+      if (!error && data?.user) {
+        accountVerified = data.user.user_metadata?.account_verified === true;
+      }
+    } catch {
+      accountVerified = null;
+    }
+  }
 
   const baseUser = {
     id: sessionUser?.id || null,
@@ -176,6 +204,7 @@ const mapSessionUser = async (supabase, sessionUser) => {
         profile?.whatsapp_number ||
         "",
     ),
+    account_verified: accountVerified === true,
   };
 
   return attachAdvertiserIdentity(supabase, baseUser);
@@ -299,6 +328,11 @@ export async function requirePermission(permission, request = null) {
     };
   }
 
+  const verificationError = getAdvertiserVerificationError(user);
+  if (verificationError) {
+    return verificationError;
+  }
+
   return {
     authorized: true,
     user,
@@ -343,6 +377,11 @@ export async function requireAuth(request = null) {
     };
   }
 
+  const verificationError = getAdvertiserVerificationError(user);
+  if (verificationError) {
+    return verificationError;
+  }
+
   return {
     authorized: true,
     user,
@@ -367,6 +406,11 @@ export async function requireAdminOrAdvertiser(request = null) {
       error: "Unauthorized - Admin or advertiser access required",
       status: 403,
     };
+  }
+
+  const verificationError = getAdvertiserVerificationError(user);
+  if (verificationError) {
+    return verificationError;
   }
 
   return {

@@ -8,6 +8,63 @@ const buildRateLimitKey = (request, scope) => {
   return `${String(scope || "public-upload").trim() || "public-upload"}:${requesterIp}`;
 };
 
+const normalizeOrigin = (value) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  try {
+    return new URL(text).origin;
+  } catch {
+    return "";
+  }
+};
+
+const getAllowedRequestOrigins = (request) => {
+  const allowedOrigins = new Set();
+  const candidates = [
+    process.env.APP_URL,
+    process.env.AUTH_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.VITE_APP_URL,
+    process.env.VITE_PUBLIC_APP_URL,
+    request?.url,
+  ];
+
+  for (const candidate of candidates) {
+    const origin = normalizeOrigin(candidate);
+    if (origin) {
+      allowedOrigins.add(origin);
+    }
+  }
+
+  return allowedOrigins;
+};
+
+const hasTrustedPublicUploadOrigin = (request) => {
+  const headers = request?.headers || new Headers();
+  const allowedOrigins = getAllowedRequestOrigins(request);
+  if (allowedOrigins.size === 0) {
+    return false;
+  }
+
+  const originHeader = normalizeOrigin(headers.get("origin"));
+  if (originHeader && allowedOrigins.has(originHeader)) {
+    return true;
+  }
+
+  const refererHeader = headers.get("referer");
+  if (refererHeader) {
+    const refererOrigin = normalizeOrigin(refererHeader);
+    if (refererOrigin && allowedOrigins.has(refererOrigin)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 export const enforceUploadAccess = async (
   request,
   {
@@ -24,6 +81,18 @@ export const enforceUploadAccess = async (
       user,
       limited: false,
       response: null,
+    };
+  }
+
+  if (!hasTrustedPublicUploadOrigin(request)) {
+    return {
+      allowed: false,
+      user: null,
+      limited: false,
+      response: Response.json(
+        { error: "Public uploads must originate from the CBN Ads app." },
+        { status: 403 },
+      ),
     };
   }
 

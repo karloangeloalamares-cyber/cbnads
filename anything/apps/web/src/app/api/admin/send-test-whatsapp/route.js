@@ -453,5 +453,8 @@ export async function POST(request) {
 }
 
 export async function GET(request) {
-  return POST(request);
+  return Response.json(
+    { error: "Method Not Allowed" },
+    { status: 405 },
+  );
 }

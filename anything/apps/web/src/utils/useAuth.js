@@ -1,6 +1,24 @@
 import { useCallback } from 'react';
 import { signIn, signOut } from '@/lib/localAuth';
 
+const sanitizeCallbackUrl = (value, fallback) => {
+  const rawValue = String(value || '').trim();
+  const fallbackValue = String(fallback || '').trim() || '/';
+  if (!rawValue) {
+    return fallbackValue;
+  }
+
+  try {
+    const url = new URL(rawValue, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/')) {
+      return fallbackValue;
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return fallbackValue;
+  }
+};
+
 function useAuth() {
   const signInWithCredentials = useCallback(async (options) => {
     const result = await signIn({
@@ -10,7 +28,10 @@ function useAuth() {
 
     if (result.ok) {
       if (options?.redirect) {
-        const callbackUrl = options?.callbackUrl || '/ads?section=Dashboard';
+        const callbackUrl = sanitizeCallbackUrl(
+          options?.callbackUrl,
+          '/ads?section=Dashboard',
+        );
         window.location.href = callbackUrl;
       }
       return { error: null, ok: true };
@@ -26,7 +47,10 @@ function useAuth() {
   const handleSignOut = useCallback(async (options = {}) => {
     await signOut();
     if (options.redirect !== false) {
-      window.location.href = options.callbackUrl || '/account/signin';
+      window.location.href = sanitizeCallbackUrl(
+        options.callbackUrl,
+        '/account/signin',
+      );
     }
     return { ok: true };
   }, []);

@@ -27,6 +27,32 @@ const sanitizeUser = (user) => {
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 const ALLOWED_APP_ROLES = new Set(["admin", "manager", "staff", "advertiser"]);
 
+const sanitizeCallbackUrl = (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return "";
+  }
+
+  try {
+    const baseUrl =
+      (typeof window !== "undefined" && window.location?.origin) ||
+      String(publicAppUrl || "").trim();
+    if (!baseUrl) {
+      return "";
+    }
+    const url = new URL(rawValue, baseUrl);
+    if (url.origin !== new URL(baseUrl).origin) {
+      return "";
+    }
+    if (!url.pathname.startsWith("/")) {
+      return "";
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "";
+  }
+};
+
 const isAllowedAppRole = (value) => ALLOWED_APP_ROLES.has(normalizeAppRole(value));
 
 const normalizeOAuthErrorMessage = (value) => {
@@ -47,8 +73,9 @@ const buildGoogleRedirectUrl = (callbackUrl = "") => {
   const baseUrl = String(publicAppUrl || "").trim() || window.location.origin;
   const redirectUrl = new URL("/account/signin", baseUrl);
   redirectUrl.searchParams.set("oauth", "google");
-  if (callbackUrl) {
-    redirectUrl.searchParams.set("callbackUrl", callbackUrl);
+  const normalizedCallbackUrl = sanitizeCallbackUrl(callbackUrl);
+  if (normalizedCallbackUrl) {
+    redirectUrl.searchParams.set("callbackUrl", normalizedCallbackUrl);
   }
   return redirectUrl.toString();
 };

@@ -89,6 +89,13 @@ export async function POST(request) {
     const password = String(body.password || "");
     const confirmPassword = String(body.confirmPassword || "");
 
+    if (!pendingAdId) {
+      return Response.json(
+        { error: "Pending ad submission ID is required." },
+        { status: 400 },
+      );
+    }
+
     if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
       return Response.json(
         { error: `Email must be ${EMAIL_MAX_LENGTH} characters or fewer.` },
@@ -144,27 +151,25 @@ export async function POST(request) {
     }
 
     const supabase = db();
-    if (pendingAdId) {
-      const { data: pendingAd, error: pendingAdError } = await supabase
-        .from(table("pending_ads"))
-        .select("id, email")
-        .eq("id", pendingAdId)
-        .maybeSingle();
+    const { data: pendingAd, error: pendingAdError } = await supabase
+      .from(table("pending_ads"))
+      .select("id, email")
+      .eq("id", pendingAdId)
+      .maybeSingle();
 
-      if (pendingAdError) {
-        throw pendingAdError;
-      }
+    if (pendingAdError) {
+      throw pendingAdError;
+    }
 
-      if (!pendingAd?.id) {
-        return Response.json({ error: "Pending ad submission not found." }, { status: 404 });
-      }
+    if (!pendingAd?.id) {
+      return Response.json({ error: "Pending ad submission not found." }, { status: 404 });
+    }
 
-      if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
-        return Response.json(
-          { error: "Pending ad does not belong to this email." },
-          { status: 403 },
-        );
-      }
+    if (normalizeEmail(pendingAd.email) !== normalizedEmail) {
+      return Response.json(
+        { error: "Pending ad does not belong to this email." },
+        { status: 403 },
+      );
     }
 
     const advertiser = await ensureAdvertiserRecord({
@@ -174,13 +179,11 @@ export async function POST(request) {
       phoneNumber,
     });
 
-    if (pendingAdId) {
-      await updatePendingAdAccountEmail({
-        pendingAdId,
-        email: normalizedEmail,
-        advertiserId: advertiser.id,
-      });
-    }
+    await updatePendingAdAccountEmail({
+      pendingAdId,
+      email: normalizedEmail,
+      advertiserId: advertiser.id,
+    });
 
     const existingUser = await findAuthUserByEmail(supabase, normalizedEmail);
     const fullName = contactName || advertiserName || normalizedEmail;

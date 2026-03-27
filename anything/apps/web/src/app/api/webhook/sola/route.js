@@ -52,7 +52,7 @@ const buildExpectedSignature = (rawBody) => {
 
 const hasValidSignature = (request, rawBody) => {
   if (!SOLA_PAYMENTS_WEBHOOK_PIN) {
-    return true;
+    return false;
   }
 
   const provided = String(request.headers.get("ck-signature") || "").trim().toLowerCase();
@@ -118,6 +118,11 @@ export async function GET() {
 
 export async function POST(request) {
   try {
+    if (!SOLA_PAYMENTS_WEBHOOK_PIN) {
+      console.error("[webhook/sola] Missing SOLA_PAYMENTS_WEBHOOK_PIN.");
+      return Response.json({ error: "Webhook not configured" }, { status: 503 });
+    }
+
     const rawBody = await request.text();
     logWebhookDebug(request, rawBody);
 

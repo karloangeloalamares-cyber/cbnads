@@ -41,7 +41,10 @@ vi.mock("../../../utils/supabase-db.js", () => ({
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: "pending-1", email: "jordan@example.com" },
+            error: null,
+          }),
         })),
       })),
     })),
@@ -103,6 +106,7 @@ describe("public submit-ad account route", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pendingAdId: "pending-1",
           advertiserName: "Acme Co",
           contactName: "Jordan Smith",
           phoneNumber: "(212) 555-0100",
@@ -122,22 +126,22 @@ describe("public submit-ad account route", () => {
     expect(data.verificationEmailSent).toBe(false);
     expect(sendPendingSubmissionAdvertiserReceiptMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pendingAdId: "",
+        pendingAdId: "pending-1",
       }),
     );
     expect(sendPendingSubmissionInternalTelegramNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pendingAdId: "",
+        pendingAdId: "pending-1",
       }),
     );
     expect(sendPendingSubmissionInternalEmailNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pendingAdId: "",
+        pendingAdId: "pending-1",
       }),
     );
     expect(sendPendingSubmissionAdminWhatsAppNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        pendingAdId: "",
+        pendingAdId: "pending-1",
       }),
     );
   });
@@ -148,6 +152,7 @@ describe("public submit-ad account route", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pendingAdId: "pending-1",
           advertiserName: "Acme Co",
           contactName: "Jordan Smith",
           phoneNumber: "(212) 555-0100",
@@ -178,6 +183,7 @@ describe("public submit-ad account route", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pendingAdId: "pending-1",
           advertiserName: "Acme Co",
           contactName: "Jordan Smith",
           phoneNumber: "(212) 555-0100",
@@ -214,6 +220,7 @@ describe("public submit-ad account route", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pendingAdId: "pending-1",
           advertiserName: "Acme Co",
           contactName: "Jordan Smith",
           phoneNumber: "(212) 555-0100",
@@ -231,6 +238,7 @@ describe("public submit-ad account route", () => {
       success: true,
       email: "jordan@example.com",
       advertiserId: "adv-1",
+      pendingAdId: "pending-1",
       verificationRequired: true,
       verificationEmailSent: true,
     });
